@@ -10,3 +10,5 @@ models/*
 *.wav
 *.flac
 sonuc_*.json
+dump.rdb
+data/
