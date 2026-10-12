@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "viet-asr"
+version = "0.1.0"
+description = "Vietnamca ses -> metin + konuşmacı ayrıştırma (CPU, sherpa-onnx)"
+requires-python = ">=3.10"
+dependencies = [
+    "sherpa-onnx>=1.12",
+    "numpy",
+    "soundfile",
+    "soxr",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "import-linter"]
+bench = ["jiwer", "datasets<4.0", "sentencepiece"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["models: modeller indirilmiş olmalı (models/ klasörü)"]
+
+# Katman kuralları: içteki katman dıştakini import edemez.
+[tool.importlinter]
+root_package = "viet_asr"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Temiz mimari katmanları"
+type = "layers"
+layers = [
+    "viet_asr.interface",
+    "viet_asr.infrastructure",
+    "viet_asr.application",
+    "viet_asr.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain ve application model kütüphanesi bilmez"
+type = "forbidden"
+source_modules = ["viet_asr.domain", "viet_asr.application"]
+forbidden_modules = ["sherpa_onnx", "soundfile", "soxr"]

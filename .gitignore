@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+models/*
+!models/README.md
+!models/hotwords/
+*.tar.bz2
+*.wav
+*.flac
+sonuc_*.json
