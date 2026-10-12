@@ -61,3 +61,15 @@ def test_turkce_kucuk_harf():
     assert turkish_lower("IŞIK İLAÇ") == "ışık ilaç"
     assert TrNormalizer().normalize("İzmir'de  doktor.") == "İzmir'de doktor."  # büyük harf korunur
     assert TrNormalizer(lowercase=True, strip_punct=True).normalize("İLAÇ, IŞIK!") == "ilaç ışık"
+
+
+def test_parcalar_sureye_gore_gruplanir():
+    import numpy as np
+
+    from viet_asr.domain import VadSegment
+    from viet_asr.infrastructure.sherpa_asr import batches
+
+    segs = [VadSegment(i * 30.0, np.zeros(int(d * 16000), np.float32)) for i, d in enumerate([20, 25, 20, 70, 5])]
+    g = batches(segs, 60)
+    assert [[round(s.end - s.start) for s in b] for b in g] == [[20, 25], [20], [70], [5]]
+    assert [s for b in g for s in b] == segs and batches([], 60) == []

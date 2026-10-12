@@ -110,4 +110,7 @@ def language_profile(code: str, models_dir: str | Path, model: str | None = None
     if key not in MODEL_CHOICES.get(code, []):
         raise ValueError(f"'{key}' modeli '{code}' dili için tanımlı değil: {MODEL_CHOICES.get(code)}")
     params.setdefault("drop_phrases", DROP_PHRASES.get(code, ()))
-    return LanguageProfile(code=code, asr_model=model_ref(key, models_dir), asr=AsrParams(**params))
+    ref = model_ref(key, models_dir)
+    # Whisper sessizlik/müzikte metin uyduruyor: ona yalnızca VAD parçaları
+    seg = "vad" if ref.kind == "whisper" else "full"
+    return LanguageProfile(code=code, asr_model=ref, asr=AsrParams(**params), segmentation=seg)

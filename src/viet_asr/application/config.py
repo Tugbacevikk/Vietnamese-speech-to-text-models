@@ -38,6 +38,11 @@ class AsrParams:
     hotwords_file: str | None = None  # yalnızca zipformer; terimler BÜYÜK HARFLE
     hotwords_score: float = 1.5
     max_word_duration: float = 1.0  # tek kelime/hece en fazla bu kadar sürebilir (sn)
+    # Parçalar en fazla bu kadar toplam sesten oluşan gruplar halinde birlikte çözülür.
+    # Hepsini birden çözmek belleği patlatıyor: 92 sn'lik seste 27 parça -> 1,7 GB,
+    # 77 dk'lık testte 6 GB'ta süreç öldürüldü. Ölçüm (12 Ekim, Zipformer-68M):
+    #   10 sn: 460 MB, RTF 0,029 | 30 sn: 1,2 GB, RTF 0,032 | 60 sn: 2,2 GB, RTF 0,043
+    batch_seconds: float = 10.0
     # Whisper sessizlik/gürültüde bu cümleleri uyduruyor; parça yalnızca bundan ibaretse atılır
     drop_phrases: tuple[str, ...] = ()
 
@@ -47,6 +52,18 @@ class LanguageProfile:
     code: str  # ISO 639-1: "vi", "tr"
     asr_model: ModelRef
     asr: AsrParams = field(default_factory=AsrParams)
+    # "full": sesin tamamı en sessiz anlardan bölünerek ASR'a verilir (Zipformer, Omnilingual).
+    # "vad": yalnızca VAD'ın konuşma dediği parçalar (Whisper: sessizlikte metin uyduruyor).
+    segmentation: str = "full"
+
+
+@dataclass(frozen=True)
+class ChunkConfig:
+    """'full' bölme: parça en fazla max_len sn, kesim en sessiz ana.
+    VietMed 50 dosya, Zipformer-68M: 10 sn %10,2 | 15 sn %10,1 | 20 sn %10,0 WER."""
+
+    max_len: float = 15.0
+    min_len: float = 5.0
 
 
 @dataclass(frozen=True)
@@ -102,7 +119,14 @@ class DiarizerConfig:
     window: float = 1.5          # sn: imza penceresi
     hop: float = 0.75            # sn: pencere kayması (konuşmacı değişimi çözünürlüğü)
     min_window: float = 0.5      # sn: bundan kısa parçadan imza çıkarılmaz
-    min_speaker_duration: float = 1.0  # sn: toplamı bundan az "konuşmacı" en yakına katılır
+    # Toplamı max(1,5 sn, konuşmanın %8'i)'nden az olan "konuşmacı" en yakın kişiye katılır
+    # (gülme, gürültü, müzik ayrı kişi sanılmasın). VietMed 50 tek kişilik dosya + 28
+    # sentetik diyalog (12 Ekim):  1 sn/%0 -> 34/50, 27/28 | 1-3 sn/%8-10 -> 48/50, 28/28.
+    # Oran asıl işi yapıyor; 3 sn mutlak alt sınır kısa mesajlarda gerçek kişileri
+    # (13 sn'lik seste 2 sn konuşan) siliyordu. Bedeli: konuşmanın %8'inden azını konuşan
+    # kişi ayrı çıkmaz; sayı biliniyorsa istekte num_speakers verilince kural uygulanmaz.
+    min_speaker_duration: float = 1.5
+    min_speaker_share: float = 0.08
     min_duration_on: float = 0.3   # yalnızca pyannote
     min_duration_off: float = 0.5  # yalnızca pyannote
     num_threads: int = 2
@@ -126,5 +150,6 @@ class PipelineConfig:
     languages: dict[str, LanguageProfile]
     lid: LidConfig | None = field(default_factory=LidConfig)  # None: dil istekte zorunlu
     vad: VadConfig = field(default_factory=VadConfig)
+    chunk: ChunkConfig = field(default_factory=ChunkConfig)
     diarizer: DiarizerConfig = field(default_factory=DiarizerConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)

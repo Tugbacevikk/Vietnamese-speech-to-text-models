@@ -76,7 +76,11 @@ class EmbeddingClusterDiarizer:
             lab = fcluster(Z, t=self.cfg.cluster_threshold, criterion="distance") - 1
         # toplam süresi çok kısa kümeleri (gürültü, öksürük) en yakın büyük kümeye kat
         tot = np.bincount(lab, weights=durations)
-        big = [c for c in range(len(tot)) if tot[c] >= self.cfg.min_speaker_duration]
+        if k and k > 1:
+            big = [int(c) for c in np.argsort(-tot)[:k]]  # sayı verildiyse en büyük k küme kalır
+        else:
+            need = max(self.cfg.min_speaker_duration, self.cfg.min_speaker_share * durations.sum())
+            big = [c for c in range(len(tot)) if tot[c] >= need]
         if not big:
             return np.zeros(len(E), dtype=int)
         cents = {c: E[lab == c].mean(axis=0) for c in big}
@@ -86,26 +90,34 @@ class EmbeddingClusterDiarizer:
             lab[idx] = max(big, key=lambda b: float(m @ cents[b]) / (np.linalg.norm(cents[b]) + 1e-9))
         return lab
 
-    def diarize(self, audio: np.ndarray, segments: list[VadSegment] | None = None,
-                num_speakers: int | None = None) -> list[SpeakerSegment]:
-        if not segments:
-            return []
+    def embed(self, segments: list[VadSegment]):
+        """Pencereler ve imzaları (ayarlama betikleri bunu bir kez hesaplayıp tekrar kullanır)."""
         wins = self._windows(segments)
-        if not wins:
+        E = np.stack([self._embed(x) for _, _, x in wins]) if wins else np.zeros((0, 1))
+        return [(a, b) for a, b, _ in wins], E
+
+    def label(self, spans: list[tuple[float, float]], E: np.ndarray,
+              num_speakers: int | None = None) -> list[SpeakerSegment]:
+        if not spans:
             return []
-        E = np.stack([self._embed(x) for _, _, x in wins])
-        dur = np.array([b - a for a, b, _ in wins])
+        dur = np.array([b - a for a, b in spans])
         k = num_speakers if num_speakers and num_speakers > 0 else (
             self.cfg.num_speakers if self.cfg.num_speakers > 0 else None)
         lab = self._cluster(E, dur, k)
-
         # komşu aynı etiketli pencereleri birleştir, etiketleri konuşma sırasına göre adlandır
         names: dict[int, str] = {}
         out: list[SpeakerSegment] = []
-        for (a, b, _), l in zip(wins, lab):
+        for (a, b), l in zip(spans, lab):
             name = names.setdefault(int(l), f"speaker_{len(names):02d}")
             if out and out[-1].speaker == name and a - out[-1].end < 1e-3:
                 out[-1] = SpeakerSegment(name, out[-1].start, b)
             else:
                 out.append(SpeakerSegment(name, a, b))
         return out
+
+    def diarize(self, audio: np.ndarray, segments: list[VadSegment] | None = None,
+                num_speakers: int | None = None) -> list[SpeakerSegment]:
+        if not segments:
+            return []
+        spans, E = self.embed(segments)
+        return self.label(spans, E, num_speakers)

@@ -30,9 +30,6 @@ def test_bosluga_dusen_hece_en_yakina_ya_da_belirsiz():
     assert eng(max_gap=0.5).assign([Y("c", 1.9, 2.1)], segs) == [BELIRSIZ]
 
 
-def test_diarization_bossa_hepsi_belirsiz():
-    assert eng().assign([Y("a", 0, 1)], []) == [BELIRSIZ]
-
 
 def test_uzun_aralik_icindeki_hece_bulunur():
     # A'nın uzun aralığı, B'nin kısa aralıklarından önce başlıyor: geriye bakma doğru çalışmalı
@@ -52,3 +49,10 @@ def test_sirasiz_heceler_siralanir():
     segs = [S(A, 0, 5)]
     u = eng().fuse([Y("b", 1, 1.2), Y("a", 0, 0.2)], segs)
     assert u[0].text == "a b"
+
+
+def test_tek_konusmaci_varsa_tum_kelimeler_ona():
+    # VAD'ın kaçırdığı (aralık dışı) kelimeler bile BELIRSIZ değil, tek konuşmacıya gider
+    w = [Y("a", 0.1, 0.3), Y("b", 10.0, 10.2)]
+    assert eng(max_gap=0.5).assign(w, [S(A, 0, 1)]) == [A, A]
+    assert eng().assign(w, []) == ["speaker_00", "speaker_00"]

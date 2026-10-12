@@ -23,6 +23,11 @@ class FusionEngine:
 
     def assign(self, words: list[Word], speakers: list[SpeakerSegment]) -> list[str]:
         """Her kelime için konuşmacı etiketi döndürür (aynı sırada)."""
+        distinct = {s.speaker for s in speakers}
+        if len(distinct) <= 1:
+            # tek (ya da hiç) konuşmacı: karışacak kimse yok; VAD'ın kaçırdığı yerlerdeki
+            # kelimeler de o kişiye aittir (BELIRSIZ demek bilgi kaybı olur)
+            return [distinct.pop() if distinct else "speaker_00"] * len(words)
         segs = sorted(speakers, key=lambda s: s.start)
         starts = [s.start for s in segs]
         # aralıklar üst üste binebilir; orta nokta aramasında geriye bakmak için

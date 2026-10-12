@@ -22,6 +22,7 @@ class Vad(Protocol):
 
 class AsrEngine(Protocol):
     name: str
+    segmentation: str  # "full" (sesin tamamı) ya da "vad" (yalnızca konuşma parçaları)
 
     def transcribe(self, segments: list[VadSegment]) -> list[Word]: ...
 

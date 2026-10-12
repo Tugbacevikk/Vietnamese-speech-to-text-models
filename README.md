@@ -20,12 +20,17 @@ ses dosyası ─► 16 kHz mono ─► VAD (Silero) ─► konuşma parçaları 
 | Adım | Model | Lisans | Hız (RTF, 2 çekirdek) |
 |---|---|---|---|
 | VAD | Silero VAD | MIT | 0,006 |
-| ASR | Zipformer-68M int8 (2025-04-20) | Apache-2.0 | 0,028–0,039 |
+| ASR | Zipformer-68M int8 (2025-04-20) | Apache-2.0 | 0,026 |
 | ASR (aday) | Zipformer-30M int8 (2026-02-09) | CC BY-NC-ND 4.0 | 0,024–0,029 |
 | Konuşmacı ayrıştırma | VAD parçaları + 3D-Speaker ERes2Net imzası + kümeleme | 3D-Speaker (Apache-2.0 doğrulanacak) | ~0,04 |
 | (eski, seçenek) | pyannote segmentation-3.0 + WeSpeaker | MIT / WeSpeaker | 0,12–0,18 |
 
 RTF = işlem süresi / ses süresi. 0,03 → 1 dakikalık ses yaklaşık 2 saniyede metne çevrilir.
+
+**Gerçek veride (VietMed, 50 dosya, 77 dk):** Zipformer-68M hece hata oranı (WER) %10,1,
+harf hata oranı %7,3; dil tespiti 50/50. Ayrıntı ve eski/yeni karşılaştırmaları:
+[docs/olcumler.md](docs/olcumler.md). Zipformer'a sesin **tamamı** verilir (en sessiz
+anlardan bölünerek): VAD müzikli/gürültülü konuşmayı atıyordu ve WER %20,8 çıkıyordu.
 Hangi Zipformer'ın kullanılacağına `benchmarks/dogruluk_testi.py` sonucuna göre karar verilecek.
 
 ## Dil seçimi
@@ -183,6 +188,7 @@ python benchmarks/hiz_testi.py        # üretim sunucusunda hız ve bellek
 python benchmarks/turkce_dogruluk_testi.py            # FLEURS tr: Omnilingual ve Whisper turbo
 python benchmarks/dil_tespiti_testi.py liste.tsv      # kendi seslerinde dil tespiti doğruluğu
 python benchmarks/konusmaci_testi.py [--bosluksuz]     # konuşmacı sayısı ve atama doğruluğu
+python benchmarks/yerel_dogruluk_testi.py liste.tsv    # kendi kayıtlarınla WER/CER (dosya, metin, rol)
 ```
 
 Seçim kuralı: VIVOS (tarafsız set) CER'i düşük olan model; fark 1 puandan azsa daha hızlı olan.

@@ -16,8 +16,11 @@ log = logging.getLogger(__name__)
 class TranscribeAndDiarize:
     def __init__(self, loader: AudioLoader, vad: Vad, language: LanguageResolver,
                  engines: AsrEngines, diarizer: Diarizer, fusion: FusionEngine,
-                 repo: ResultRepository, notifier: Notifier | None = None):
+                 repo: ResultRepository, notifier: Notifier | None = None,
+                 chunker: Vad | None = None):
+        """chunker: 'full' bölmeli motorlar için sesin tamamını parçalayan bölücü."""
         self.loader, self.vad, self.language, self.engines = loader, vad, language, engines
+        self.chunker = chunker
         self.diarizer, self.fusion, self.repo, self.notifier = diarizer, fusion, repo, notifier
 
     def run(self, job: AudioJob, decision: LanguageDecision | None = None) -> Transcript:
@@ -44,7 +47,10 @@ class TranscribeAndDiarize:
         segments = self.vad.split(audio)
         lang = decision or self.language.resolve(job.language, segments)
         asr = self.engines[lang.code]
-        words = asr.transcribe(segments) if segments else []
+        # VAD müzik altındaki/gürültülü konuşmayı atıyor; uydurma yapmayan motorlara sesin tamamı
+        full = self.chunker is not None and getattr(asr, "segmentation", "vad") == "full"
+        asr_segments = self.chunker.split(audio) if full else segments
+        words = asr.transcribe(asr_segments) if asr_segments else []
         speakers = self.diarizer.diarize(audio, segments, job.num_speakers) if segments else []
         utterances = self.fusion.fuse(words, speakers)
 
@@ -52,6 +58,6 @@ class TranscribeAndDiarize:
         log.info("job=%s dil=%s(%s %.2f%s) sure=%.1fs rtf=%.3f parca=%d kelime=%d satir=%d",
                  job.job_id, lang.code, lang.source.value, lang.confidence,
                  " BELIRSIZ" if lang.uncertain else "", duration, dt / max(duration, 1e-9),
-                 len(segments), len(words), len(utterances))
+                 len(asr_segments), len(words), len(utterances))
         return Transcript(job_id=job.job_id, duration=duration, utterances=utterances,
                           model=asr.name, language=lang)

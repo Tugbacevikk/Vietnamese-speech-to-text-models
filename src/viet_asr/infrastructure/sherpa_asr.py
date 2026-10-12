@@ -64,7 +64,24 @@ def spread_words(text: str, seg_start: float, seg_end: float,
     return out
 
 
+def batches(segments: list[VadSegment], max_seconds: float) -> list[list[VadSegment]]:
+    """Sırayı koruyarak, toplam süresi max_seconds'ı geçmeyen gruplar (tek parça hep sığar)."""
+    out, cur, total = [], [], 0.0
+    for s in segments:
+        d = s.end - s.start
+        if cur and total + d > max_seconds:
+            out.append(cur)
+            cur, total = [], 0.0
+        cur.append(s)
+        total += d
+    if cur:
+        out.append(cur)
+    return out
+
+
 class _SherpaAsr:
+    segmentation = "full"
+
     def __init__(self, model: ModelRef, params: AsrParams, normalizer: TextNormalizer):
         self.name = model.name
         self.params = params
@@ -75,15 +92,17 @@ class _SherpaAsr:
         raise NotImplementedError
 
     def transcribe(self, segments: list[VadSegment]) -> list[Word]:
-        streams = []
-        for seg in segments:
-            st = self.recognizer.create_stream()
-            st.accept_waveform(seg.sample_rate, seg.samples)
-            streams.append(st)
-        self.recognizer.decode_streams(streams)  # toplu çözme: tek tek çağırmaktan hızlı
         out: list[Word] = []
-        for seg, st in zip(segments, streams):
-            out += self._words(st.result, seg)
+        for batch in batches(segments, self.params.batch_seconds):
+            streams = []
+            for seg in batch:
+                st = self.recognizer.create_stream()
+                st.accept_waveform(seg.sample_rate, seg.samples)
+                streams.append(st)
+            self.recognizer.decode_streams(streams)  # grup içinde toplu çözme: tek tek çağırmaktan hızlı
+            for seg, st in zip(batch, streams):
+                out += self._words(st.result, seg)
+            del streams  # grubun belleği bir sonrakinden önce bırakılır
         return out
 
     def _words(self, r, seg: VadSegment) -> list[Word]:
@@ -116,6 +135,8 @@ SherpaOnnxAsr = SherpaZipformerAsr
 
 
 class SherpaWhisperAsr(_SherpaAsr):
+    segmentation = "vad"
+
     def __init__(self, model, params, normalizer, language: str):
         self.language = language
         self._drop = {self._key(p) for p in params.drop_phrases}
@@ -145,6 +166,12 @@ class SherpaOmnilingualAsr(_SherpaAsr):
 
 
 def build_asr(profile: LanguageProfile, normalizer: TextNormalizer):
+    engine = _build_asr(profile, normalizer)
+    engine.segmentation = profile.segmentation
+    return engine
+
+
+def _build_asr(profile: LanguageProfile, normalizer: TextNormalizer):
     kind = profile.asr_model.kind
     if kind == "zipformer-transducer":
         return SherpaZipformerAsr(profile.asr_model, profile.asr, normalizer)
