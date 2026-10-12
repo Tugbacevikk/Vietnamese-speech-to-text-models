@@ -1,4 +1,4 @@
-"""Gerçek modellerle uçtan uca test. Modeller yoksa atlanır.
+"""Gerçek modellerle uçtan uca testler. Gereken model yoksa test atlanır.
 
     python scripts/download_models.py
     pytest -m models
@@ -10,75 +10,144 @@ import pytest
 
 M = Path(__file__).resolve().parents[2] / "models"
 Z68 = M / "sherpa-onnx-zipformer-vi-int8-2025-04-20"
-need = pytest.mark.skipif(not (Z68 / "tokens.txt").exists() or not (M / "silero_vad.onnx").exists(),
-                          reason="modeller indirilmemiş")
-pytestmark = [pytest.mark.models, need]
+LIDW = M / "spoken-language-identification-test-wavs"
+TINY = M / "sherpa-onnx-whisper-tiny"
+SMALL = M / "sherpa-onnx-whisper-small"
+TURBO = M / "sherpa-onnx-whisper-turbo"
+OMNI = M / "sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-int8-2025-11-12"
 
 
-def _wavs():
+def need(*paths):
+    missing = [p for p in paths if not Path(p).exists()]
+    return pytest.mark.skipif(bool(missing), reason=f"model yok: {[str(p) for p in missing]}")
+
+
+pytestmark = pytest.mark.models
+VI_OK = need(Z68 / "tokens.txt", M / "silero_vad.onnx")
+LID_OK = need(TINY / "tiny-encoder.int8.onnx", SMALL / "small-encoder.int8.onnx",
+              LIDW / "tr-turkish.wav", Z68 / "test_wavs")
+DIAR = [M / "sherpa-onnx-pyannote-segmentation-3-0/model.onnx",
+        M / "wespeaker_en_voxceleb_resnet34_LM.onnx"]
+
+
+def load(p):
     from viet_asr.infrastructure.audio import SoundfileLoader
 
-    return [SoundfileLoader().load(str(Z68 / "test_wavs" / f"{i}.wav")) for i in range(3)]
+    return SoundfileLoader().load(str(p))
 
 
-def _cfg(hot=None):
-    from viet_asr.application.config import ZIPFORMER_68M, AsrParams, ModelRef
-
-    return ModelRef(folder=Z68, **ZIPFORMER_68M), AsrParams(hotwords_file=hot)
+def vi_wavs():
+    return [load(Z68 / "test_wavs" / f"{i}.wav") for i in range(3)]
 
 
+@VI_OK
 def test_vad_ofseti_ve_asr_zamanlari():
     from viet_asr.application.config import VadConfig
+    from viet_asr.infrastructure.catalog import language_profile
     from viet_asr.infrastructure.normalizer import ViNormalizer
-    from viet_asr.infrastructure.sherpa_asr import SherpaOnnxAsr
+    from viet_asr.infrastructure.sherpa_asr import build_asr
     from viet_asr.infrastructure.sherpa_vad import SileroVad
 
-    w = _wavs()[0]
-    sessiz = np.zeros(16000 * 3, dtype=np.float32)
-    audio = np.concatenate([sessiz, w])  # konuşma 3. saniyede başlıyor
+    audio = np.concatenate([np.zeros(16000 * 3, dtype=np.float32), vi_wavs()[0]])
     segs = SileroVad(VadConfig(model=str(M / "silero_vad.onnx"))).split(audio)
     assert segs and 2.5 < segs[0].start < 3.6
 
-    asr = SherpaOnnxAsr(*_cfg(), ViNormalizer())
-    syl = asr.transcribe(segs)
-    assert len(syl) > 3
-    assert syl[0].start >= 2.5  # ofset eklenmiş olmalı
-    assert all(a.start <= b.start for a, b in zip(syl, syl[1:]))
-    assert all(s.text == s.text.lower() for s in syl)
+    words = build_asr(language_profile("vi", M), ViNormalizer()).transcribe(segs)
+    assert len(words) > 3
+    assert words[0].start >= 2.5  # ofset eklenmiş olmalı
+    assert all(a.start <= b.start for a, b in zip(words, words[1:]))
+    assert all(w.text == w.text.lower() for w in words)
 
 
+@VI_OK
 def test_hotword_bpe_vocab_olmadan_hata_verir(tmp_path):
-    from viet_asr.application.config import ZIPFORMER_68M, AsrParams, ModelRef
+    from dataclasses import replace
+
+    from viet_asr.infrastructure.catalog import language_profile
     from viet_asr.infrastructure.normalizer import ViNormalizer
-    from viet_asr.infrastructure.sherpa_asr import SherpaOnnxAsr
+    from viet_asr.infrastructure.sherpa_asr import build_asr
 
     hw = tmp_path / "h.txt"
     hw.write_text("BÁC SĨ\n", encoding="utf-8")
-    ref = ModelRef(folder=Z68, **{**ZIPFORMER_68M}, bpe_vocab="yok.vocab")
+    prof = language_profile("vi", M, hotwords_file=str(hw))
+    files = {**prof.asr_model.files, "bpe_vocab": "yok.vocab"}
+    prof = replace(prof, asr_model=replace(prof.asr_model, files=files))
     with pytest.raises(FileNotFoundError):
-        SherpaOnnxAsr(ref, AsrParams(hotwords_file=str(hw)), ViNormalizer())
+        build_asr(prof, ViNormalizer())
 
 
-@pytest.mark.skipif(not (M / "wespeaker_en_voxceleb_resnet34_LM.onnx").exists(), reason="diarization modeli yok")
-def test_uctan_uca_iki_konusmaci(tmp_path):
+@LID_OK
+def test_dil_tespiti_gercek_seslerde():
+    from viet_asr.application.config import LidConfig
+    from viet_asr.application.language import LanguageResolver
+    from viet_asr.domain import UnsupportedLanguageError, VadSegment
+    from viet_asr.infrastructure.catalog import lid_stages
+    from viet_asr.infrastructure.whisper_lid import WhisperLanguageDetector
+
+    tiny, small = (WhisperLanguageDetector(e, d) for e, d in lid_stages(M))
+    p = tiny.probabilities(load(LIDW / "tr-turkish.wav"))
+    assert abs(sum(p.values()) - 1) < 1e-6 and len(p) == 99
+
+    # 2.wav yalnızca 1,6 sn: tiny tek başına reddediyor, kademe small'a devredip doğru buluyor
+    with pytest.raises(UnsupportedLanguageError):
+        LanguageResolver(["vi", "tr"], [tiny]).resolve(None, [VadSegment(0.0, vi_wavs()[2])])
+
+    res = LanguageResolver(["vi", "tr"], [tiny, small], LidConfig())
+    seg = lambda a: [VadSegment(0.0, a)]  # noqa: E731
+    assert res.resolve(None, seg(load(LIDW / "tr-turkish.wav"))).code == "tr"
+    for a in vi_wavs():
+        assert res.resolve(None, seg(a)).code == "vi"
+    for f in ("en-english.wav", "de-german.wav", "zh-chinese.wav"):
+        with pytest.raises(UnsupportedLanguageError):
+            res.resolve(None, seg(load(LIDW / f)))
+
+
+@need(TURBO / "turbo-encoder.int8.onnx", LIDW / "tr-turkish.wav", M / "silero_vad.onnx")
+def test_turkce_whisper_ve_uydurma_filtresi():
+    from viet_asr.domain import VadSegment
+    from viet_asr.infrastructure.catalog import language_profile
+    from viet_asr.infrastructure.normalizer import TrNormalizer
+    from viet_asr.infrastructure.sherpa_asr import build_asr
+
+    asr = build_asr(language_profile("tr", M, "whisper-turbo"), TrNormalizer())
+    words = asr.transcribe([VadSegment(4.0, load(LIDW / "tr-turkish.wav"))])
+    text = " ".join(w.text for w in words).lower()
+    assert "hayal" in text and "yapabilirsin" in text
+    assert words[0].start >= 4.0 and words[-1].end <= 4.0 + len(load(LIDW / "tr-turkish.wav")) / 16000 + 1e-6
+    # 10 sn sessizlikte Whisper "İzlediğiniz için teşekkür ederim." uyduruyor -> atılmalı
+    assert asr.transcribe([VadSegment(0.0, np.zeros(16000 * 10, dtype=np.float32))]) == []
+
+
+@need(OMNI / "model.int8.onnx", LIDW / "tr-turkish.wav")
+def test_turkce_omnilingual_gercek_zaman_damgasi():
+    from viet_asr.domain import VadSegment
+    from viet_asr.infrastructure.catalog import language_profile
+    from viet_asr.infrastructure.normalizer import TrNormalizer
+    from viet_asr.infrastructure.sherpa_asr import build_asr
+
+    a = load(LIDW / "tr-turkish.wav")
+    words = build_asr(language_profile("tr", M), TrNormalizer()).transcribe([VadSegment(4.0, a)])
+    assert [w.text for w in words] == ["hayal", "edebiliyorsan", "yapabilirsin"]
+    assert 4.0 <= words[0].start < words[1].start < words[2].start < 4.0 + len(a) / 16000
+
+
+@VI_OK
+@LID_OK
+@need(*DIAR)
+def test_uctan_uca_dil_tespitli(tmp_path):
     import soundfile as sf
 
-    from viet_asr.application.config import DiarizerConfig, PipelineConfig, VadConfig
-    from viet_asr.domain import AudioJob
-    from viet_asr.interface.cli import MemoryRepo, build
+    from viet_asr.domain import AudioJob, LanguageSource
+    from viet_asr.interface.cli import MemoryRepo, build, default_config
 
-    w = _wavs()
+    w = vi_wavs()
     gap = np.zeros(8000, dtype=np.float32)
-    audio = np.concatenate([w[0], gap, w[1], gap, w[2], gap, w[0]])
     p = tmp_path / "konusma.wav"
-    sf.write(p, audio, 16000)
+    sf.write(p, np.concatenate([w[0], gap, w[1], gap, w[2], gap, w[0]]), 16000)
 
-    model, params = _cfg()
-    cfg = PipelineConfig(
-        asr_model=model, asr=params, vad=VadConfig(model=str(M / "silero_vad.onnx")),
-        diarizer=DiarizerConfig(
-            segmentation_model=str(M / "sherpa-onnx-pyannote-segmentation-3-0/model.onnx"),
-            embedding_model=str(M / "wespeaker_en_voxceleb_resnet34_LM.onnx")))
-    t = build(cfg, MemoryRepo()).run(AudioJob("e2e", str(p)))
+    uc = build(default_config(M), MemoryRepo())
+    t = uc.run(AudioJob("e2e", str(p)))
+    assert t.language.code == "vi" and t.language.source == LanguageSource.DETECTED
     assert t.utterances and len(t.text.split()) > 10
     assert {u.speaker for u in t.utterances} <= {"speaker_00", "speaker_01", "BELIRSIZ"}
+    assert uc.engines.loaded() == ["vi"]  # Türkçe model yüklenmedi

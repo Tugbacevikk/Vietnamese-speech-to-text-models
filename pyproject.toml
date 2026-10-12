@@ -5,13 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "viet-asr"
 version = "0.1.0"
-description = "Vietnamca ses -> metin + konuşmacı ayrıştırma (CPU, sherpa-onnx)"
+description = "Ses -> metin + konuşmacı ayrıştırma, dil tespitli (Vietnamca, Türkçe; CPU, sherpa-onnx)"
 requires-python = ">=3.10"
 dependencies = [
     "sherpa-onnx>=1.12",
     "numpy",
     "soundfile",
     "soxr",
+    "onnxruntime",
 ]
 
 [project.optional-dependencies]
@@ -45,4 +46,4 @@ layers = [
 name = "Domain ve application model kütüphanesi bilmez"
 type = "forbidden"
 source_modules = ["viet_asr.domain", "viet_asr.application"]
-forbidden_modules = ["sherpa_onnx", "soundfile", "soxr"]
+forbidden_modules = ["sherpa_onnx", "onnxruntime", "soundfile", "soxr"]

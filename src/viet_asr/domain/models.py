@@ -1,7 +1,8 @@
 """Çekirdek veri tipleri. Hiçbir dış kütüphaneye bağlı değildir.
 
 Zaman birimi her yerde saniyedir (float), ses dosyasının başından itibaren.
-Vietnamcada metin birimi hecedir: boşlukla ayrılan her parça bir hecedir.
+Metin birimi Word'dür: boşlukla ayrılan her parça. Vietnamcada bu bir hecedir
+(Vietnamca yazımda her hece ayrı yazılır), Türkçede bir kelimedir.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from enum import Enum
 
 import numpy as np
 
-BELIRSIZ = "BELIRSIZ"  # konuşmacısı güvenle belirlenemeyen hece
+BELIRSIZ = "BELIRSIZ"  # konuşmacısı güvenle belirlenemeyen kelime/hece
 
 
 class JobStatus(str, Enum):
@@ -18,14 +19,30 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
+    REJECTED = "rejected"  # ör. desteklenmeyen dil: hata değil, bilinçli ret
+
+
+class LanguageSource(str, Enum):
+    REQUEST = "istek"        # dili isteği gönderen yazdı
+    DETECTED = "tespit"      # sistem sesten buldu
+    DEFAULT = "varsayilan"   # konuşma yok ya da tek dil var; tespit yapılmadı
+
+
+class UnsupportedLanguageError(Exception):
+    """İstenen ya da tespit edilen dil sistemde yok."""
+
+    def __init__(self, message: str, detected: str | None = None):
+        super().__init__(message)
+        self.detected = detected
 
 
 @dataclass(frozen=True)
 class AudioJob:
-    """Bir ses dosyasını işleme isteği."""
+    """Bir ses dosyasını işleme isteği. language=None ise dil sesten tespit edilir."""
 
     job_id: str
     audio_path: str
+    language: str | None = None
     callback_url: str | None = None
 
 
@@ -43,8 +60,8 @@ class VadSegment:
 
 
 @dataclass(frozen=True)
-class Syllable:
-    """ASR çıktısındaki tek hece, mutlak zamanlarla."""
+class Word:
+    """ASR çıktısındaki tek birim (Vietnamcada hece, Türkçede kelime), mutlak zamanlarla."""
 
     text: str
     start: float
@@ -66,7 +83,7 @@ class SpeakerSegment:
 
 @dataclass(frozen=True)
 class Utterance:
-    """Aynı konuşmacının art arda gelen heceleri (son çıktının bir satırı)."""
+    """Aynı konuşmacının art arda gelen kelimeleri (son çıktının bir satırı)."""
 
     speaker: str
     start: float
@@ -75,11 +92,20 @@ class Utterance:
 
 
 @dataclass(frozen=True)
+class LanguageDecision:
+    code: str
+    confidence: float
+    source: LanguageSource
+    uncertain: bool = False  # tespit güveni eşiğin altında: sonuç insan kontrolüne düşmeli
+
+
+@dataclass(frozen=True)
 class Transcript:
     job_id: str
     duration: float
     utterances: list[Utterance]
     model: str
+    language: LanguageDecision
 
     @property
     def text(self) -> str:

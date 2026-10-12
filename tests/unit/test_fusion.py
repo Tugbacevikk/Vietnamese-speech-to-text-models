@@ -1,6 +1,6 @@
 from viet_asr.application.config import FusionConfig
 from viet_asr.application.fusion import FusionEngine
-from viet_asr.domain import BELIRSIZ, SpeakerSegment as S, Syllable as Y
+from viet_asr.domain import BELIRSIZ, SpeakerSegment as S, Word as Y
 
 A, B = "speaker_00", "speaker_01"
 

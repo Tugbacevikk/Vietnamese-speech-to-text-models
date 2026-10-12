@@ -1,4 +1,4 @@
-# Vietnamca Ses → Metin + Konuşmacı Ayrıştırma
+# Ses → Metin + Konuşmacı Ayrıştırma (Vietnamca, Türkçe)
 
 Vietnamca ses kayıtlarını metne çevirir ve her cümlenin hangi konuşmacıya
 (ör. doktor / hasta) ait olduğunu bulur. Yalnızca CPU'da, internetsiz
@@ -27,6 +27,22 @@ ses dosyası ─► 16 kHz mono ─► VAD (Silero) ─► konuşma parçaları 
 RTF = işlem süresi / ses süresi. 0,03 → 1 dakikalık ses yaklaşık 2 saniyede metne çevrilir.
 Hangi Zipformer'ın kullanılacağına `benchmarks/dogruluk_testi.py` sonucuna göre karar verilecek.
 
+## Dil seçimi
+
+İstekte dil verilirse (`--lang vi` / `--lang tr`) o kullanılır. Verilmezse dil sesten
+tespit edilir: önce Whisper-tiny (~0,25 sn), emin olamazsa Whisper-small (~1 sn).
+Tespit yalnızca desteklenen diller arasında yapılır; desteklenen dillerin toplam
+olasılığı %50'nin altındaysa iş **reddedilir** (`rejected`), yanlış modelle anlamsız
+metin üretilmez. Güven %80'in altındaysa sonuç "belirsiz" işaretlenir.
+
+| Dil | Varsayılan model | Seçenek | 60 sn diyalog, tüm hat (2 çekirdek) |
+|---|---|---|---|
+| Vietnamca | Zipformer-68M | Zipformer-30M | 13–14 sn |
+| Türkçe | Omnilingual-300M (Meta, Apache-2.0) | Whisper large-v3-turbo (MIT) | 25 sn (turbo: 63 sn) |
+
+Türkçe doğruluk henüz yalnızca 24 sentetik cümlede ölçüldü (CER: turbo %3,0,
+Omnilingual %3,8). Gerçek ölçüm: `benchmarks/turkce_dogruluk_testi.py` (FLEURS tr).
+
 ## Kurulum
 
 ```bash
@@ -37,7 +53,8 @@ python scripts/download_models.py     # models/ klasörüne indirir, bpe.vocab v
 ## Kullanım
 
 ```bash
-python -m viet_asr.interface.cli kayit.wav --model 68m --speakers 2 --json sonuc.json
+python -m viet_asr.interface.cli kayit.wav                    # dil otomatik
+python -m viet_asr.interface.cli kayit.wav --lang tr --tr-model whisper-turbo --json sonuc.json
 ```
 
 Hotword (özel terim) listesi: her satıra bir terim, **BÜYÜK HARFLE** yazılmalı.

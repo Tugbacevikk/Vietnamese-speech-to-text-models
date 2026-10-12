@@ -43,4 +43,19 @@ class SileroVad:
             drain()
         vad.flush()
         drain()
+        return self._pad(out, audio)
+
+    def _pad(self, segs: list[VadSegment], audio: np.ndarray) -> list[VadSegment]:
+        """Parçaları iki yandan genişletir; iki parça arasındaki boşluk ortadan paylaşılır."""
+        p = int(self.cfg.pad * self.cfg.sample_rate)
+        if p <= 0 or not segs:
+            return segs
+        sr = self.cfg.sample_rate
+        bounds = [(round(s.start * sr), round(s.start * sr) + len(s.samples)) for s in segs]
+        out = []
+        for i, (a, b) in enumerate(bounds):
+            lo = 0 if i == 0 else (bounds[i - 1][1] + a) // 2
+            hi = len(audio) if i == len(bounds) - 1 else (b + bounds[i + 1][0]) // 2
+            a2, b2 = max(lo, a - p), min(hi, b + p)
+            out.append(VadSegment(start=a2 / sr, samples=audio[a2:b2], sample_rate=sr))
         return out

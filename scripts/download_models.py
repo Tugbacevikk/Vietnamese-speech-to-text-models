@@ -1,9 +1,11 @@
-"""Tüm modelleri models/ klasörüne indirir, açar ve bpe.vocab üretir.
+"""Modelleri models/ klasörüne indirir, açar, bpe.vocab ve MANIFEST.json üretir.
 
-    python scripts/download_models.py            # her şey
-    python scripts/download_models.py --asr 68m  # yalnızca 68M ASR + VAD + diarization
+    python scripts/download_models.py                          # varsayılanlar: vi=zipformer-68m, tr=omnilingual-300m
+    python scripts/download_models.py --vi zipformer-30m --tr whisper-turbo
+    python scripts/download_models.py --vi all --tr all        # tüm adaylar (karşılaştırma için)
+    python scripts/download_models.py --tr none                # yalnızca Vietnamca
 
-Windows ve Linux'ta aynı çalışır (yalnızca Python standart kütüphanesi + sentencepiece).
+Her zaman inenler: Silero VAD, pyannote segmentation, WeSpeaker, Whisper-tiny ve -small (dil tespiti).
 İnternetsiz (air-gapped) sunucu için: bunu internetli makinede çalıştırıp models/
 klasörünü olduğu gibi taşıyın. MANIFEST.json içindeki sha256 değerleri ile kontrol edin.
 """
@@ -12,25 +14,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 import tarfile
 import urllib.request
 from pathlib import Path
 
-BASE = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
-ASR = {
-    "68m": ("asr-models/sherpa-onnx-zipformer-vi-int8-2025-04-20.tar.bz2", "Apache-2.0"),
-    "30m": ("asr-models/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09.tar.bz2",
-            "CC BY-NC-ND 4.0"),
-}
-COMMON = {
-    "silero_vad.onnx": ("asr-models/silero_vad.onnx", "MIT"),
-    "pyannote-segmentation-3-0": (
-        "speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2", "MIT"),
-    "wespeaker_en_voxceleb_resnet34_LM.onnx": (
-        # 'recongition' yazım hatası sherpa-onnx'in kendi adresinde var, düzeltmeyin
-        "speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx",
-        "WeSpeaker (Apache-2.0 kod; VoxCeleb ile eğitilmiş ağırlık lisansı doğrulanacak)"),
-}
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from viet_asr.infrastructure.catalog import ASR_PACKS, AUX_PACKS, BASE, MODEL_CHOICES, Pack  # noqa: E402
 
 
 def sha256(p: Path) -> str:
@@ -41,16 +31,23 @@ def sha256(p: Path) -> str:
     return h.hexdigest()
 
 
-def fetch(rel: str, dest: Path) -> Path:
-    out = dest / rel.rsplit("/", 1)[1]
-    if not out.exists():
-        print(f"indiriliyor: {rel}")
-        urllib.request.urlretrieve(f"{BASE}/{rel}", out)
-    if out.suffix == ".bz2":
-        with tarfile.open(out, "r:bz2") as t:
+def fetch(pack: Pack, dest: Path) -> Path:
+    out = dest / pack.target
+    if out.exists():
+        print(f"var, atlanıyor: {pack.target}")
+        return out
+    name = pack.url_path.rsplit("/", 1)[1]
+    tmp = dest / name
+    print(f"indiriliyor: {name}")
+    urllib.request.urlretrieve(f"{BASE}/{pack.url_path}", tmp)
+    if name.endswith(".tar.bz2"):
+        with tarfile.open(tmp, "r:bz2") as t:
             t.extractall(dest, filter="data")
-        out.unlink()
-        out = dest / out.name.removesuffix(".tar.bz2")
+        tmp.unlink()
+    if pack.keep and out.is_dir():
+        for f in out.iterdir():
+            if f.is_file() and f.name not in pack.keep:
+                f.unlink()  # ör. fp32 kopyalar: yalnızca int8 kullanılıyor
     return out
 
 
@@ -64,25 +61,38 @@ def make_bpe_vocab(model_dir: Path) -> None:
             f.write(f"{sp.id_to_piece(i)}\t{sp.get_score(i)}\n")
 
 
+def choose(arg: str, lang: str) -> list[str]:
+    if arg == "none":
+        return []
+    if arg == "all":
+        return MODEL_CHOICES[lang]
+    return [arg]
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--asr", choices=[*ASR, "all"], default="all")
+    p.add_argument("--vi", choices=[*MODEL_CHOICES["vi"], "all", "none"], default="zipformer-68m")
+    p.add_argument("--tr", choices=[*MODEL_CHOICES["tr"], "all", "none"], default="omnilingual-300m")
     p.add_argument("--dest", default="models")
     a = p.parse_args()
     dest = Path(a.dest)
     dest.mkdir(exist_ok=True)
 
-    manifest = {}
-    items = {**COMMON, **{k: v for k, v in ASR.items() if a.asr in (k, "all")}}
-    for key, (rel, lic) in items.items():
-        path = fetch(rel, dest)
-        if key in ASR:
+    packs = dict(AUX_PACKS)
+    for key in choose(a.vi, "vi") + choose(a.tr, "tr"):
+        packs[key] = ASR_PACKS[key]
+
+    mpath = dest / "MANIFEST.json"
+    manifest = json.loads(mpath.read_text(encoding="utf-8")) if mpath.exists() else {}
+    for key, pack in packs.items():
+        path = fetch(pack, dest)
+        if pack.needs_bpe_vocab and not (path / "bpe.vocab").exists():
             make_bpe_vocab(path)
-        files = [path] if path.is_file() else sorted(f for f in path.rglob("*.onnx"))
-        manifest[path.name] = {"url": f"{BASE}/{rel}", "license": lic,
-                               "sha256": {f.relative_to(dest).as_posix(): sha256(f) for f in files}}
-    (dest / "MANIFEST.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
-    print(f"Tamam. {dest}/MANIFEST.json yazıldı.")
+        files = [path] if path.is_file() else sorted(path.rglob("*.onnx"))
+        manifest[key] = {"url": f"{BASE}/{pack.url_path}", "license": pack.license,
+                         "sha256": {f.relative_to(dest).as_posix(): sha256(f) for f in files}}
+    mpath.write_text(json.dumps(manifest, indent=1, ensure_ascii=False), encoding="utf-8")
+    print(f"Tamam. {mpath} yazıldı.")
 
 
 if __name__ == "__main__":

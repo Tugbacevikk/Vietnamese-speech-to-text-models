@@ -6,11 +6,12 @@ sadece altyapıdaki bir sınıf değişir.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Protocol
 
 import numpy as np
 
-from viet_asr.domain import AudioJob, JobStatus, SpeakerSegment, Syllable, Transcript, VadSegment
+from viet_asr.domain import AudioJob, JobStatus, SpeakerSegment, Transcript, VadSegment, Word
 
 
 class Vad(Protocol):
@@ -20,7 +21,17 @@ class Vad(Protocol):
 class AsrEngine(Protocol):
     name: str
 
-    def transcribe(self, segments: list[VadSegment]) -> list[Syllable]: ...
+    def transcribe(self, segments: list[VadSegment]) -> list[Word]: ...
+
+
+# dil kodu -> o dilin ASR motoru. Gerçeklemesi motoru ilk kullanımda yükleyebilir.
+AsrEngines = Mapping[str, AsrEngine]
+
+
+class LanguageDetector(Protocol):
+    def probabilities(self, audio: np.ndarray) -> dict[str, float]:
+        """Modelin bildiği TÜM diller için olasılık (toplamı 1). Kısıtlama uygulamada yapılır."""
+        ...
 
 
 class Diarizer(Protocol):

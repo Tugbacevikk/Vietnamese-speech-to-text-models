@@ -1,27 +1,32 @@
-"""Ana kullanım senaryosu: ses -> konuşmacılı metin."""
+"""Ana kullanım senaryosu: ses -> dil kararı -> konuşmacılı metin."""
 from __future__ import annotations
 
 import logging
 import time
 
-from viet_asr.domain import AudioJob, JobStatus, Transcript
+from viet_asr.domain import AudioJob, JobStatus, Transcript, UnsupportedLanguageError
 
 from .fusion import FusionEngine
-from .ports import AsrEngine, AudioLoader, Diarizer, Notifier, ResultRepository, Vad
+from .language import LanguageResolver
+from .ports import AsrEngines, AudioLoader, Diarizer, Notifier, ResultRepository, Vad
 
 log = logging.getLogger(__name__)
 
 
 class TranscribeAndDiarize:
-    def __init__(self, loader: AudioLoader, vad: Vad, asr: AsrEngine, diarizer: Diarizer,
-                 fusion: FusionEngine, repo: ResultRepository, notifier: Notifier | None = None):
-        self.loader, self.vad, self.asr, self.diarizer = loader, vad, asr, diarizer
-        self.fusion, self.repo, self.notifier = fusion, repo, notifier
+    def __init__(self, loader: AudioLoader, vad: Vad, language: LanguageResolver,
+                 engines: AsrEngines, diarizer: Diarizer, fusion: FusionEngine,
+                 repo: ResultRepository, notifier: Notifier | None = None):
+        self.loader, self.vad, self.language, self.engines = loader, vad, language, engines
+        self.diarizer, self.fusion, self.repo, self.notifier = diarizer, fusion, repo, notifier
 
     def run(self, job: AudioJob) -> Transcript:
         self.repo.set_status(job.job_id, JobStatus.RUNNING)
         try:
             transcript = self._process(job)
+        except UnsupportedLanguageError as e:
+            self.repo.set_status(job.job_id, JobStatus.REJECTED, error=str(e))
+            raise
         except Exception as e:
             self.repo.set_status(job.job_id, JobStatus.FAILED, error=f"{type(e).__name__}: {e}")
             raise
@@ -37,12 +42,16 @@ class TranscribeAndDiarize:
         duration = len(audio) / 16000
 
         segments = self.vad.split(audio)
-        syllables = self.asr.transcribe(segments) if segments else []
+        lang = self.language.resolve(job.language, segments)
+        asr = self.engines[lang.code]
+        words = asr.transcribe(segments) if segments else []
         speakers = self.diarizer.diarize(audio) if segments else []
-        utterances = self.fusion.fuse(syllables, speakers)
+        utterances = self.fusion.fuse(words, speakers)
 
         dt = time.perf_counter() - t0
-        log.info("job=%s sure=%.1fs rtf=%.3f parca=%d hece=%d satir=%d", job.job_id, duration,
-                 dt / max(duration, 1e-9), len(segments), len(syllables), len(utterances))
+        log.info("job=%s dil=%s(%s %.2f%s) sure=%.1fs rtf=%.3f parca=%d kelime=%d satir=%d",
+                 job.job_id, lang.code, lang.source.value, lang.confidence,
+                 " BELIRSIZ" if lang.uncertain else "", duration, dt / max(duration, 1e-9),
+                 len(segments), len(words), len(utterances))
         return Transcript(job_id=job.job_id, duration=duration, utterances=utterances,
-                          model=self.asr.name)
+                          model=asr.name, language=lang)
