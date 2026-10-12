@@ -55,6 +55,7 @@ class Repo:
 
     def save(self, t):
         self.saved = t
+        self.history.append((JobStatus.DONE, None))
 
 
 def make(probs, diar=None, loaded=None):

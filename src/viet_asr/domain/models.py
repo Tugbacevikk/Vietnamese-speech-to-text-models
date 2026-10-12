@@ -7,6 +7,7 @@ Metin birimi Word'dür: boşlukla ayrılan her parça. Vietnamcada bu bir hecedi
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 
 import numpy as np
@@ -97,6 +98,18 @@ class LanguageDecision:
     confidence: float
     source: LanguageSource
     uncertain: bool = False  # tespit güveni eşiğin altında: sonuç insan kontrolüne düşmeli
+
+
+@dataclass(frozen=True)
+class JobRecord:
+    """Bir işin kalıcı kaydı (veritabanındaki hali)."""
+
+    job: AudioJob
+    status: JobStatus
+    decision: LanguageDecision | None = None  # dil kararı verildiyse
+    error: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 @dataclass(frozen=True)

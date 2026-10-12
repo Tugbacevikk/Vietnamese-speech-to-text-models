@@ -1,6 +1,7 @@
 from .models import (
     BELIRSIZ,
     AudioJob,
+    JobRecord,
     JobStatus,
     LanguageDecision,
     LanguageSource,
@@ -13,7 +14,7 @@ from .models import (
 )
 
 __all__ = [
-    "BELIRSIZ", "AudioJob", "JobStatus", "LanguageDecision", "LanguageSource",
+    "BELIRSIZ", "AudioJob", "JobRecord", "JobStatus", "LanguageDecision", "LanguageSource",
     "SpeakerSegment", "Transcript", "UnsupportedLanguageError", "Utterance",
     "VadSegment", "Word",
 ]

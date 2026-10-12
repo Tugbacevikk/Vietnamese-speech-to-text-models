@@ -11,7 +11,9 @@ from typing import Protocol
 
 import numpy as np
 
-from viet_asr.domain import AudioJob, JobStatus, SpeakerSegment, Transcript, VadSegment, Word
+from viet_asr.domain import (
+    AudioJob, JobRecord, JobStatus, LanguageDecision, SpeakerSegment, Transcript, VadSegment, Word,
+)
 
 
 class Vad(Protocol):
@@ -51,7 +53,30 @@ class AudioLoader(Protocol):
 class ResultRepository(Protocol):
     def set_status(self, job_id: str, status: JobStatus, error: str | None = None) -> None: ...
 
-    def save(self, transcript: Transcript) -> None: ...
+    def save(self, transcript: Transcript) -> None:
+        """Sonucu yazar ve işi DONE yapar; ikisi birlikte olur ya da hiçbiri olmaz."""
+        ...
+
+
+class JobStore(ResultRepository, Protocol):
+    """İş kayıtlarının tamamı. Gerçeklemesi (PostgreSQL) sonuç ile bildirim
+    olayını (outbox) aynı işlemde yazar: sonuç kaydedildiyse bildirim kaybolmaz."""
+
+    def create(self, job: AudioJob) -> None: ...
+
+    def get(self, job_id: str) -> JobRecord | None: ...
+
+    def set_language(self, job_id: str, decision: LanguageDecision) -> None: ...
+
+    def get_transcript(self, job_id: str) -> Transcript | None: ...
+
+
+class JobQueue(Protocol):
+    """İşi doğru kuyruğa koyar: dil belliyse o dilin ASR kuyruğu, değilse dil tespiti."""
+
+    def enqueue_detection(self, job_id: str) -> None: ...
+
+    def enqueue_transcription(self, job_id: str, language: str) -> None: ...
 
 
 class Notifier(Protocol):

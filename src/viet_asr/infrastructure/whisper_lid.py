@@ -96,7 +96,10 @@ class LazyDetector:
     def __init__(self, factory):
         self._factory, self._det = factory, None
 
-    def probabilities(self, audio: np.ndarray) -> dict[str, float]:
+    def load(self):
         if self._det is None:
             self._det = self._factory()
-        return self._det.probabilities(audio)
+        return self._det
+
+    def probabilities(self, audio: np.ndarray) -> dict[str, float]:
+        return self.load().probabilities(audio)
