@@ -32,7 +32,8 @@ def main(argv=None):
     p.add_argument("--vi-model", choices=MODEL_CHOICES["vi"], default=None)
     p.add_argument("--tr-model", choices=MODEL_CHOICES["tr"], default=None)
     p.add_argument("--models-dir", default="models")
-    p.add_argument("--speakers", type=int, default=2, help="-1: otomatik")
+    p.add_argument("--speakers", type=int, default=0, help="konuşmacı sayısı; 0: sesten bul")
+    p.add_argument("--diarizer", choices=["cluster", "pyannote"], default="cluster")
     p.add_argument("--hotwords", default=None, help="Vietnamca terim listesi (BÜYÜK HARF)")
     p.add_argument("--threads", type=int, default=2)
     p.add_argument("--json", default=None)
@@ -41,7 +42,7 @@ def main(argv=None):
 
     models = {k: v for k, v in (("vi", a.vi_model), ("tr", a.tr_model)) if v}
     cfg = default_config(a.models_dir, tuple(a.languages.split(",")), models, a.threads,
-                         a.speakers, a.hotwords)
+                         a.speakers, a.hotwords, a.diarizer)
     repo = MemoryRepo()
     job = AudioJob(job_id=Path(a.audio).stem, audio_path=a.audio,
                    language=None if a.lang == "auto" else a.lang)

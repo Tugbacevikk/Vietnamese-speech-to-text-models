@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     audio_path      TEXT NOT NULL,
     requested_lang  TEXT,
     callback_url    TEXT,
+    num_speakers    INTEGER,
     lang_code       TEXT,
     lang_confidence REAL,
     lang_source     TEXT,
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS jobs_status_idx ON jobs (status);
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS num_speakers INTEGER;
 
 CREATE TABLE IF NOT EXISTS utterances (
     job_id   TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
@@ -82,10 +84,10 @@ class PostgresJobStore:
     # --- yazma ---
     def create(self, job: AudioJob) -> None:
         with self.pool.connection() as c:
-            c.execute("INSERT INTO jobs (id, status, audio_path, requested_lang, callback_url) "
-                      "VALUES (%s, %s, %s, %s, %s)",
+            c.execute("INSERT INTO jobs (id, status, audio_path, requested_lang, callback_url, "
+                      "num_speakers) VALUES (%s, %s, %s, %s, %s, %s)",
                       (job.job_id, JobStatus.QUEUED.value, job.audio_path, job.language,
-                       job.callback_url))
+                       job.callback_url, job.num_speakers))
 
     def set_status(self, job_id: str, status: JobStatus, error: str | None = None) -> None:
         with self.pool.connection() as c, c.transaction():
@@ -179,7 +181,8 @@ def _decision(r: dict) -> LanguageDecision | None:
 
 
 def _record(r: dict) -> JobRecord:
-    job = AudioJob(r["id"], r["audio_path"], r["requested_lang"], r["callback_url"])
+    job = AudioJob(r["id"], r["audio_path"], r["requested_lang"], r["callback_url"],
+                   r.get("num_speakers"))
     return JobRecord(job=job, status=JobStatus(r["status"]), decision=_decision(r),
                      error=r["error"], created_at=r["created_at"], updated_at=r["updated_at"])
 

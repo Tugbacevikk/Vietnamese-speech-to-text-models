@@ -37,7 +37,10 @@ class LanguageDetector(Protocol):
 
 
 class Diarizer(Protocol):
-    def diarize(self, audio: np.ndarray) -> list[SpeakerSegment]: ...
+    def diarize(self, audio: np.ndarray, segments: list[VadSegment] | None = None,
+                num_speakers: int | None = None) -> list[SpeakerSegment]:
+        """num_speakers verilirse tam o kadar konuşmacı; None ise sesten bulunur."""
+        ...
 
 
 class TextNormalizer(Protocol):

@@ -10,6 +10,7 @@ from viet_asr.domain import SpeakerSegment
 
 class SherpaOnnxDiarizer:
     def __init__(self, cfg: DiarizerConfig):
+        self.cfg = cfg
         clustering = (sherpa_onnx.FastClusteringConfig(num_clusters=cfg.num_speakers)
                       if cfg.num_speakers > 0
                       else sherpa_onnx.FastClusteringConfig(threshold=cfg.cluster_threshold))
@@ -27,7 +28,11 @@ class SherpaOnnxDiarizer:
             raise ValueError("diarization ayarı geçersiz (model yolu?)")
         self.sd = sherpa_onnx.OfflineSpeakerDiarization(conf)
 
-    def diarize(self, audio: np.ndarray) -> list[SpeakerSegment]:
+    def diarize(self, audio: np.ndarray, segments=None, num_speakers=None) -> list[SpeakerSegment]:
+        if num_speakers and num_speakers != self.cfg.num_speakers:
+            # sherpa-onnx kümeleme ayarı kurulumda sabit; istek başına sayı için yeniden kur
+            from dataclasses import replace
+            return SherpaOnnxDiarizer(replace(self.cfg, num_speakers=num_speakers)).diarize(audio)
         # konuşmacı sayısından az ses varsa kümeleme çöker; çok kısa sesleri atla
         if len(audio) < self.sd.sample_rate:
             return []

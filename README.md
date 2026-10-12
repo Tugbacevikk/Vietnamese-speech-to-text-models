@@ -10,7 +10,7 @@ tüm modeller [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) ile çalış�
 ```
 ses dosyası ─► 16 kHz mono ─► VAD (Silero) ─► konuşma parçaları ─► dil kararı ─► ASR (dile göre) ─► kelimeler + zaman
                     │                                                                     │
-                    └──────────► Diarization (pyannote seg-3.0 + WeSpeaker) ─► konuşmacı aralıkları
+                    └──────────► Konuşmacı ayrıştırma (parça imzaları + kümeleme) ─► konuşmacı aralıkları
                                                                                           │
                                                   Birleştirme (Fusion) ◄──────────────────┘
                                                           │
@@ -22,7 +22,8 @@ ses dosyası ─► 16 kHz mono ─► VAD (Silero) ─► konuşma parçaları 
 | VAD | Silero VAD | MIT | 0,006 |
 | ASR | Zipformer-68M int8 (2025-04-20) | Apache-2.0 | 0,028–0,039 |
 | ASR (aday) | Zipformer-30M int8 (2026-02-09) | CC BY-NC-ND 4.0 | 0,024–0,029 |
-| Diarization | pyannote segmentation-3.0 + WeSpeaker ResNet34 | MIT / WeSpeaker (ağırlık lisansı doğrulanacak) | 0,14–0,18 |
+| Konuşmacı ayrıştırma | VAD parçaları + 3D-Speaker ERes2Net imzası + kümeleme | 3D-Speaker (Apache-2.0 doğrulanacak) | ~0,04 |
+| (eski, seçenek) | pyannote segmentation-3.0 + WeSpeaker | MIT / WeSpeaker | 0,12–0,18 |
 
 RTF = işlem süresi / ses süresi. 0,03 → 1 dakikalık ses yaklaşık 2 saniyede metne çevrilir.
 Hangi Zipformer'ın kullanılacağına `benchmarks/dogruluk_testi.py` sonucuna göre karar verilecek.
@@ -42,6 +43,21 @@ metin üretilmez. Güven %80'in altındaysa sonuç "belirsiz" işaretlenir.
 
 Türkçe doğruluk henüz yalnızca 24 sentetik cümlede ölçüldü (CER: turbo %3,0,
 Omnilingual %3,8). Gerçek ölçüm: `benchmarks/turkce_dogruluk_testi.py` (FLEURS tr).
+
+## Konuşmacı ayrıştırma
+
+Konuşmacı sayısı **sesten bulunur**; istekte `num_speakers` verilirse tam o sayı kullanılır.
+Yöntem: her konuşma parçası 1,5 sn'lik pencerelere bölünür, her pencereden ses imzası
+(3D-Speaker) çıkarılır, imzalar benzerliğe göre kümelenir. `benchmarks/konusmaci_testi.py`
+ile 14 sentetik diyalogda (1-3 kişi, vi + tr):
+
+| Yöntem | Konuşmacı sayısı doğru | Cümle doğru kişide | Hız (RTF) |
+|---|---|---|---|
+| kümeleme (varsayılan) | 13/14 | %99,4 | 0,038 |
+| pyannote (eski) | 8/14 | %81,0 | 0,121 |
+
+pyannote yolu kısa sıralarla konuşan iki Vietnamca sesi "tam 2 kişi" denince bile ayıramadı.
+Ölçüm sentetik seslerle; gerçek kayıtlarla doğrulanmalı (`--kaynak tsv`). Aynı anda konuşma ayrılmaz.
 
 ## Sistem (servisler)
 
@@ -72,8 +88,13 @@ docker compose up -d --build
 curl http://localhost:8000/health
 ```
 
-Çekirdek bütçesi: worker süreci sayısı (`-c`) x `ONNX_THREADS` makinedeki çekirdek sayısını
-geçmemeli; geçerse süreçler birbirini yavaşlatır. `docker-compose.yml` 8 çekirdeğe göre ayarlı.
+Çekirdek sayısı önceden bilinmek zorunda değil: `worker-vi` süreç sayısını kendisi hesaplar
+(kullanılabilir çekirdek / `ONNX_THREADS`; Docker'da `cpus:` sınırını dikkate alır).
+Elle vermek için `CONCURRENCY=4`. Toplam süreç x `ONNX_THREADS` çekirdek sayısını geçmemeli.
+
+Önemli ortam değişkenleri: `LANGUAGES` (vi,tr), `VI_MODEL`, `TR_MODEL`, `NUM_SPEAKERS`
+(0 = sesten bul), `DIARIZER` (cluster | pyannote), `ONNX_THREADS`, `CONCURRENCY`,
+`TASK_TIME_LIMIT` (sn, tek iş üst sınırı), `MAX_AUDIO_MINUTES`, `MAX_UPLOAD_MB`.
 
 ### API
 
@@ -83,17 +104,20 @@ curl -F file=@kayit.wav -F callback_url=https://ornek.com/hook http://localhost:
 # -> 202 {"job_id": "...", "status": "queued", "duration": 61.2, "language": "auto"}
 
 curl -F file=@kayit.wav -F language=tr http://localhost:8000/jobs   # dil verilir
+curl -F file=@kayit.wav -F num_speakers=1 http://localhost:8000/jobs # konuşmacı sayısı biliniyorsa
 curl http://localhost:8000/jobs/<job_id>                              # durum + sonuç
 ```
 
 Durumlar: `queued` → `running` → `done` | `failed` | `rejected` (desteklenmeyen dil).
-Hata kodları: 415 dosya türü (wav, flac, ogg, mp3, opus), 400 bozuk ses, 413 boyut, 422 dil.
+Hata kodları: 415 dosya türü (wav, flac, ogg, mp3, opus), 400 bozuk ses, 413 boyut ya da
+süre, 422 dil / num_speakers.
 
 Webhook gövdesi (`X-Event: job.done`):
 
 ```json
 {"status": "done", "job_id": "...", "duration": 61.2, "model": "zipformer-68m",
  "language": {"code": "vi", "confidence": 0.99, "source": "tespit", "uncertain": false},
+ "speakers": 2,
  "text": "...",
  "utterances": [{"speaker": "speaker_00", "start": 0.1, "end": 3.5, "text": "..."}]}
 ```
@@ -158,6 +182,7 @@ python benchmarks/dogruluk_testi.py   # VIVOS test + VietMed dev, iki Zipformer:
 python benchmarks/hiz_testi.py        # üretim sunucusunda hız ve bellek
 python benchmarks/turkce_dogruluk_testi.py            # FLEURS tr: Omnilingual ve Whisper turbo
 python benchmarks/dil_tespiti_testi.py liste.tsv      # kendi seslerinde dil tespiti doğruluğu
+python benchmarks/konusmaci_testi.py [--bosluksuz]     # konuşmacı sayısı ve atama doğruluğu
 ```
 
 Seçim kuralı: VIVOS (tarafsız set) CER'i düşük olan model; fark 1 puandan azsa daha hızlı olan.
@@ -171,5 +196,6 @@ Zipformer-30M, VietMed ve FLEURS ile eğitildiği için onun VietMed sonucu iyim
 - [ ] Faz 0.4 — doğruluk testini çalıştır, 30M/68M seçimi, kabul eşiği
 - [x] Dil seçimi — istekte dil ya da otomatik tespit (tiny → small kademesi), Türkçe desteği
 - [x] Faz 1 — FastAPI, Celery + Redis (`lid`, `asr.vi`, `asr.tr`), PostgreSQL + outbox, webhook, Docker
+- [x] Konuşmacı sayısı otomatik (kümeleme), istekte num_speakers, çekirdeğe göre worker sayısı
 - [ ] Faz 1.1 — gerçek verilerle ölçüm (VietMed, FLEURS tr), 4000 mesajlık yük testi
 - [ ] Faz 2 — tıbbi hotword sözlüğü, noktalama geri getirme, DER/cpWER ölçümü

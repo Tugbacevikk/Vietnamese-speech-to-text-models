@@ -37,12 +37,12 @@ class Det:
 
 
 class Diar:
-    def diarize(self, audio):
+    def diarize(self, audio, segments=None, num_speakers=None):
         return [SpeakerSegment("speaker_00", 0.4, 1.5)]
 
 
 class BozukDiar:
-    def diarize(self, audio):
+    def diarize(self, audio, segments=None, num_speakers=None):
         raise RuntimeError("model yok")
 
 

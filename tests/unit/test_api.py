@@ -94,7 +94,7 @@ def test_sonuc_sorgulama_ve_uctan_uca_akis(ctx):
             return [Word("xin", 0.1, 0.3), Word("chào", 0.3, 0.6)]
 
     class Diar:
-        def diarize(self, a):
+        def diarize(self, a, segments=None, num_speakers=None):
             return [SpeakerSegment("speaker_00", 0.0, 1.0)]
 
     jid = post(c).json()["job_id"]
@@ -119,3 +119,16 @@ def test_sonuc_sorgulama_ve_uctan_uca_akis(ctx):
     assert c.get("/jobs/yok").status_code == 404
     h = c.get("/health").json()
     assert h["status"] == "ok" and h["jobs"] == {"done": 1}
+
+
+def test_konusmaci_sayisi_ve_sure_siniri(tmp_path):
+    store, queue = MemoryJobStore(), Queue()
+    s = Settings(data_dir=str(tmp_path), languages=["vi", "tr"], max_audio_minutes=0.5)
+    c = TestClient(create_app(store, queue, s))
+    r = post(c, {"num_speakers": "3"})
+    assert r.status_code == 202
+    assert store.get(r.json()["job_id"]).job.num_speakers == 3
+    assert c.get(f"/jobs/{r.json()['job_id']}").json()["num_speakers"] == 3
+    assert post(c, {"num_speakers": "0"}).status_code == 422
+    assert post(c, content=wav_bytes(31)).status_code == 413   # 0,5 dakikadan uzun
+    assert len(list(tmp_path.iterdir())) == 1                   # reddedilenlerin dosyası silindi

@@ -45,7 +45,7 @@ class TranscribeAndDiarize:
         lang = decision or self.language.resolve(job.language, segments)
         asr = self.engines[lang.code]
         words = asr.transcribe(segments) if segments else []
-        speakers = self.diarizer.diarize(audio) if segments else []
+        speakers = self.diarizer.diarize(audio, segments, job.num_speakers) if segments else []
         utterances = self.fusion.fuse(words, speakers)
 
         dt = time.perf_counter() - t0

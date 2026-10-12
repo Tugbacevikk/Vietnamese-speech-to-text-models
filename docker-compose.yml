@@ -2,8 +2,10 @@
 # Önce modeller: python scripts/download_models.py  (./models klasörüne)
 #
 # Çekirdek bütçesi: her worker süreci ONNX_THREADS çekirdek kullanır.
-# worker-vi.concurrency x ONNX_THREADS + worker-tr... <= makinedeki çekirdek sayısı.
-# Aşağıdaki değerler 8 çekirdek içindir; makineye göre CONCURRENCY değerlerini değiştirin.
+# worker-vi süreç sayısını kendisi hesaplar: kullanılabilir çekirdek / ONNX_THREADS
+# (konteynere "cpus:" sınırı konduysa onu dikkate alır). worker-lid ve worker-tr
+# 1 süreçle başlar; Türkçe yük artarsa CONCURRENCY değerini yükseltin. Toplam
+# süreç x ONNX_THREADS çekirdek sayısını geçerse süreçler birbirini yavaşlatır.
 
 x-app: &app
   build: .
@@ -16,7 +18,9 @@ x-app: &app
     VI_MODEL: zipformer-68m
     TR_MODEL: omnilingual-300m
     ONNX_THREADS: "2"
-    NUM_SPEAKERS: "2"
+    NUM_SPEAKERS: "0"            # 0: sesten bul; istekte num_speakers verilebilir
+    DIARIZER: cluster
+    TASK_TIME_LIMIT: "1800"      # tek iş en fazla 30 dk
   volumes:
     - ./models:/models:ro
     - uploads:/data/uploads
@@ -55,26 +59,29 @@ services:
   worker-lid:          # dil tespiti: hafif, 1 süreç çoğu zaman yeter (~0,25 sn/ses)
     <<: *app
     command: ["celery", "-A", "viet_asr.interface.worker", "worker", "-Q", "lid",
-              "-c", "1", "-n", "lid@%h", "--loglevel=INFO"]
+              "-n", "lid@%h", "--loglevel=INFO"]
     environment:
       <<: *env
       WARMUP_LID: "1"
+      CONCURRENCY: "1"
 
   worker-vi:           # Vietnamca: Zipformer ~0,5 GB/süreç
     <<: *app
     command: ["celery", "-A", "viet_asr.interface.worker", "worker", "-Q", "asr.vi",
-              "-c", "2", "-n", "vi@%h", "--loglevel=INFO"]
+              "-n", "vi@%h", "--loglevel=INFO"]
     environment:
       <<: *env
       WARMUP_LANGS: vi
+      CONCURRENCY: auto
 
   worker-tr:           # Türkçe: Omnilingual ~0,5 GB/süreç (Whisper turbo seçilirse ~1,6 GB)
     <<: *app
     command: ["celery", "-A", "viet_asr.interface.worker", "worker", "-Q", "asr.tr",
-              "-c", "1", "-n", "tr@%h", "--loglevel=INFO"]
+              "-n", "tr@%h", "--loglevel=INFO"]
     environment:
       <<: *env
       WARMUP_LANGS: tr
+      CONCURRENCY: "1"
 
   dispatcher:          # outbox -> webhook
     <<: *app

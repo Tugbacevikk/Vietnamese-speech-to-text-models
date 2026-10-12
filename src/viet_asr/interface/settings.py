@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 def _list(v: str) -> list[str]:
@@ -20,8 +21,12 @@ class Settings:
     vi_model: str | None = field(default_factory=lambda: os.environ.get("VI_MODEL") or None)
     tr_model: str | None = field(default_factory=lambda: os.environ.get("TR_MODEL") or None)
     threads: int = field(default_factory=lambda: int(os.environ.get("ONNX_THREADS", "2")))
-    speakers: int = field(default_factory=lambda: int(os.environ.get("NUM_SPEAKERS", "2")))
+    # 0: konuşmacı sayısı sesten bulunur (istekte num_speakers verilirse o kullanılır)
+    speakers: int = field(default_factory=lambda: int(os.environ.get("NUM_SPEAKERS", "0")))
+    diarizer: str = field(default_factory=lambda: os.environ.get("DIARIZER", "cluster"))
     hotwords: str | None = field(default_factory=lambda: os.environ.get("VI_HOTWORDS") or None)
+    task_time_limit: int = field(default_factory=lambda: int(os.environ.get("TASK_TIME_LIMIT", "1800")))
+    max_audio_minutes: float = field(default_factory=lambda: float(os.environ.get("MAX_AUDIO_MINUTES", "60")))
     max_upload_mb: int = field(default_factory=lambda: int(os.environ.get("MAX_UPLOAD_MB", "100")))
     # sunucudaki bir dosya yolunu doğrudan kabul et (toplu iş için; yalnızca güvenilir ağda aç)
     allow_local_paths: bool = field(default_factory=lambda: os.environ.get(
@@ -32,5 +37,31 @@ class Settings:
     warmup_lid: bool = field(default_factory=lambda: os.environ.get("WARMUP_LID", "0") == "1")
 
     @property
+    def concurrency(self) -> int:
+        """CONCURRENCY=auto (varsayılan): kullanılabilir çekirdek / ONNX_THREADS."""
+        v = os.environ.get("CONCURRENCY", "auto")
+        if v != "auto":
+            return max(1, int(v))
+        return max(1, available_cpus() // max(1, self.threads))
+
+    @property
     def models(self) -> dict[str, str]:
         return {k: v for k, v in (("vi", self.vi_model), ("tr", self.tr_model)) if v}
+
+
+def available_cpus() -> int:
+    """Bu sürecin gerçekten kullanabileceği çekirdek sayısı.
+
+    os.cpu_count() Docker'da ana makinenin TÜM çekirdeklerini döndürür; konteynere
+    sınır konduysa (cpus: 4) cgroup'tan okunur, yoksa sürecin izinli çekirdekleri.
+    """
+    try:
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        if quota != "max":
+            return max(1, int(int(quota) / int(period)))
+    except (OSError, ValueError):
+        pass
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:  # Windows / macOS
+        return os.cpu_count() or 1

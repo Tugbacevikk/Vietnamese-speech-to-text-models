@@ -26,8 +26,7 @@ pytestmark = pytest.mark.models
 VI_OK = need(Z68 / "tokens.txt", M / "silero_vad.onnx")
 LID_OK = need(TINY / "tiny-encoder.int8.onnx", SMALL / "small-encoder.int8.onnx",
               LIDW / "tr-turkish.wav", Z68 / "test_wavs")
-DIAR = [M / "sherpa-onnx-pyannote-segmentation-3-0/model.onnx",
-        M / "wespeaker_en_voxceleb_resnet34_LM.onnx"]
+DIAR = [M / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"]
 
 
 def load(p):
@@ -149,5 +148,27 @@ def test_uctan_uca_dil_tespitli(tmp_path):
     t = uc.run(AudioJob("e2e", str(p)))
     assert t.language.code == "vi" and t.language.source == LanguageSource.DETECTED
     assert t.utterances and len(t.text.split()) > 10
-    assert {u.speaker for u in t.utterances} <= {"speaker_00", "speaker_01", "BELIRSIZ"}
+    # 0.wav, 1.wav, 2.wav üç farklı kişi (3D-Speaker uzaklığı 0,84-1,07); sıra 0,1,2,0
+    assert [u.speaker for u in t.utterances] == ["speaker_00", "speaker_01", "speaker_02", "speaker_00"]
     assert uc.engines.loaded() == ["vi"]  # Türkçe model yüklenmedi
+
+
+@need(*DIAR, LIDW / "tr-turkish.wav", Z68 / "test_wavs", M / "silero_vad.onnx")
+def test_konusmaci_sayisi_otomatik_ve_verilen():
+    from viet_asr.application.config import VadConfig
+    from viet_asr.infrastructure.sherpa_vad import SileroVad
+    from viet_asr.interface.composition import build_diarizer, default_config
+
+    tr, vi = load(LIDW / "tr-turkish.wav"), vi_wavs()[0]
+    gap = np.zeros(8000, dtype=np.float32)
+    iki = np.concatenate([tr, gap, vi, gap, tr, gap, vi])
+    tek = np.concatenate([vi, gap, vi, gap, vi])
+    vad = SileroVad(VadConfig(model=str(M / "silero_vad.onnx")))
+    d = build_diarizer(default_config(M).diarizer)
+
+    segs = d.diarize(iki, vad.split(iki))
+    assert len({s.speaker for s in segs}) == 2
+    assert [s.speaker for s in segs][:2] == ["speaker_00", "speaker_01"]
+    assert len({s.speaker for s in d.diarize(tek, vad.split(tek))}) == 1
+    assert len({s.speaker for s in d.diarize(iki, vad.split(iki), num_speakers=1)}) == 1
+    assert d.diarize(iki, []) == []

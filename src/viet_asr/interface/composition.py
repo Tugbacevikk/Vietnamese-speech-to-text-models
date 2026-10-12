@@ -13,6 +13,7 @@ from viet_asr.infrastructure.catalog import language_profile, lid_stages
 from viet_asr.infrastructure.engines import LazyAsrEngines
 from viet_asr.infrastructure.normalizer import normalizer_for
 from viet_asr.infrastructure.sherpa_asr import build_asr
+from viet_asr.infrastructure.cluster_diarizer import EmbeddingClusterDiarizer
 from viet_asr.infrastructure.sherpa_diarizer import SherpaOnnxDiarizer
 from viet_asr.infrastructure.sherpa_vad import SileroVad
 from viet_asr.infrastructure.whisper_lid import LazyDetector, WhisperLanguageDetector
@@ -20,7 +21,8 @@ from viet_asr.infrastructure.whisper_lid import LazyDetector, WhisperLanguageDet
 
 def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                    models: dict[str, str] | None = None, threads: int = 2,
-                   speakers: int = 2, hotwords: str | None = None) -> PipelineConfig:
+                   speakers: int = 0, hotwords: str | None = None,
+                   diarizer: str = "cluster") -> PipelineConfig:
     d, models = Path(models_dir), models or {}
     profiles = {}
     for code in languages:
@@ -33,9 +35,19 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
         lid=LidConfig(stages=lid_stages(d), num_threads=threads),
         vad=VadConfig(model=str(d / "silero_vad.onnx")),
         diarizer=DiarizerConfig(
+            kind=diarizer,
             segmentation_model=str(d / "sherpa-onnx-pyannote-segmentation-3-0/model.onnx"),
-            embedding_model=str(d / "wespeaker_en_voxceleb_resnet34_LM.onnx"),
+            embedding_model=str(d / ("3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+                                     if diarizer == "cluster" else "wespeaker_en_voxceleb_resnet34_LM.onnx")),
             num_speakers=speakers, num_threads=threads))
+
+
+def build_diarizer(cfg: DiarizerConfig):
+    if cfg.kind == "cluster":
+        return EmbeddingClusterDiarizer(cfg)
+    if cfg.kind == "pyannote":
+        return SherpaOnnxDiarizer(cfg)
+    raise ValueError(f"bilinmeyen diarizer: {cfg.kind}")
 
 
 def build_resolver(cfg: PipelineConfig, with_detection: bool = True) -> LanguageResolver:
@@ -60,7 +72,7 @@ def build_pipeline(cfg: PipelineConfig, repo: ResultRepository,
     return TranscribeAndDiarize(
         loader=SoundfileLoader(), vad=SileroVad(cfg.vad),
         language=build_resolver(cfg, with_detection), engines=build_engines(cfg),
-        diarizer=SherpaOnnxDiarizer(cfg.diarizer), fusion=FusionEngine(cfg.fusion), repo=repo)
+        diarizer=build_diarizer(cfg.diarizer), fusion=FusionEngine(cfg.fusion), repo=repo)
 
 
 # geriye dönük ad (CLI ve testler)

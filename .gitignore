@@ -12,3 +12,4 @@ models/*
 sonuc_*.json
 dump.rdb
 data/
+models/tts-test/

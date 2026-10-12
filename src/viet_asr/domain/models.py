@@ -45,6 +45,7 @@ class AudioJob:
     audio_path: str
     language: str | None = None
     callback_url: str | None = None
+    num_speakers: int | None = None  # biliniyorsa; None ise sesten bulunur
 
 
 @dataclass(frozen=True)

@@ -37,7 +37,9 @@ class SubmitJob:
             # API'de hemen hata: kuyruğa hiç girmez
             raise UnsupportedLanguageError(
                 f"istenen dil '{lang}' desteklenmiyor; desteklenenler: {', '.join(self.supported)}")
-        job = AudioJob(job.job_id, job.audio_path, lang, job.callback_url)
+        if job.num_speakers is not None and not 1 <= job.num_speakers <= 20:
+            raise ValueError("num_speakers 1 ile 20 arasında olmalı")
+        job = AudioJob(job.job_id, job.audio_path, lang, job.callback_url, job.num_speakers)
         self.store.create(job)
         if lang is None:
             self.queue.enqueue_detection(job.job_id)

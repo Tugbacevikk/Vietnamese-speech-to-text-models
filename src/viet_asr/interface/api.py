@@ -2,7 +2,8 @@
 
     POST /jobs          ses dosyası yükle -> 202 + job_id (iş kuyruğa girer)
                         form alanları: file (zorunlu), language (vi | tr | auto, varsayılan auto),
-                        callback_url (isteğe bağlı: iş bitince buraya POST edilir)
+                        callback_url (isteğe bağlı: iş bitince buraya POST edilir),
+                        num_speakers (isteğe bağlı: biliniyorsa konuşmacı sayısı; yoksa sesten bulunur)
     GET  /jobs/{id}     durum; bittiyse sonuç (konuşmacılı satırlar)
     GET  /health        veritabanı ve kuyruk erişimi, durum sayıları
 
@@ -39,7 +40,8 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
 
     @api.post("/jobs", status_code=202)
     def create_job(file: UploadFile | None = File(None), language: str = Form("auto"),
-                   callback_url: str | None = Form(None), audio_path: str | None = Form(None)):
+                   callback_url: str | None = Form(None), audio_path: str | None = Form(None),
+                   num_speakers: int | None = Form(None)):
         if callback_url and not callback_url.startswith(("http://", "https://")):
             raise HTTPException(422, "callback_url http:// ya da https:// ile başlamalı")
         job_id = uuid.uuid4().hex
@@ -65,12 +67,17 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             if file is not None:
                 path.unlink(missing_ok=True)
             raise HTTPException(400, "ses dosyası okunamadı (bozuk ya da desteklenmeyen biçim)")
-        try:
-            submit(AudioJob(job_id, str(path.resolve()), language, callback_url))
-        except UnsupportedLanguageError as e:
+        def reject(code, msg):
             if file is not None:
                 path.unlink(missing_ok=True)
-            raise HTTPException(422, str(e))
+            raise HTTPException(code, msg)
+
+        if info.duration > settings.max_audio_minutes * 60:
+            reject(413, f"ses {settings.max_audio_minutes:g} dakikadan uzun")
+        try:
+            submit(AudioJob(job_id, str(path.resolve()), language, callback_url, num_speakers))
+        except (UnsupportedLanguageError, ValueError) as e:
+            reject(422, str(e))
         return {"job_id": job_id, "status": JobStatus.QUEUED.value,
                 "duration": round(info.duration, 3), "language": language}
 

@@ -11,6 +11,7 @@ Kuyruklar:
     celery -A viet_asr.interface.worker worker -Q asr.tr -c 2 -n tr@%h
 -c (eşzamanlılık) x ONNX_THREADS <= çekirdek sayısı olmalı; yoksa süreçler
 birbirini yavaşlatır (2 çekirdekte 4 thread ile Whisper 2,3 kat yavaşladı).
+-c verilmezse çekirdek sayısından kendisi hesaplar (settings.concurrency).
 
 Güvenilirlik: acks_late + prefetch 1 -> worker iş ortasında ölürse iş kuyruğa
 geri döner, başka worker alır. Aynı iş iki kez gelirse RunTranscription
@@ -41,6 +42,11 @@ app.conf.update(
     task_default_queue="lid",
     broker_connection_retry_on_startup=True,
     task_ignore_result=True,            # sonuç PostgreSQL'de, Celery sonucuna gerek yok
+    # -c verilmezse: kullanılabilir çekirdek / ONNX_THREADS (CONCURRENCY ile ezilebilir)
+    worker_concurrency=settings.concurrency,
+    # süre sınırı: tek iş en fazla bu kadar sürebilir; aşarsa FAILED olur, worker kilitlenmez
+    task_soft_time_limit=settings.task_time_limit,
+    task_time_limit=settings.task_time_limit + 30,
 )
 
 DETECT = "viet_asr.detect_language"
@@ -64,7 +70,8 @@ _state: dict = {}
 
 def _config():
     return default_config(settings.models_dir, tuple(settings.languages), settings.models,
-                          settings.threads, settings.speakers, settings.hotwords)
+                          settings.threads, settings.speakers, settings.hotwords,
+                          settings.diarizer)
 
 
 def _store() -> PostgresJobStore:

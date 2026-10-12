@@ -84,12 +84,27 @@ class VadConfig:
 
 @dataclass(frozen=True)
 class DiarizerConfig:
+    """Konuşmacı ayrıştırma.
+
+    kind="cluster" (varsayılan): VAD parçaları -> pencere -> 3D-Speaker imzası -> kümeleme.
+    kind="pyannote": pyannote segmentation-3.0 + kümeleme (eski yol; kısa konuşma
+    sıralarında Vietnamca sesleri ayıramadı, bkz. cluster_diarizer.py).
+    """
+
+    kind: str = "cluster"
+    embedding_model: str = "models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
     segmentation_model: str = "models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
-    embedding_model: str = "models/wespeaker_en_voxceleb_resnet34_LM.onnx"
-    num_speakers: int = 2  # doktor + hasta; bilinmiyorsa -1 ve threshold kullanılır
-    cluster_threshold: float = 0.5
-    min_duration_on: float = 0.3
-    min_duration_off: float = 0.5
+    # konuşmacı sayısı: 0 = sesten bul (istekte verilirse o kullanılır)
+    num_speakers: int = 0
+    # kosinüs uzaklığı eşiği; sentetik testte 0,55-0,75 arası doğru, ortası seçildi
+    cluster_threshold: float = 0.65
+    # pencere 3 sn/kayma 1,5 sn: duraksamasız konuşmada %89; 1,5/0,75: %99-100 (12 Ekim)
+    window: float = 1.5          # sn: imza penceresi
+    hop: float = 0.75            # sn: pencere kayması (konuşmacı değişimi çözünürlüğü)
+    min_window: float = 0.5      # sn: bundan kısa parçadan imza çıkarılmaz
+    min_speaker_duration: float = 1.0  # sn: toplamı bundan az "konuşmacı" en yakına katılır
+    min_duration_on: float = 0.3   # yalnızca pyannote
+    min_duration_off: float = 0.5  # yalnızca pyannote
     num_threads: int = 2
 
 
