@@ -24,14 +24,18 @@ server = [
     "python-multipart",
     "redis>=5",
     "python-dotenv",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
     "psycopg[binary]>=3.1",
-    "psycopg-pool",
     "httpx",
 ]
 bench = ["jiwer", "datasets<4.0", "sentencepiece"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+viet_asr = ["infrastructure/db/migrations/script.py.mako"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -57,4 +61,4 @@ layers = [
 name = "Domain ve application model kütüphanesi bilmez"
 type = "forbidden"
 source_modules = ["viet_asr.domain", "viet_asr.application"]
-forbidden_modules = ["sherpa_onnx", "onnxruntime", "scipy", "soundfile", "soxr", "psycopg", "redis", "fastapi", "httpx"]
+forbidden_modules = ["sherpa_onnx", "onnxruntime", "scipy", "soundfile", "soxr", "psycopg", "redis", "fastapi", "httpx", "sqlalchemy", "alembic"]

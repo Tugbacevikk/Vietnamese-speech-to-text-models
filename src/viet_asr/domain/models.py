@@ -46,6 +46,8 @@ class AudioJob:
     language: str | None = None
     callback_url: str | None = None
     num_speakers: int | None = None  # biliniyorsa; None ise sesten bulunur
+    # entegre olan sistemin kendi kimliği; aynısı tekrar gelirse yeni iş açılmaz
+    external_id: str | None = None
 
 
 @dataclass(frozen=True)

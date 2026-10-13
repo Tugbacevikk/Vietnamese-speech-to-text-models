@@ -66,7 +66,10 @@ class JobStore(ResultRepository, Protocol):
     """İş kayıtlarının tamamı. Gerçeklemesi (PostgreSQL) sonuç ile bildirim
     olayını (outbox) aynı işlemde yazar: sonuç kaydedildiyse bildirim kaybolmaz."""
 
-    def create(self, job: AudioJob) -> None: ...
+    def create(self, job: AudioJob) -> str:
+        """Kaydeder, geçerli job_id'yi döndürür. external_id daha önce kullanıldıysa
+        yeni iş açılmaz; var olan işin kimliği döner."""
+        ...
 
     def get(self, job_id: str) -> JobRecord | None: ...
 

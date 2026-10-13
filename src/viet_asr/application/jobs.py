@@ -29,7 +29,9 @@ class SubmitJob:
     def __init__(self, store: JobStore, queue: JobQueue, supported: list[str]):
         self.store, self.queue, self.supported = store, queue, [s.lower() for s in supported]
 
-    def __call__(self, job: AudioJob) -> None:
+    def __call__(self, job: AudioJob) -> str:
+        """İşi kaydedip kuyruğa koyar; geçerli job_id'yi döndürür. Aynı external_id ile
+        daha önce iş açıldıysa o işin kimliği döner ve kuyruğa tekrar girilmez."""
         lang = job.language.strip().lower() if job.language else None
         if lang in ("", "auto"):
             lang = None
@@ -39,12 +41,18 @@ class SubmitJob:
                 f"istenen dil '{lang}' desteklenmiyor; desteklenenler: {', '.join(self.supported)}")
         if job.num_speakers is not None and not 1 <= job.num_speakers <= 20:
             raise ValueError("num_speakers 1 ile 20 arasında olmalı")
-        job = AudioJob(job.job_id, job.audio_path, lang, job.callback_url, job.num_speakers)
-        self.store.create(job)
+        ext = (job.external_id or "").strip() or None
+        if ext is not None and len(ext) > 255:
+            raise ValueError("external_id en fazla 255 karakter olmalı")
+        job = AudioJob(job.job_id, job.audio_path, lang, job.callback_url, job.num_speakers, ext)
+        job_id = self.store.create(job)
+        if job_id != job.job_id:
+            return job_id  # tekrar gönderim: var olan iş
         if lang is None:
             self.queue.enqueue_detection(job.job_id)
         else:
             self.queue.enqueue_transcription(job.job_id, lang)
+        return job_id
 
 
 class DetectLanguage:

@@ -16,14 +16,13 @@ import argparse
 import logging
 import threading
 import time
-from pathlib import Path
 
 import uvicorn
 
 from viet_asr.application.jobs import DetectLanguage, RunTranscription
 from viet_asr.infrastructure.audio import SoundfileLoader
+from viet_asr.infrastructure.db import SqlAlchemyJobStore
 from viet_asr.infrastructure.sherpa_vad import SileroVad
-from viet_asr.infrastructure.sqlite_store import SqliteJobStore
 from viet_asr.infrastructure.thread_queue import ThreadJobQueue
 from viet_asr.infrastructure.webhook import OutboxDispatcher
 from viet_asr.interface.api import create_app
@@ -37,7 +36,7 @@ log = logging.getLogger(__name__)
 
 def build_local(settings: Settings, workers: int | None = None, warm_up: bool = True):
     """Yerel sistemi kurar; (app, store, queue, dispatcher) döndürür (testler de kullanır)."""
-    store = SqliteJobStore(Path(settings.data_dir) / "jobs.db")
+    store = SqlAlchemyJobStore(settings.local_db)
     store.migrate()
     cfg = default_config(settings.models_dir, tuple(settings.languages), settings.models,
                          settings.threads, settings.speakers, settings.hotwords, settings.diarizer)
@@ -59,7 +58,7 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
         log.info("yarım kalan iş yeniden kuyrukta: %s", rec.job.job_id)
 
     dispatcher = OutboxDispatcher(store, secret=settings.webhook_secret)
-    app = create_app(store, queue, settings, {"veritabani": lambda: store.counts()})
+    app = create_app(store, queue, settings, {"veritabani": store.ping})
     app.state.maintenance = build_maintenance(store, settings)
     return app, store, queue, dispatcher
 

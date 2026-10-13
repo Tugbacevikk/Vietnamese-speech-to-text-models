@@ -19,11 +19,16 @@ class MemoryJobStore:
         self.events: list[tuple[str, str]] = []  # (job_id, olay) — outbox yerine
         self._lock = threading.Lock()
 
-    def create(self, job: AudioJob) -> None:
+    def create(self, job: AudioJob) -> str:
         with self._lock:
             if job.job_id in self.jobs:
                 raise KeyError(f"iş zaten var: {job.job_id}")
+            if job.external_id:
+                for r in self.jobs.values():
+                    if r.job.external_id == job.external_id:
+                        return r.job.job_id
             self.jobs[job.job_id] = JobRecord(job, JobStatus.QUEUED, created_at=_now(), updated_at=_now())
+            return job.job_id
 
     def _update(self, job_id: str, **kw) -> JobRecord | None:
         with self._lock:

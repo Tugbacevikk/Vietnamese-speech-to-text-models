@@ -60,6 +60,16 @@ def test_dil_verilirse_o_dilin_kuyruguna(ctx):
     assert queue.sent == [("asr.tr", jid)]
 
 
+def test_ayni_external_id_tekrar_is_acmaz(ctx, tmp_path):
+    _, queue, c = ctx
+    first = post(c, {"external_id": "mesaj-42"})
+    assert first.status_code == 202
+    again = post(c, {"external_id": "mesaj-42"})
+    assert again.status_code == 200 and again.json()["job_id"] == first.json()["job_id"]
+    assert again.json()["tekrar"] is True and len(queue.sent) == 1   # kuyruğa bir kez girdi
+    assert len(list(tmp_path.glob("*.wav"))) == 1                    # ikinci dosya silindi
+
+
 def test_hatali_istekler(ctx):
     _, queue, c = ctx
     assert post(c, {"language": "en"}).status_code == 422          # desteklenmeyen dil

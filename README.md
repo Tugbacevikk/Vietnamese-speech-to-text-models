@@ -160,18 +160,20 @@ src/viet_asr/
   application/     iş kuralları: TranscribeAndDiarize, LanguageResolver, FusionEngine,
                    SubmitJob / DetectLanguage / RunTranscription, portlar (arayüzler)
   infrastructure/  gerçeklemeler: sherpa-onnx (VAD, ASR, diarization), Whisper dil tespiti,
-                   PostgreSQL deposu + outbox, webhook göndericisi, model kataloğu
-  interface/       dışarıya açılan kapılar: api.py (FastAPI), worker.py (Celery),
-                   dispatcher.py, cli.py; composition.py hepsini aynı şekilde kurar
+                   db/ (SQLAlchemy modelleri + Alembic göçleri + iş deposu ve outbox;
+                   SQLite ve PostgreSQL tek kod), Redis Streams kuyruğu, webhook göndericisi
+  interface/       dışarıya açılan kapılar: api.py (FastAPI), stream_worker.py, local_server.py,
+                   dispatcher.py, bakim.py, cli.py; composition.py hepsini aynı şekilde kurar
 benchmarks/        dogruluk_testi.py, turkce_dogruluk_testi.py, dil_tespiti_testi.py, hiz_testi.py
 scripts/           download_models.py, smoke_test.py
 tests/unit         modelsiz hızlı testler (API dahil)
 tests/integration  gerçek modellerle testler (modeller yoksa atlanır)
-tests/db           gerçek PostgreSQL ile depo + outbox + webhook (TEST_DATABASE_URL yoksa atlanır)
+tests/db           depo + outbox + webhook: SQLite'ta her zaman, PostgreSQL'de TEST_DATABASE_URL
+                   verilince; Redis Streams TEST_REDIS_URL verilince
 ```
 
 Katman kuralı `lint-imports` ile denetlenir: içteki katman dıştakini import edemez,
-domain ve application `sherpa_onnx`, `onnxruntime`, `psycopg`, `celery`, `fastapi` bilmez. Model değişirse yalnızca
+domain ve application `sherpa_onnx`, `onnxruntime`, `sqlalchemy`, `redis`, `fastapi` bilmez. Model değişirse yalnızca
 `infrastructure/` altındaki bir sınıf değişir.
 
 ## Test
@@ -180,6 +182,19 @@ domain ve application `sherpa_onnx`, `onnxruntime`, `psycopg`, `celery`, `fastap
 pytest            # birim + (modeller varsa) entegrasyon testleri
 TEST_DATABASE_URL=postgresql://postgres@localhost/asr_test pytest tests/db
 lint-imports      # katman kuralları
+```
+
+### Veritabanı şeması (code-first)
+
+Tablolar `src/viet_asr/infrastructure/db/models.py` içinde tanımlıdır; uygulama açılırken
+göçleri kendisi uygular (`alembic upgrade head`). Şema değişikliği:
+
+```bash
+# 1) models.py'yi değiştir  2) göç üret  3) gözden geçir  4) test et
+set DATABASE_URL=sqlite:///data/gelistirme.db
+alembic upgrade head
+alembic revision --autogenerate -m "aciklama"
+pytest tests/db   # test_sema_modellerle_ayni: göç unutulursa kırılır
 ```
 
 ## Ölçüm

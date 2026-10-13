@@ -21,7 +21,7 @@ import redis
 
 from viet_asr.application.jobs import DetectLanguage, RunTranscription
 from viet_asr.infrastructure.audio import SoundfileLoader
-from viet_asr.infrastructure.postgres import PostgresJobStore
+from viet_asr.infrastructure.db import SqlAlchemyJobStore
 from viet_asr.infrastructure.redis_streams import RedisStreamJobQueue, StreamConsumer
 from viet_asr.infrastructure.sherpa_vad import SileroVad
 from viet_asr.interface.composition import (
@@ -40,7 +40,10 @@ def _config(s: Settings):
 def build_consumer(queue: str, s: Settings, client: redis.Redis | None = None,
                    store=None) -> StreamConsumer:
     r = client or redis.Redis.from_url(s.redis_url)
-    store = store or PostgresJobStore(s.database_url, max_size=2)
+    if store is None:
+        store = SqlAlchemyJobStore(s.database_url, pool_size=2)
+        if store.dialect == "sqlite":  # birden çok süreç aynı SQLite dosyasına güvenle yazamaz
+            raise SystemExit("tam mod PostgreSQL ister (DATABASE_URL); tek bilgisayar için baslat.bat")
     cfg = _config(s)
     if queue == "lid":
         handler = DetectLanguage(store, RedisStreamJobQueue(r), SoundfileLoader(),

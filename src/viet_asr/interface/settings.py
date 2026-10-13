@@ -32,6 +32,9 @@ class Settings:
         os.environ.get("WEBHOOK_ALLOWED_HOSTS", "")))
     database_url: str = field(default_factory=lambda: os.environ.get(
         "DATABASE_URL", "postgresql://asr:asr@localhost:5432/asr"))
+    # yerel mod (baslat.bat) veritabanı; boşsa DATA_DIR içinde jobs.db (SQLite).
+    # PostgreSQL de verilebilir: LOCAL_DATABASE_URL=postgresql://...
+    local_database_url: str = field(default_factory=lambda: os.environ.get("LOCAL_DATABASE_URL", ""))
     redis_url: str = field(default_factory=lambda: os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
     models_dir: str = field(default_factory=lambda: os.environ.get("MODELS_DIR", "models"))
     data_dir: str = field(default_factory=lambda: os.environ.get("DATA_DIR", "data/uploads"))
@@ -69,6 +72,10 @@ class Settings:
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def local_db(self) -> str:
+        return self.local_database_url or f"sqlite:///{Path(self.data_dir) / 'jobs.db'}"
 
     @property
     def concurrency(self) -> int:

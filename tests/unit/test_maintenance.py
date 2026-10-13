@@ -4,7 +4,7 @@ from viet_asr.application.maintenance import Maintenance, latency_stats
 from viet_asr.domain import (
     AudioJob, JobStatus, LanguageDecision, LanguageSource, Transcript,
 )
-from viet_asr.infrastructure.sqlite_store import SqliteJobStore
+from viet_asr.infrastructure.db import SqlAlchemyJobStore
 from viet_asr.infrastructure.webhook import sign, verify_signature
 from viet_asr.interface.composition import safe_file_remover
 
@@ -12,7 +12,7 @@ from viet_asr.interface.composition import safe_file_remover
 def test_saklama_ve_askidaki_isler(tmp_path):
     up = tmp_path / "up"
     up.mkdir()
-    store = SqliteJobStore(tmp_path / "j.db")
+    store = SqlAlchemyJobStore(f"sqlite:///{tmp_path / 'j.db'}")
     store.migrate()
     disari = tmp_path / "kullanici.wav"
     disari.write_bytes(b"x")
