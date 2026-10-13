@@ -34,6 +34,56 @@ from viet_asr.domain import SpeakerSegment, VadSegment
 SR = 16000
 
 
+def nme_spectral(E: np.ndarray, max_k: int = 8, k: int | None = None,
+                 max_n: int = 600) -> np.ndarray:
+    """NME-SC (Park ve ark., 2019): eşik gerektirmeyen spektral kümeleme.
+
+    Benzerlik matrisinin her satırında en benzer p komşu tutulur; grafiğin Laplasyen
+    özdeğerlerindeki en büyük boşluk (eigengap) kişi sayısını verir. p, "boşluk ne kadar
+    belirgin" oranını en iyi yapan değer seçilerek otomatik bulunur. Kişi sayısı
+    biliniyorsa (k) doğrudan o kadar küme.
+    """
+    from scipy.cluster.vq import kmeans2
+    from scipy.linalg import eigh
+
+    n = len(E)
+    if n < 3:
+        return np.zeros(n, dtype=int)
+    # çok uzun seste matris büyümesin: ardışık pencereleri gruplayıp ortala
+    group = int(np.ceil(n / max_n))
+    if group > 1:
+        idx = np.arange(n) // group
+        G = np.stack([E[idx == g].mean(axis=0) for g in range(idx.max() + 1)])
+        G /= np.linalg.norm(G, axis=1, keepdims=True) + 1e-9
+        return nme_spectral(G, max_k, k, max_n)[idx]
+
+    S = np.clip(E @ E.T, -1.0, 1.0)
+    max_k = min(max_k, n - 1)
+    best = None
+    for p in sorted({max(2, int(n * f)) for f in (0.02, 0.04, 0.06, 0.08, 0.1, 0.15, 0.2, 0.25)}):
+        if p >= n:
+            continue
+        A = np.zeros_like(S)
+        nn = np.argsort(-S, axis=1)[:, :p]
+        A[np.arange(n)[:, None], nn] = 1.0
+        A = (A + A.T) / 2
+        L = np.diag(A.sum(axis=1)) - A
+        lam, vec = eigh(L)
+        gaps = np.diff(lam[: max_k + 1])
+        g = gaps.max() / (lam[-1] + 1e-10)
+        ratio = (p / n) / (g + 1e-10)
+        if best is None or ratio < best[0]:
+            best = (ratio, int(np.argmax(gaps)) + 1, vec)
+    _, k_est, vec = best
+    kk = k or k_est
+    if kk <= 1:
+        return np.zeros(n, dtype=int)
+    X = vec[:, :kk]
+    X = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-9)
+    _, lab = kmeans2(X, kk, minit="++", seed=0, iter=50)
+    return lab
+
+
 class EmbeddingClusterDiarizer:
     def __init__(self, cfg: DiarizerConfig):
         self.cfg = cfg
@@ -73,11 +123,16 @@ class EmbeddingClusterDiarizer:
     def _cluster(self, E: np.ndarray, durations: np.ndarray, k: int | None) -> np.ndarray:
         if len(E) == 1 or k == 1:
             return np.zeros(len(E), dtype=int)
-        Z = linkage(E, method="average", metric="cosine")
-        if k and k > 1:
-            lab = fcluster(Z, t=min(k, len(E)), criterion="maxclust") - 1
+        if self.cfg.method == "spectral":
+            lab = nme_spectral(E, k=k if k and k > 1 else None)
+            if not (k and k > 1):  # sayı verildiyse ona uyulur, birleştirme yapılmaz
+                lab = self._merge_close(E, lab)
         else:
-            lab = fcluster(Z, t=self.cfg.cluster_threshold, criterion="distance") - 1
+            Z = linkage(E, method="average", metric="cosine")
+            if k and k > 1:
+                lab = fcluster(Z, t=min(k, len(E)), criterion="maxclust") - 1
+            else:
+                lab = fcluster(Z, t=self.cfg.cluster_threshold, criterion="distance") - 1
         # toplam süresi çok kısa kümeleri (gürültü, öksürük) en yakın büyük kümeye kat
         tot = np.bincount(lab, weights=durations)
         if k and k > 1:
@@ -118,6 +173,22 @@ class EmbeddingClusterDiarizer:
             else:
                 out.append(SpeakerSegment(name, a, b))
         return out
+
+    def _merge_close(self, E: np.ndarray, lab: np.ndarray) -> np.ndarray:
+        """Merkezleri merge_distance'tan yakın kümeleri birleştir (aynı kişinin bölünmesi)."""
+        lab = np.unique(lab, return_inverse=True)[1]
+        while True:
+            ks = np.unique(lab)
+            if len(ks) < 2:
+                return lab
+            C = np.stack([E[lab == c].mean(axis=0) for c in ks])
+            C /= np.linalg.norm(C, axis=1, keepdims=True) + 1e-9
+            D = 1 - C @ C.T
+            np.fill_diagonal(D, 9)
+            i, j = np.unravel_index(D.argmin(), D.shape)
+            if D[i, j] >= self.cfg.merge_distance:
+                return np.unique(lab, return_inverse=True)[1]
+            lab[lab == ks[j]] = ks[i]
 
     def diarize(self, audio: np.ndarray, segments: list[VadSegment] | None = None,
                 num_speakers: int | None = None) -> list[SpeakerSegment]:

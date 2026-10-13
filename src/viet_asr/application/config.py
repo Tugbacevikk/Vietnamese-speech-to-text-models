@@ -109,6 +109,14 @@ class DiarizerConfig:
     """
 
     kind: str = "cluster"
+    # Kümeleme yöntemi: "spectral" (NME-SC: kişi sayısını özdeğer boşluğundan bulur) ya da
+    # "ahc" (sabit eşikle birleştirme). 13 Ekim, VietMed'den 9 gerçek görüşme diyaloğu:
+    #   ahc 0,70: kişi sayısı 4/9, DER %33,5 | ahc 0,55: 7/9, %17,1 ama tek kişilik 63/70
+    #   spectral (birleştirme 0,35): 7/9, DER %17,1, tek kişilik 66/70; sayı verilince %15,9
+    # Aynı kaydın iki kişisi arası uzaklık 0,38-0,58, telefondaki tek kişinin kendi içi ~0,3:
+    # tek bir sabit eşik ikisine birden uymuyor; spektral yöntem buna daha dayanıklı.
+    method: str = "spectral"
+    merge_distance: float = 0.35  # spectral: merkezleri bundan yakın kümeler aynı kişi
     embedding_model: str = "models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
     segmentation_model: str = "models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
     # konuşmacı sayısı: 0 = sesten bul (istekte verilirse o kullanılır)
