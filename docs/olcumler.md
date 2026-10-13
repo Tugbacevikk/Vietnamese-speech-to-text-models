@@ -92,9 +92,39 @@ Piper sesleri (vi ve tr, her dilde 3 ses), 1–3 kişi, 12 konuşma sırası.
 | parça imzası + kümeleme (yeni) | 14/14 | %100 | 0,037 |
 | aynısı, sıra değişiminde duraksama yok | 14/14 | %100 | 0,046 |
 
+## Türkçe kayıtlar — 22 dosya, 34 dk (13 Ekim 2026)
+
+Kullanıcının gönderdiği set: 16 podcast/diyalog parçası (1,7–2,2 dk, 16 kHz), 1 müşteri
+hizmetleri diyaloğu (1 dk), 2 telefon kaydı (8 kHz, 17 sn ve 63 sn), 3 adet 1 sn'lik test sesi
+(saf ton). **Doğru metin yok**: doğruluk yalnızca modellerin birbirine göre farkıyla ve gözle
+değerlendirildi. 2 çekirdekli bulut makinesi; dil verilmedi (sesten bulundu).
+
+| | Omnilingual-300M | Whisper-turbo | faster-whisper small (proje, önceki sistem) |
+|---|---|---|---|
+| Hız, ~2 dk'lık dosya (oran) | 0,26–0,29 | 0,58–0,83 | 0,5–0,7 (kendi bilgisayarında, önceki hatla) |
+| Hız, 17 sn telefon kaydı | 0,96 | 1,14 | 0,70 |
+| Dil tespiti | 19/19 tr | 4/4 tr | — |
+| 1 sn test sesi | düzeltmeden önce "ừ" uydurdu; düzeltmeden sonra boş | boş | "Altyazı M.K." uydurdu |
+
+- **Kısa ses:** 17 sn'lik telefon kaydında sürenin 5 sn'si dil tespiti. Whisper-tiny 8 kHz
+  telefon sesinde Türkçeye %36 verdi (desteklenen dillerin toplamı %50'nin altında), ikinci
+  kademe Whisper-small %98 ile buldu. Dil istekte verilirse bu süre sıfır.
+- **Uydurma:** VAD hiç konuşma bulmazsa artık ASR çalışmıyor (önceden Zipformer/Omnilingual'e
+  sesin tamamı veriliyordu).
+- **Kaçırılan konuşma:** önceki hat (faster-whisper small) bir podcast parçasında 6–30. sn
+  arasını tamamen atladı (181 kelime; Omnilingual 230, turbo 236).
+- **Modeller arası fark** (turbo'ya göre WER; turbo doğru kabul edilmez, yalnızca yön gösterir):
+  podcast Omnilingual %20 / small %26; müşteri hizmetleri Omnilingual %29 / small %18;
+  telefon kayıtlarında üçü de birbirinden %59–78 farklı → 8 kHz telefon sesinde hiçbirine
+  güvenilemez, doğru metinle ölçülmeli.
+- **Konuşmacı:** 18 dosyada 2 kişi bulundu (önceki hat aynı dosyalarda 1–4 arası). Müşteri
+  hizmetleri diyaloğunda iki ses çok benzer (merkez uzaklığı 0,345, birleştirme eşiği 0,35):
+  tek kişi çıktı; `num_speakers=2` verilince cümleler doğru ayrıldı. Eşiği 0,34'e indirmek bu
+  dosyayı düzeltiyor ama 17 sn'lik telefon kaydını 6 kişiye bölüyor; değiştirilmedi.
+
 ## Henüz yapılmadı
 
 - VIVOS test (tarafsız) — `benchmarks/dogruluk_testi.py`; bu ortamdan Hugging Face'e erişim yok.
-- Türkçe gerçek ses (FLEURS tr) — `benchmarks/turkce_dogruluk_testi.py`.
+- Türkçe doğru metinli ölçüm (FLEURS tr ya da elle yazılmış metin) — `benchmarks/turkce_dogruluk_testi.py`, `yerel_dogruluk_testi.py --dil tr`.
 - Gerçek, kesintisiz çekilmiş doktor-hasta görüşmesi (şimdiki diyaloglar kesitlerden kuruldu;
   üst üste konuşma yok).

@@ -49,7 +49,9 @@ class TranscribeAndDiarize:
         asr = self.engines[lang.code]
         # VAD müzik altındaki/gürültülü konuşmayı atıyor; uydurma yapmayan motorlara sesin tamamı
         full = self.chunker is not None and getattr(asr, "segmentation", "vad") == "full"
-        asr_segments = self.chunker.split(audio) if full else segments
+        # ...ama VAD hiç konuşma bulmadıysa (sessizlik, test sinyali, bip) ASR hiç çalışmaz:
+        # 13 Ekim, 1 sn'lik test sesleri: Zipformer "ừ", Whisper "Altyazı M.K." uyduruyordu.
+        asr_segments = (self.chunker.split(audio) if full else segments) if segments else []
         words = asr.transcribe(asr_segments) if asr_segments else []
         speakers = self.diarizer.diarize(audio, segments, job.num_speakers) if segments else []
         utterances = self.fusion.fuse(words, speakers)

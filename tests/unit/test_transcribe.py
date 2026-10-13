@@ -104,3 +104,30 @@ def test_hata_durumu_kaydedilir():
         uc.run(AudioJob("j4", "x.wav"))
     assert repo.history[-1][0] == JobStatus.FAILED and "model yok" in repo.history[-1][1]
     assert repo.saved is None
+
+
+def test_konusma_yoksa_asr_calismaz():
+    """Sessizlik / test sinyali: VAD konuşma bulmadıysa 'full' bölmeli motor da çalışmaz
+    (Zipformer 1 sn'lik bip sesinde "ừ", Whisper "Altyazı M.K." uyduruyordu)."""
+    class BosVad:
+        def split(self, audio):
+            return []
+
+    class Chunker:
+        def split(self, audio):
+            return [VadSegment(start=0.0, samples=audio)]
+
+    calls = []
+
+    class FullAsr(Asr):
+        segmentation = "full"
+
+        def transcribe(self, segs):
+            calls.append(segs)
+            return super().transcribe(segs)
+
+    engines = LazyAsrEngines({"vi": lambda: FullAsr("asr-vi", ["ừ"]), "tr": lambda: FullAsr("asr-tr", [])})
+    uc = TranscribeAndDiarize(Loader(), BosVad(), LanguageResolver(["vi", "tr"], Det({"vi": 1.0})),
+                              engines, Diar(), FusionEngine(), Repo(), chunker=Chunker())
+    t = uc.run(AudioJob("bos", "x.wav", language="tr"))
+    assert t.utterances == [] and calls == []
