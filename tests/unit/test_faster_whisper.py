@@ -1,6 +1,6 @@
 """faster-whisper adaptörü (Türkçe): gerçek model yerine sahte nesnelerle.
 
-Gerçek modelle doğrulama: tests/integration (models/faster-whisper-small varsa).
+Gerçek modelle doğrulama: tests/integration (models/faster-whisper-medium ya da -small varsa).
 """
 from types import SimpleNamespace as NS
 
@@ -92,7 +92,7 @@ def test_tekrar_suzgeci():
 def test_katalog_ve_profil():
     from viet_asr.infrastructure.catalog import DEFAULT_MODELS, language_profile
 
-    assert DEFAULT_MODELS["tr"] == "faster-whisper-small"
+    assert DEFAULT_MODELS["tr"] == "faster-whisper-medium"
     p = language_profile("tr", "models")
     assert p.segmentation == "vad" and p.asr_model.kind == "faster-whisper"
-    assert p.asr_model.path("model").replace("\\", "/").endswith("faster-whisper-small/model.bin")
+    assert p.asr_model.path("model").replace("\\", "/").endswith("faster-whisper-medium/model.bin")

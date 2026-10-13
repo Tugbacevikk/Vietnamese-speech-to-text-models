@@ -130,11 +130,13 @@ def test_turkce_omnilingual_gercek_zaman_damgasi():
     assert 4.0 <= words[0].start < words[1].start < words[2].start < 4.0 + len(a) / 16000
 
 
-FW = M / "faster-whisper-small"
+FW_MODELS = [m for m in ("faster-whisper-medium", "faster-whisper-small") if (M / m / "model.bin").exists()]
 
 
-@need(FW / "model.bin", LIDW / "tr-turkish.wav")
-def test_turkce_faster_whisper_kelime_zamani():
+@pytest.mark.skipif(not FW_MODELS, reason="faster-whisper modeli yok")
+@need(LIDW / "tr-turkish.wav")
+@pytest.mark.parametrize("fw", FW_MODELS or ["yok"])
+def test_turkce_faster_whisper_kelime_zamani(fw):
     """Fine-tuning projesindeki model: gerçek kelime zamanı, parça başına göre mutlak."""
     from viet_asr.domain import VadSegment
     from viet_asr.infrastructure.catalog import language_profile
@@ -142,7 +144,7 @@ def test_turkce_faster_whisper_kelime_zamani():
     from viet_asr.infrastructure.sherpa_asr import build_asr
 
     a = load(LIDW / "tr-turkish.wav")
-    asr = build_asr(language_profile("tr", M, "faster-whisper-small"), TrNormalizer(lowercase=True,
+    asr = build_asr(language_profile("tr", M, fw), TrNormalizer(lowercase=True,
                                                                                     strip_punct=True))
     for eng in (asr, _unbatched(asr)):
         words = eng.transcribe([VadSegment(4.0, a)])

@@ -32,16 +32,16 @@ ses ─► 16 kHz mono ─► VAD (Silero) ─► dil kararı ─► ASR (dile g
 | Dil | Varsayılan model | Seçenekler | Not |
 |---|---|---|---|
 | Vietnamca | Zipformer-68M int8 (Apache-2.0) | Zipformer-30M (CC BY-NC-ND) | Sesin tamamı en sessiz anlardan bölünür |
-| Türkçe | **faster-whisper small** (fine-tuning projesinin modeli, MIT) | Omnilingual-300M, Whisper-turbo | Yalnızca VAD parçaları (Whisper sessizlikte uyduruyor) |
+| Türkçe | **faster-whisper medium** (fine-tuning projesinin model ailesi, MIT) | faster-whisper small, Omnilingual-300M, Whisper-turbo | Yalnızca VAD parçaları (Whisper sessizlikte uyduruyor) |
 
 **Ölçümler** (ayrıntı: [docs/olcumler.md](docs/olcumler.md)):
 - Vietnamca, VietMed 50 dosya: WER %10,1, CER %7,3. Dil tespiti 85/85 doğru.
 - Konuşmacı ayırma, 9 gerçek görüşme: DER %10,2 (sayı istekte verilirse %5,2).
 - Hız: 3 dk'lık diyalog 2 çekirdekte 28 sn (oran 0,15). 1 dk ses ≈ 9 sn.
-- Türkçe faster-whisper small'un hızı bu ortamda ölçülemedi (model indirilemedi).
+- Türkçe faster-whisper medium'un hızı bu ortamda ölçülemedi (model indirilemedi).
   Kendi bilgisayarında `python benchmarks/kabul_testi.py --dil tr kayit.wav` ile ölç.
-  Oran 1'i aşarsa `.env` içinde `TR_MODEL=omnilingual-300m` yap (24 sentetik cümlede
-  CER %3,8; 60 sn diyalog 25 sn).
+  Oran 1'i aşarsa `.env` içinde önce `TR_MODEL=faster-whisper-small`, o da aşarsa
+  `TR_MODEL=omnilingual-300m` (Türkçe 2 dk'lık kayıtlarda oran 0,27, 2 çekirdek).
 
 ### Dil seçimi
 
@@ -168,7 +168,7 @@ CI (GitHub Actions): Linux (PostgreSQL + Redis ile), Windows (yerel mod), Rust (
 - [x] Faz 0 — hat, dil seçimi, konuşmacı sayısı otomatik, DER/cpWER ölçütleri, VietMed bölümlü test seti
 - [x] Faz 1 — API, Redis Streams, PostgreSQL/SQLite (code-first), outbox + imzalı webhook, güvenlik,
       saklama, `/metrics`, web arayüzü, kabul testi, CI, ADR'ler
-- [x] Türkçe — fine-tuning projesindeki faster-whisper small (kelime zamanlı)
+- [x] Türkçe — faster-whisper medium varsayılan, small seçenek (kelime zamanlı)
 - [x] Faz 2 hazırlığı — ince ayar hattı + Kapı 2 (eğitim GPU'lu makinede çalıştırılacak)
 - [ ] Kabul testi hedef bilgisayarda (özellikle Türkçe faster-whisper hızı) ve 4000 mesajlık yük testi
 - [ ] Türkçe gerçek kayıtlarla WER/DER ölçümü

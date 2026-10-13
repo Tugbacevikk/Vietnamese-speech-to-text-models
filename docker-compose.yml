@@ -20,7 +20,7 @@ x-app: &app
     REDIS_URL: redis://redis:6379/0
     LANGUAGES: vi,tr
     VI_MODEL: zipformer-68m
-    TR_MODEL: ${TR_MODEL:-faster-whisper-small}
+    TR_MODEL: ${TR_MODEL:-faster-whisper-medium}
     ONNX_THREADS: "2"
     NUM_SPEAKERS: "0"            # 0: sesten bul; istekte num_speakers verilebilir
     DIARIZER: cluster

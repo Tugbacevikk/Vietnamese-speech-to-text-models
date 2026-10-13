@@ -44,8 +44,13 @@ ASR_PACKS: dict[str, Pack] = {
         "whisper",
         {"encoder": "turbo-encoder.int8.onnx", "decoder": "turbo-decoder.int8.onnx",
          "tokens": "turbo-tokens.txt"}),
-    # Fine-tuning projesindeki Türkçe model (WHISPER_MODEL_SIZE=small), CTranslate2 int8.
-    # Gerçek kelime zamanı verir (sherpa-onnx Whisper vermiyor).
+    # Fine-tuning projesindeki Türkçe model ailesi, CTranslate2 int8. Gerçek kelime zamanı verir
+    # (sherpa-onnx Whisper vermiyor). Varsayılan medium (13 Ekim kararı); small daha hızlı seçenek.
+    "faster-whisper-medium": Pack(
+        "", "faster-whisper-medium", "MIT", "faster-whisper",
+        {"model": "model.bin", "config": "config.json", "tokenizer": "tokenizer.json",
+         "vocabulary": "vocabulary.txt"},
+        hf_repo="Systran/faster-whisper-medium"),
     "faster-whisper-small": Pack(
         "", "faster-whisper-small", "MIT", "faster-whisper",
         {"model": "model.bin", "config": "config.json", "tokenizer": "tokenizer.json",
@@ -98,13 +103,15 @@ AUX_PACKS: dict[str, Pack] = {
 #   gerçek zaman damgası veriyor, ama "varmı", "birkan" gibi bitişik yazım
 #   hataları ve noktalamasız küçük harf çıktı var.
 #   -> hız hedefini (1 dk ses <= 1 dk) karşılayan omnilingual-300m.
-# Türkçe varsayılanı fine-tuning projesindeki faster-whisper small (13 Ekim kararı: proje
-# modeli ve kelime zamanı). Bu ortamda indirilemediği için hızı henüz ÖLÇÜLMEDİ:
-#   python benchmarks/kabul_testi.py --dil tr ses.wav   (1 dk ses <= 1 dk mı?)
-# oran 1'i aşarsa TR_MODEL=omnilingual-300m ile eski varsayılana dönülür.
-DEFAULT_MODELS = {"vi": "zipformer-68m", "tr": "faster-whisper-small"}
+# Türkçe varsayılanı faster-whisper medium (13 Ekim, kullanıcı kararı). Bu ortamda indirilemediği
+# için hızı ÖLÇÜLMEDİ. CPU'da small'dan ~2-3 kat yavaş olması beklenir; önceki hatta small,
+# kullanıcının bilgisayarında oran 0,5-0,7 verdi. Ölçüm:
+#   python benchmarks/kabul_testi.py --dil tr kayit.wav   (1 dk ses <= 1 dk mı?)
+# Oran 1'i aşarsa sırasıyla: TR_MODEL=faster-whisper-small, sonra omnilingual-300m.
+DEFAULT_MODELS = {"vi": "zipformer-68m", "tr": "faster-whisper-medium"}
 MODEL_CHOICES = {"vi": ["zipformer-68m", "zipformer-30m"],
-                 "tr": ["faster-whisper-small", "omnilingual-300m", "whisper-turbo"]}
+                 "tr": ["faster-whisper-medium", "faster-whisper-small", "omnilingual-300m",
+                        "whisper-turbo"]}
 
 # Whisper'ın sessizlik/gürültüde uydurduğu, gözlenmiş cümleler
 DROP_PHRASES = {"tr": ("İzlediğiniz için teşekkür ederim.",)}

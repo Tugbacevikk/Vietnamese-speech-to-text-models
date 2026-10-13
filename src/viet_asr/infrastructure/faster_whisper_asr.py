@@ -1,4 +1,4 @@
-"""Türkçe ASR: faster-whisper (CTranslate2), fine-tuning projesindeki model (small).
+"""Türkçe ASR: faster-whisper (CTranslate2), fine-tuning projesindeki model (varsayılan medium).
 
 Projedeki FasterWhisperAdapter'dan uyarlandı; düzeltilenler:
   1. Ayarlar transcribe() içinde genel Settings/ortam değişkeninden okunuyordu (gizli
@@ -13,7 +13,7 @@ Projedeki FasterWhisperAdapter'dan uyarlandı; düzeltilenler:
      ayrımı ve ASR aynı parçalara bakar, ses iki kez taranmaz.
   5. log_prob_threshold ve istem (initial_prompt): bkz. WhisperParams.
 
-Model klasörü (çevrimdışı): models/faster-whisper-small/{model.bin, config.json,
+Model klasörü (çevrimdışı): models/faster-whisper-medium/ (ya da -small)/{model.bin, config.json,
 tokenizer.json, vocabulary.txt}; scripts/download_models.py indirir.
 """
 from __future__ import annotations

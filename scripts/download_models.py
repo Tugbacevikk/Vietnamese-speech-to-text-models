@@ -1,6 +1,6 @@
 """Modelleri models/ klasörüne indirir, açar, bpe.vocab ve MANIFEST.json üretir.
 
-    python scripts/download_models.py                          # varsayılanlar: vi=zipformer-68m, tr=faster-whisper-small
+    python scripts/download_models.py                          # varsayılanlar: vi=zipformer-68m, tr=faster-whisper-medium
     python scripts/download_models.py --vi zipformer-30m --tr omnilingual-300m
     python scripts/download_models.py --vi all --tr all        # tüm adaylar (karşılaştırma için)
     python scripts/download_models.py --tr none                # yalnızca Vietnamca
