@@ -74,6 +74,11 @@ class JobStore(ResultRepository, Protocol):
 
     def get_transcript(self, job_id: str) -> Transcript | None: ...
 
+    def fail(self, job_id: str, error: str) -> None:
+        """Son karar: iş FAILED ve (callback varsa) 'job.failed' bildirimi tek işlemde.
+        set_status(FAILED) yalnızca kaydeder; tekrar denenecek ara hatalar bildirim üretmez."""
+        ...
+
 
 class JobQueue(Protocol):
     """İşi doğru kuyruğa koyar: dil belliyse o dilin ASR kuyruğu, değilse dil tespiti."""

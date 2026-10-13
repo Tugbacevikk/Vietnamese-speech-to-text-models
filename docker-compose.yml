@@ -11,7 +11,11 @@ x-app: &app
   build: .
   image: viet-asr:0.2.0
   restart: unless-stopped
+  env_file: [{path: .env, required: false}]
   environment: &env
+    APP_ENV: production
+    API_KEY: ${API_KEY:?API_KEY .env içinde tanımlanmalı}
+    WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
     DATABASE_URL: postgresql://asr:asr@postgres:5432/asr
     REDIS_URL: redis://redis:6379/0
     LANGUAGES: vi,tr
@@ -58,34 +62,32 @@ services:
 
   worker-lid:          # dil tespiti: hafif, 1 süreç çoğu zaman yeter (~0,25 sn/ses)
     <<: *app
-    command: ["celery", "-A", "viet_asr.interface.worker", "worker", "-Q", "lid",
-              "-n", "lid@%h", "--loglevel=INFO"]
+    command: ["python", "-m", "viet_asr.interface.stream_worker", "--kuyruk", "lid"]
     environment:
       <<: *env
-      WARMUP_LID: "1"
       CONCURRENCY: "1"
 
   worker-vi:           # Vietnamca: Zipformer ~0,5 GB/süreç
     <<: *app
-    command: ["celery", "-A", "viet_asr.interface.worker", "worker", "-Q", "asr.vi",
-              "-n", "vi@%h", "--loglevel=INFO"]
+    command: ["python", "-m", "viet_asr.interface.stream_worker", "--kuyruk", "vi"]
     environment:
       <<: *env
-      WARMUP_LANGS: vi
       CONCURRENCY: auto
 
   worker-tr:           # Türkçe: Omnilingual ~0,5 GB/süreç (Whisper turbo seçilirse ~1,6 GB)
     <<: *app
-    command: ["celery", "-A", "viet_asr.interface.worker", "worker", "-Q", "asr.tr",
-              "-n", "tr@%h", "--loglevel=INFO"]
+    command: ["python", "-m", "viet_asr.interface.stream_worker", "--kuyruk", "tr"]
     environment:
       <<: *env
-      WARMUP_LANGS: tr
       CONCURRENCY: "1"
 
-  dispatcher:          # outbox -> webhook
+  dispatcher:          # outbox -> webhook (WEBHOOK_SECRET varsa imzalı)
     <<: *app
     command: ["python", "-m", "viet_asr.interface.dispatcher"]
+
+  bakim:               # eski ses/sonuç silme, askıda kalan işler
+    <<: *app
+    command: ["python", "-m", "viet_asr.interface.bakim"]
 
 volumes:
   pgdata:

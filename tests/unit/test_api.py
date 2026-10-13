@@ -63,7 +63,7 @@ def test_dil_verilirse_o_dilin_kuyruguna(ctx):
 def test_hatali_istekler(ctx):
     _, queue, c = ctx
     assert post(c, {"language": "en"}).status_code == 422          # desteklenmeyen dil
-    assert post(c, name="a.m4a").status_code == 415                 # dosya türü
+    assert post(c, name="a.xyz").status_code == 415                 # dosya türü
     assert post(c, content=b"ses degil").status_code == 400          # bozuk dosya
     assert post(c, content=wav_bytes(40)).status_code == 413         # 1 MB sınırı
     assert post(c, {"callback_url": "ftp://x"}).status_code == 422
@@ -132,3 +132,64 @@ def test_konusmaci_sayisi_ve_sure_siniri(tmp_path):
     assert post(c, {"num_speakers": "0"}).status_code == 422
     assert post(c, content=wav_bytes(31)).status_code == 413   # 0,5 dakikadan uzun
     assert len(list(tmp_path.iterdir())) == 1                   # reddedilenlerin dosyası silindi
+
+
+def test_api_anahtari(tmp_path):
+    store, queue = MemoryJobStore(), Queue()
+    s = Settings(data_dir=str(tmp_path), languages=["vi", "tr"], api_key="gizli")
+    c = TestClient(create_app(store, queue, s))
+    assert post(c).status_code == 401
+    ok = c.post("/jobs", files={"file": ("a.wav", wav_bytes(), "audio/wav")},
+                headers={"X-API-Key": "gizli"})
+    assert ok.status_code == 202
+    assert c.get(f"/jobs/{ok.json()['job_id']}").status_code == 401
+    assert c.get(f"/jobs/{ok.json()['job_id']}", headers={"X-API-Key": "gizli"}).status_code == 200
+    assert c.get("/health").status_code == 200   # sağlık kontrolü anahtar istemez
+    with pytest.raises(RuntimeError):            # production'da anahtarsız açılmaz
+        create_app(store, queue, Settings(data_dir=str(tmp_path), app_env="production", api_key=""))
+
+
+def test_callback_dogrulama(tmp_path):
+    store, queue = MemoryJobStore(), Queue()
+    prod = Settings(data_dir=str(tmp_path), app_env="production", api_key="k", languages=["vi"])
+    c = TestClient(create_app(store, queue, prod))
+    h = {"X-API-Key": "k"}
+
+    def send(url):
+        return c.post("/jobs", files={"file": ("a.wav", wav_bytes(), "audio/wav")},
+                      data={"callback_url": url}, headers=h).status_code
+
+    assert send("http://127.0.0.1:9000/hook") == 422      # iç adres: SSRF
+    assert send("http://10.0.0.5/hook") == 422
+    allow = Settings(data_dir=str(tmp_path), app_env="production", api_key="k", languages=["vi"],
+                     webhook_allowed_hosts=["10.0.0.5"])
+    c2 = TestClient(create_app(store, queue, allow))
+    r = c2.post("/jobs", files={"file": ("a.wav", wav_bytes(), "audio/wav")},
+                data={"callback_url": "http://10.0.0.5/hook"}, headers=h)
+    assert r.status_code == 202                           # izin listesindeki iç ağ alıcısı
+    r = c2.post("/jobs", files={"file": ("a.wav", wav_bytes(), "audio/wav")},
+                data={"callback_url": "http://baska.local/hook"}, headers=h)
+    assert r.status_code == 422
+
+
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="ffmpeg yok")
+def test_m4a_ffmpeg_ile_okunur(tmp_path):
+    import subprocess
+
+    from viet_asr.infrastructure.audio import SoundfileLoader
+
+    wav, m4a = tmp_path / "a.wav", tmp_path / "a.m4a"
+    t = np.arange(16000 * 2) / 16000
+    sf.write(wav, (0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32), 16000)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(wav), str(m4a)], check=True)
+    a = SoundfileLoader().load(str(m4a))
+    assert abs(len(a) / 16000 - 2.0) < 0.1
+    store, queue = MemoryJobStore(), Queue()
+    c = TestClient(create_app(store, queue, Settings(data_dir=str(tmp_path / "up"), languages=["vi"])))
+    assert post(c, content=m4a.read_bytes(), name="kayit.m4a").status_code == 202
+
+
+def test_metrikler(ctx):
+    store, queue, c = ctx
+    m = c.get("/metrics").json()
+    assert m["gecikme"] == {"n": 0}

@@ -66,7 +66,9 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE INDEX IF NOT EXISTS outbox_pending_idx ON outbox (next_attempt_at) WHERE sent_at IS NULL;
 """
 
-_TERMINAL_EVENTS = {JobStatus.FAILED: "job.failed", JobStatus.REJECTED: "job.rejected"}
+# set_status ile anında bildirim üreten durum: ret kesindir, tekrar denenmez.
+# FAILED tekrar denenebilir; bildirimi yalnızca fail() (son deneme) üretir.
+_TERMINAL_EVENTS = {JobStatus.REJECTED: "job.rejected"}
 
 
 class PostgresJobStore:
@@ -96,6 +98,14 @@ class PostgresJobStore:
             if row and row["callback_url"] and status in _TERMINAL_EVENTS:
                 payload = {"job_id": job_id, "status": status.value, "error": error}
                 self._outbox(c, job_id, _TERMINAL_EVENTS[status], row["callback_url"], payload)
+
+    def fail(self, job_id: str, error: str) -> None:
+        with self.pool.connection() as c, c.transaction():
+            row = c.execute("UPDATE jobs SET status=%s, error=%s, updated_at=now() WHERE id=%s "
+                            "RETURNING callback_url", (JobStatus.FAILED.value, error, job_id)).fetchone()
+            if row and row["callback_url"]:
+                self._outbox(c, job_id, "job.failed", row["callback_url"],
+                             {"job_id": job_id, "status": JobStatus.FAILED.value, "error": error})
 
     def set_language(self, job_id: str, d: LanguageDecision) -> None:
         with self.pool.connection() as c:
@@ -175,6 +185,39 @@ class PostgresJobStore:
         with self.pool.connection() as c:
             c.execute("UPDATE outbox SET attempts=attempts+1, last_error=%s, "
                       "next_attempt_at=now() + %s WHERE id=%s", (error[:500], retry_in, outbox_id))
+
+    # --- bakım ve ölçüm ---
+    _DONE = ("done", "failed", "rejected")
+
+    def finished_with_audio_before(self, before) -> list[tuple[str, str]]:
+        with self.pool.connection() as c:
+            rows = c.execute("SELECT id, audio_path FROM jobs WHERE status = ANY(%s) "
+                             "AND updated_at < %s AND audio_path <> ''",
+                             (list(self._DONE), before)).fetchall()
+        return [(r["id"], r["audio_path"]) for r in rows]
+
+    def clear_audio(self, job_id: str) -> None:
+        with self.pool.connection() as c:
+            c.execute("UPDATE jobs SET audio_path='' WHERE id=%s", (job_id,))
+
+    def delete_finished_before(self, before) -> int:
+        with self.pool.connection() as c:
+            return c.execute("DELETE FROM jobs WHERE status = ANY(%s) AND updated_at < %s",
+                             (list(self._DONE), before)).rowcount
+
+    def stale_running(self, before) -> list[str]:
+        with self.pool.connection() as c:
+            rows = c.execute("SELECT id FROM jobs WHERE status=%s AND updated_at < %s",
+                             (JobStatus.RUNNING.value, before)).fetchall()
+        return [r["id"] for r in rows]
+
+    def recent_done(self, limit: int = 500) -> list[tuple[float, float]]:
+        """(ses süresi, istekten bitişe geçen süre) — son biten işler."""
+        with self.pool.connection() as c:
+            rows = c.execute("SELECT duration, EXTRACT(EPOCH FROM updated_at - created_at) AS lat "
+                             "FROM jobs WHERE status=%s ORDER BY updated_at DESC LIMIT %s",
+                             (JobStatus.DONE.value, limit)).fetchall()
+        return [(float(r["duration"] or 0), float(r["lat"])) for r in rows]
 
     def unfinished(self) -> list[JobRecord]:
         with self.pool.connection() as c:

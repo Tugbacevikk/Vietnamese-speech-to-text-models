@@ -22,7 +22,8 @@ server = [
     "fastapi",
     "uvicorn",
     "python-multipart",
-    "celery[redis]>=5.3",
+    "redis>=5",
+    "python-dotenv",
     "psycopg[binary]>=3.1",
     "psycopg-pool",
     "httpx",
@@ -56,4 +57,4 @@ layers = [
 name = "Domain ve application model kütüphanesi bilmez"
 type = "forbidden"
 source_modules = ["viet_asr.domain", "viet_asr.application"]
-forbidden_modules = ["sherpa_onnx", "onnxruntime", "scipy", "soundfile", "soxr", "psycopg", "celery", "fastapi", "httpx"]
+forbidden_modules = ["sherpa_onnx", "onnxruntime", "scipy", "soundfile", "soxr", "psycopg", "redis", "fastapi", "httpx"]

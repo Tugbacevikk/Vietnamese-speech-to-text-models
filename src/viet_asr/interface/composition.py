@@ -79,3 +79,90 @@ def build_pipeline(cfg: PipelineConfig, repo: ResultRepository,
 
 # geriye dönük ad (CLI ve testler)
 build = build_pipeline
+
+
+def model_files(cfg: PipelineConfig) -> list[Path]:
+    """Bu yapılandırmanın gerçekten kullandığı model dosyaları."""
+    files = [Path(cfg.vad.model), Path(cfg.diarizer.embedding_model)]
+    if cfg.diarizer.kind == "pyannote":
+        files.append(Path(cfg.diarizer.segmentation_model))
+    if cfg.lid is not None and len(cfg.languages) > 1:
+        files += [Path(p) for stage in cfg.lid.stages for p in stage]
+    for prof in cfg.languages.values():
+        files += [Path(prof.asr_model.path(role)) for role in prof.asr_model.files
+                  if role != "bpe_vocab" or prof.asr.hotwords_file]
+    return files
+
+
+def verify_models(models_dir: str | Path, files: list[Path]) -> list[str]:
+    """MANIFEST.json'daki sha256 ile karşılaştırır. Sorun listesi döndürür (boş = tamam).
+    İnternetsiz sunucuya taşınan modellerin bozulmadığını/değiştirilmediğini garanti eder."""
+    import hashlib
+    import json
+
+    md = Path(models_dir)
+    mpath = md / "MANIFEST.json"
+    if not mpath.exists():
+        return [f"{mpath} yok: scripts/download_models.py ile üretin"]
+    expected = {}
+    for pack in json.loads(mpath.read_text(encoding="utf-8")).values():
+        expected.update(pack.get("sha256", {}))
+    problems = []
+    for f in files:
+        if not f.exists():
+            problems.append(f"dosya yok: {f}")
+            continue
+        try:
+            rel = f.resolve().relative_to(md.resolve()).as_posix()
+        except ValueError:
+            continue  # models klasörü dışında (ör. ince ayarlı model): manifest kapsamaz
+        if rel not in expected:
+            if f.suffix == ".onnx":
+                problems.append(f"MANIFEST'te yok: {rel}")
+            continue
+        h = hashlib.sha256()
+        with f.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != expected[rel]:
+            problems.append(f"sha256 uyuşmuyor (dosya bozuk ya da değişmiş): {rel}")
+    return problems
+
+
+def verify_models_or_exit(settings) -> None:
+    import logging
+
+    if not settings.verify_models:
+        return
+    cfg = default_config(settings.models_dir, tuple(settings.languages), settings.models,
+                         settings.threads, settings.speakers, settings.hotwords, settings.diarizer)
+    problems = verify_models(settings.models_dir, model_files(cfg))
+    if problems:
+        raise SystemExit("Model doğrulaması başarısız (VERIFY_MODELS=0 ile atlanabilir):\n  "
+                         + "\n  ".join(problems))
+    logging.getLogger(__name__).info("modeller doğrulandı (sha256)")
+
+
+def safe_file_remover(data_dir: str | Path):
+    """Yalnızca yükleme klasörü içindeki dosyaları siler (ALLOW_LOCAL_PATHS ile verilen
+    kullanıcı dosyalarına asla dokunmaz)."""
+    root = Path(data_dir).resolve()
+
+    def remove(path: str) -> bool:
+        try:
+            p = Path(path).resolve()
+            if root not in p.parents:
+                return False
+            p.unlink(missing_ok=True)
+            return True
+        except OSError:
+            return False
+
+    return remove
+
+
+def build_maintenance(store, settings):
+    from viet_asr.application.maintenance import Maintenance
+
+    return Maintenance(store, safe_file_remover(settings.data_dir), settings.audio_retention_hours,
+                       settings.result_retention_days, settings.processing_stale_sec)

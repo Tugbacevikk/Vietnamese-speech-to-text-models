@@ -16,22 +16,31 @@ log = logging.getLogger(__name__)
 
 
 class ThreadJobQueue:
-    def __init__(self, asr_workers: int, lid_workers: int = 1):
+    def __init__(self, asr_workers: int, lid_workers: int = 1, max_attempts: int = 3):
         self._lid = ThreadPoolExecutor(lid_workers, thread_name_prefix="lid")
         self._asr = ThreadPoolExecutor(asr_workers, thread_name_prefix="asr")
         self._detect: Callable[[str], object] | None = None
         self._run: Callable[[str], object] | None = None
+        self._give_up: Callable[[str, str], None] = lambda job_id, err: None
+        self.max_attempts = max_attempts
 
-    def bind(self, detect: Callable[[str], object], run: Callable[[str], object]) -> None:
-        """İş akışı nesneleri kuyruğa ihtiyaç duyduğu için kurulumdan sonra bağlanır."""
+    def bind(self, detect: Callable[[str], object], run: Callable[[str], object],
+             give_up: Callable[[str, str], None] | None = None) -> None:
+        """İş akışı nesneleri kuyruğa ihtiyaç duyduğu için kurulumdan sonra bağlanır.
+        give_up(job_id, hata): son deneme de başarısız olunca (ör. store.fail)."""
         self._detect, self._run = detect, run
+        if give_up is not None:
+            self._give_up = give_up
 
-    @staticmethod
-    def _safe(fn, job_id):
-        try:
-            fn(job_id)
-        except Exception:  # durum zaten FAILED/REJECTED yazıldı; havuz ölmesin
-            log.exception("iş başarısız: %s", job_id)
+    def _safe(self, fn, job_id):
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                fn(job_id)
+                return
+            except Exception as e:  # havuz ölmesin; tekrar dene, sonra bırak
+                log.exception("iş hata verdi: %s (deneme %d/%d)", job_id, attempt, self.max_attempts)
+                err = f"{type(e).__name__}: {e}"
+        self._give_up(job_id, f"en fazla deneme ({self.max_attempts}) aşıldı; son hata: {err}")
 
     def enqueue_detection(self, job_id: str) -> None:
         self._lid.submit(self._safe, self._detect, job_id)

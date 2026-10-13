@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE INDEX IF NOT EXISTS outbox_pending_idx ON outbox (next_attempt_at) WHERE sent_at IS NULL;
 """
 
-_TERMINAL_EVENTS = {JobStatus.FAILED: "job.failed", JobStatus.REJECTED: "job.rejected"}
+# ret kesindir: anında bildirim. FAILED'in bildirimi yalnızca fail() ile (son deneme).
+_TERMINAL_EVENTS = {JobStatus.REJECTED: "job.rejected"}
 
 
 def _now() -> datetime:
@@ -99,6 +100,15 @@ class SqliteJobStore:
             if row and row["callback_url"] and status in _TERMINAL_EVENTS:
                 self._outbox(c, job_id, _TERMINAL_EVENTS[status], row["callback_url"],
                              {"job_id": job_id, "status": status.value, "error": error})
+
+    def fail(self, job_id: str, error: str) -> None:
+        with self._tx() as c:
+            c.execute("UPDATE jobs SET status=?, error=?, updated_at=? WHERE id=?",
+                      (JobStatus.FAILED.value, error, _iso(_now()), job_id))
+            row = c.execute("SELECT callback_url FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row and row["callback_url"]:
+                self._outbox(c, job_id, "job.failed", row["callback_url"],
+                             {"job_id": job_id, "status": JobStatus.FAILED.value, "error": error})
 
     def set_language(self, job_id: str, d: LanguageDecision) -> None:
         with self._tx() as c:
@@ -163,6 +173,40 @@ class SqliteJobStore:
             rows = self._conn.execute("SELECT * FROM jobs WHERE status IN (?, ?) ORDER BY created_at",
                                       (JobStatus.QUEUED.value, JobStatus.RUNNING.value)).fetchall()
         return [_record(r) for r in rows]
+
+    # --- bakım ve ölçüm ---
+    _DONE = ("done", "failed", "rejected")
+
+    def finished_with_audio_before(self, before: datetime) -> list[tuple[str, str]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT id, audio_path FROM jobs WHERE status IN (?,?,?) "
+                                      "AND updated_at < ? AND audio_path <> ''",
+                                      (*self._DONE, _iso(before))).fetchall()
+        return [(r["id"], r["audio_path"]) for r in rows]
+
+    def clear_audio(self, job_id: str) -> None:
+        with self._tx() as c:
+            c.execute("UPDATE jobs SET audio_path='' WHERE id=?", (job_id,))
+
+    def delete_finished_before(self, before: datetime) -> int:
+        with self._tx() as c:
+            return c.execute("DELETE FROM jobs WHERE status IN (?,?,?) AND updated_at < ?",
+                             (*self._DONE, _iso(before))).rowcount
+
+    def stale_running(self, before: datetime) -> list[str]:
+        with self._lock:
+            rows = self._conn.execute("SELECT id FROM jobs WHERE status=? AND updated_at < ?",
+                                      (JobStatus.RUNNING.value, _iso(before))).fetchall()
+        return [r["id"] for r in rows]
+
+    def recent_done(self, limit: int = 500) -> list[tuple[float, float]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT duration, created_at, updated_at FROM jobs WHERE status=? "
+                                      "ORDER BY updated_at DESC LIMIT ?",
+                                      (JobStatus.DONE.value, limit)).fetchall()
+        return [(float(r["duration"] or 0),
+                 (datetime.fromisoformat(r["updated_at"]) - datetime.fromisoformat(r["created_at"])
+                  ).total_seconds()) for r in rows]
 
     # --- outbox gönderici için ---
     def claim_outbox(self, limit: int, max_attempts: int, lease: timedelta) -> list[dict]:

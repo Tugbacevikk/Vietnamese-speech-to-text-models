@@ -12,7 +12,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     store = PostgresJobStore(Settings().database_url, max_size=1)
     store.migrate()
-    OutboxDispatcher(store).run_forever()
+    OutboxDispatcher(store, secret=Settings().webhook_secret).run_forever()
 
 
 if __name__ == "__main__":

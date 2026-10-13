@@ -21,12 +21,21 @@ from pathlib import Path
 import httpx
 
 received: dict[str, dict] = {}
+SECRET = ""
 
 
 class Hook(BaseHTTPRequestHandler):
     def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        received[self.headers["X-Job-Id"]] = {"event": self.headers["X-Event"], **body}
+        raw = self.rfile.read(int(self.headers["Content-Length"]))
+        body = json.loads(raw)
+        imza = "-"
+        if SECRET:
+            from viet_asr.infrastructure.webhook import verify_signature
+
+            ok = verify_signature(SECRET, self.headers.get("X-Timestamp", "0"), raw,
+                                  self.headers.get("X-Signature", ""))
+            imza = "geçerli" if ok else "GEÇERSİZ"
+        received[self.headers["X-Job-Id"]] = {"event": self.headers["X-Event"], "imza": imza, **body}
         self.send_response(200)
         self.end_headers()
 
@@ -42,14 +51,19 @@ def main():
     p.add_argument("--hook-host", default="localhost")
     p.add_argument("--hook-port", type=int, default=9009)
     p.add_argument("--timeout", type=float, default=600)
+    p.add_argument("--api-key", default=None, help="sunucuda API_KEY tanımlıysa")
+    p.add_argument("--secret", default=None, help="WEBHOOK_SECRET: verilirse imza doğrulanır")
     a = p.parse_args()
+    global SECRET
+    SECRET = a.secret or ""
 
     srv = HTTPServer(("0.0.0.0", a.hook_port), Hook)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     hook = f"http://{a.hook_host}:{a.hook_port}/hook"
 
     jobs = {}
-    with httpx.Client(base_url=a.api, timeout=60) as c:
+    headers = {"X-API-Key": a.api_key} if a.api_key else {}
+    with httpx.Client(base_url=a.api, timeout=60, headers=headers) as c:
         print("health:", c.get("/health").json())
         t0 = time.time()
         for f in a.files:
@@ -65,12 +79,14 @@ def main():
         for jid, f in jobs.items():
             body = c.get(f"/jobs/{jid}").json()
             hook_ev = received.get(jid, {}).get("event", "GELMEDİ")
+            hook_ev += f" (imza {received.get(jid, {}).get('imza', '-')})"
             lang = body.get("language") or {}
             print(f"\n{Path(f).name}: durum={body['status']} webhook={hook_ev} "
                   f"dil={lang.get('code')}({lang.get('source')}, {lang.get('confidence')}) "
                   f"hata={body.get('error')}")
             for u in (body.get("result") or {}).get("utterances", [])[:4]:
                 print(f"   [{u['start']:6.2f}-{u['end']:6.2f}] {u['speaker']}: {u['text']}")
+        print("\nmetrikler:", c.get("/metrics").json())
     print(f"\n{len(received)}/{len(jobs)} webhook, toplam {dt:.1f} sn")
     sys.exit(0 if len(received) == len(jobs) else 1)
 

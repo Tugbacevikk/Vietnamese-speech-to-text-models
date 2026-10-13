@@ -46,6 +46,7 @@ def test_ret_bildirimi_ve_bildirimsiz_is(store):
     store.set_status("r", JobStatus.REJECTED, "desteklenmeyen dil")
     store.create(AudioJob("f", "/b.wav"))
     store.set_status("f", JobStatus.FAILED, "bozuk")
+    store.fail("f", "bozuk")
     assert [(o["job_id"], o["event"]) for o in store.outbox_rows()] == [("r", "job.rejected")]
     assert store.counts() == {"rejected": 1, "failed": 1}
 
@@ -67,3 +68,54 @@ def test_webhook_gonderimi(store):
     assert ob["ok"]["sent_at"] and ob["bozuk"]["attempts"] == 1 and ob["bozuk"]["last_error"] == "HTTP 500"
     assert d.run_once() == 0  # bekleme süresi dolmadan tekrar yok
     assert store.claim_outbox(10, 8, timedelta(seconds=60)) == []
+
+
+def test_ara_hata_bildirim_uretmez_son_hata_uretir(store):
+    store.create(AudioJob("x", "/a.wav", None, "http://alici/hook"))
+    store.set_status("x", JobStatus.FAILED, "geçici hata")   # tekrar denenecek
+    assert store.outbox_rows() == []
+    store.fail("x", "en fazla deneme aşıldı")
+    ob = store.outbox_rows()
+    assert [(o["job_id"], o["event"]) for o in ob] == [("x", "job.failed")]
+    assert store.get("x").status == JobStatus.FAILED
+
+
+def test_thread_kuyrugu_tekrar_dener_sonra_birakir(store):
+    from viet_asr.infrastructure.thread_queue import ThreadJobQueue
+
+    calls, given = [], []
+
+    def flaky(job_id):
+        calls.append(job_id)
+        if len(calls) < 2:
+            raise RuntimeError("geçici")
+
+    q = ThreadJobQueue(asr_workers=1, max_attempts=3)
+    q.bind(detect=lambda j: None, run=flaky, give_up=lambda j, e: given.append(j))
+    q.enqueue_transcription("a", "vi")
+    q.shutdown()
+    assert calls == ["a", "a"] and given == []          # 2. denemede başardı
+
+    calls.clear()
+    q = ThreadJobQueue(asr_workers=1, max_attempts=2)
+    q.bind(detect=lambda j: None, run=lambda j: (_ for _ in ()).throw(RuntimeError("kalıcı")),
+           give_up=lambda j, e: given.append((j, e)))
+    q.enqueue_transcription("b", "vi")
+    q.shutdown()
+    assert given and given[0][0] == "b" and "kalıcı" in given[0][1]
+
+
+def test_imzali_webhook(store):
+    from viet_asr.infrastructure.webhook import verify_signature
+
+    store.create(AudioJob("s", "/a.wav", None, "http://alici/ok"))
+    store.save(transcript("s"))
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append(verify_signature("gizli", req.headers["X-Timestamp"], req.content,
+                                     req.headers["X-Signature"]))
+        return httpx.Response(200)
+
+    OutboxDispatcher(store, httpx.Client(transport=httpx.MockTransport(handler)), secret="gizli").run_once()
+    assert seen == [True]

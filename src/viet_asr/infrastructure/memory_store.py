@@ -40,8 +40,13 @@ class MemoryJobStore:
 
     def set_status(self, job_id: str, status: JobStatus, error: str | None = None) -> None:
         r = self._update(job_id, status=status, error=error)
-        if r.job.callback_url and status in (JobStatus.FAILED, JobStatus.REJECTED):
-            self.events.append((job_id, f"job.{status.value}"))
+        if r.job.callback_url and status == JobStatus.REJECTED:
+            self.events.append((job_id, "job.rejected"))
+
+    def fail(self, job_id: str, error: str) -> None:
+        r = self._update(job_id, status=JobStatus.FAILED, error=error)
+        if r.job.callback_url:
+            self.events.append((job_id, "job.failed"))
 
     def set_language(self, job_id: str, decision: LanguageDecision) -> None:
         self._update(job_id, decision=decision)
@@ -60,3 +65,30 @@ class MemoryJobStore:
         for r in self.jobs.values():
             out[r.status.value] = out.get(r.status.value, 0) + 1
         return out
+
+    # --- bakım ve ölçüm ---
+    _DONE = (JobStatus.DONE, JobStatus.FAILED, JobStatus.REJECTED)
+
+    def finished_with_audio_before(self, before):
+        return [(j, r.job.audio_path) for j, r in self.jobs.items()
+                if r.status in self._DONE and r.updated_at < before and r.job.audio_path]
+
+    def clear_audio(self, job_id):
+        r = self.jobs[job_id]
+        self.jobs[job_id] = replace(r, job=replace(r.job, audio_path=""))
+
+    def delete_finished_before(self, before):
+        old = [j for j, r in self.jobs.items() if r.status in self._DONE and r.updated_at < before]
+        for j in old:
+            self.jobs.pop(j)
+            self.results.pop(j, None)
+        return len(old)
+
+    def stale_running(self, before):
+        return [j for j, r in self.jobs.items() if r.status == JobStatus.RUNNING and r.updated_at < before]
+
+    def recent_done(self, limit=500):
+        done = sorted((r for r in self.jobs.values() if r.status == JobStatus.DONE),
+                      key=lambda r: r.updated_at, reverse=True)[:limit]
+        return [(self.results[r.job.job_id].duration if r.job.job_id in self.results else 0.0,
+                 (r.updated_at - r.created_at).total_seconds()) for r in done]
