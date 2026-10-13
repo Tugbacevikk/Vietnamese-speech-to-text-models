@@ -127,7 +127,7 @@ class SherpaZipformerAsr(_SherpaAsr):
             encoder=model.path("encoder"), decoder=model.path("decoder"),
             joiner=model.path("joiner"), tokens=model.path("tokens"),
             num_threads=params.num_threads, decoding_method=params.decoding_method,
-            provider="cpu", **kw)
+            max_active_paths=params.max_active_paths, provider="cpu", **kw)
 
 
 # geriye dönük uyumluluk

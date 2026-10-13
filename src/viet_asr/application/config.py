@@ -37,6 +37,9 @@ class AsrParams:
     decoding_method: str = "modified_beam_search"  # yalnızca zipformer
     hotwords_file: str | None = None  # yalnızca zipformer; terimler BÜYÜK HARFLE
     hotwords_score: float = 1.5
+    # beam genişliği (modified_beam_search). Hotword çok parçalı terimlerde ancak geniş
+    # beam ile etkili: "XƠ VỮA" (V+Ữ+A) 4 yol/skor 3'te 0/5, 10 yol/skor 5'te 5/5 (13 Ekim).
+    max_active_paths: int = 4
     max_word_duration: float = 1.0  # tek kelime/hece en fazla bu kadar sürebilir (sn)
     # Parçalar en fazla bu kadar toplam sesten oluşan gruplar halinde birlikte çözülür.
     # Hepsini birden çözmek belleği patlatıyor: 92 sn'lik seste 27 parça -> 1,7 GB,
