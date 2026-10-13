@@ -18,10 +18,8 @@ if not exist ".env" (
     echo .env olusturuldu ^(ayarlari buradan degistirebilirsiniz^)
 )
 
-if not exist "models\MANIFEST.json" (
-    echo [1/2] Modeller indiriliyor ^(bir kez, ~1.5 GB^)...
-    %PY% scripts\download_models.py || goto :hata
-)
+echo [1/2] Modeller kontrol ediliyor ^(eksik varsa iner; ilk sefer ~2 GB^)...
+%PY% scripts\download_models.py || goto :hata
 
 echo [2/2] Ses Analizi ^(yerel mod^) baslatiliyor...
 start "Ses Analizi - Yerel" cmd /k "%PY% -m viet_asr.interface.local_server --host 127.0.0.1 --port 8000"

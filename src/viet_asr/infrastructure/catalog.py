@@ -21,6 +21,8 @@ class Pack:
     files: dict[str, str] = field(default_factory=dict)
     needs_bpe_vocab: bool = False
     keep: tuple[str, ...] = ()  # boş değilse açıldıktan sonra yalnızca bu dosyalar kalır
+    hf_repo: str | None = None  # sherpa-onnx yerine Hugging Face deposundan (url_path kullanılmaz)
+    hf_revision: str | None = None  # sabit sürüm (commit): aynı komut hep aynı dosyaları indirir
 
 
 ASR_PACKS: dict[str, Pack] = {
@@ -42,6 +44,13 @@ ASR_PACKS: dict[str, Pack] = {
         "whisper",
         {"encoder": "turbo-encoder.int8.onnx", "decoder": "turbo-decoder.int8.onnx",
          "tokens": "turbo-tokens.txt"}),
+    # Fine-tuning projesindeki Türkçe model (WHISPER_MODEL_SIZE=small), CTranslate2 int8.
+    # Gerçek kelime zamanı verir (sherpa-onnx Whisper vermiyor).
+    "faster-whisper-small": Pack(
+        "", "faster-whisper-small", "MIT", "faster-whisper",
+        {"model": "model.bin", "config": "config.json", "tokenizer": "tokenizer.json",
+         "vocabulary": "vocabulary.txt"},
+        hf_repo="Systran/faster-whisper-small"),
     "omnilingual-300m": Pack(
         "asr-models/sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-int8-2025-11-12.tar.bz2",
         "sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-int8-2025-11-12", "Apache-2.0",
@@ -88,11 +97,14 @@ AUX_PACKS: dict[str, Pack] = {
 #   maliyet parça sayısıyla artıyor ve kelime zamanı vermiyor. Omnilingual
 #   gerçek zaman damgası veriyor, ama "varmı", "birkan" gibi bitişik yazım
 #   hataları ve noktalamasız küçük harf çıktı var.
-#   -> varsayılan hız hedefini (1 dk ses <= 1 dk) karşılayan omnilingual-300m;
-#      doğruluk öncelikliyse whisper-turbo seçilebilir.
-DEFAULT_MODELS = {"vi": "zipformer-68m", "tr": "omnilingual-300m"}
+#   -> hız hedefini (1 dk ses <= 1 dk) karşılayan omnilingual-300m.
+# Türkçe varsayılanı fine-tuning projesindeki faster-whisper small (13 Ekim kararı: proje
+# modeli ve kelime zamanı). Bu ortamda indirilemediği için hızı henüz ÖLÇÜLMEDİ:
+#   python benchmarks/kabul_testi.py --dil tr ses.wav   (1 dk ses <= 1 dk mı?)
+# oran 1'i aşarsa TR_MODEL=omnilingual-300m ile eski varsayılana dönülür.
+DEFAULT_MODELS = {"vi": "zipformer-68m", "tr": "faster-whisper-small"}
 MODEL_CHOICES = {"vi": ["zipformer-68m", "zipformer-30m"],
-                 "tr": ["omnilingual-300m", "whisper-turbo"]}
+                 "tr": ["faster-whisper-small", "omnilingual-300m", "whisper-turbo"]}
 
 # Whisper'ın sessizlik/gürültüde uydurduğu, gözlenmiş cümleler
 DROP_PHRASES = {"tr": ("İzlediğiniz için teşekkür ederim.",)}
@@ -118,5 +130,5 @@ def language_profile(code: str, models_dir: str | Path, model: str | None = None
     params.setdefault("drop_phrases", DROP_PHRASES.get(code, ()))
     ref = model_ref(key, models_dir)
     # Whisper sessizlik/müzikte metin uyduruyor: ona yalnızca VAD parçaları
-    seg = "vad" if ref.kind == "whisper" else "full"
+    seg = "vad" if ref.kind in ("whisper", "faster-whisper") else "full"
     return LanguageProfile(code=code, asr_model=ref, asr=AsrParams(**params), segmentation=seg)

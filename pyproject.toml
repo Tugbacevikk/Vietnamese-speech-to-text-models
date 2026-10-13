@@ -14,6 +14,7 @@ dependencies = [
     "soxr",
     "onnxruntime",
     "scipy",
+    "faster-whisper>=1.1",  # Türkçe varsayılan model (CTranslate2)
 ]
 
 [project.optional-dependencies]
@@ -61,4 +62,4 @@ layers = [
 name = "Domain ve application model kütüphanesi bilmez"
 type = "forbidden"
 source_modules = ["viet_asr.domain", "viet_asr.application"]
-forbidden_modules = ["sherpa_onnx", "onnxruntime", "scipy", "soundfile", "soxr", "psycopg", "redis", "fastapi", "httpx", "sqlalchemy", "alembic"]
+forbidden_modules = ["sherpa_onnx", "onnxruntime", "scipy", "soundfile", "soxr", "psycopg", "redis", "fastapi", "httpx", "sqlalchemy", "alembic", "faster_whisper", "ctranslate2"]

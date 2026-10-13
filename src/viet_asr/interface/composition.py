@@ -117,7 +117,7 @@ def verify_models(models_dir: str | Path, files: list[Path]) -> list[str]:
         except ValueError:
             continue  # models klasörü dışında (ör. ince ayarlı model): manifest kapsamaz
         if rel not in expected:
-            if f.suffix == ".onnx":
+            if f.suffix in (".onnx", ".bin"):  # ağırlık dosyası doğrulanmadan çalışmaz
                 problems.append(f"MANIFEST'te yok: {rel}")
             continue
         h = hashlib.sha256()

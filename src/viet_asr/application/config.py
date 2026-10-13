@@ -32,6 +32,30 @@ class ModelRef:
 
 
 @dataclass(frozen=True)
+class WhisperParams:
+    """faster-whisper (CTranslate2) ayarları. Değerler fine-tuning projesindeki Türkçe
+    ayarlardan alındı; farklı olanların gerekçesi yanında."""
+
+    compute_type: str = "int8"        # CPU'da int8: bellek ve hız
+    beam_size: int = 5
+    batch_size: int = 8               # BatchedInferencePipeline: aynı anda çözülen parça
+    repetition_penalty: float = 1.2
+    no_repeat_ngram_size: int = 3
+    no_speech_threshold: float = 0.6
+    compression_ratio_threshold: float = 2.4
+    # Projede None idi. None iken "sessizlik olasılığı > 0,6" tek başına parçayı atar;
+    # -1,0 (kütüphane varsayılanı) ile model metinden eminse parça korunur -> sessiz
+    # konuşan hastanın cümlesi atılmaz.
+    log_prob_threshold: float | None = -1.0
+    # Projede "Türkçe ses kaydı." idi. Whisper istemi sessiz yerlerde aynen yazabiliyor;
+    # dil zaten verildiği için varsayılan kapalı (istenirse açılır, çıktıdan da süzülür).
+    initial_prompt: str | None = None
+    hotwords: str | None = None       # boşlukla ayrılmış terimler (ör. ilaç adları)
+    # aynı kelime art arda bu sayıdan fazla gelirse fazlası atılır (Whisper döngüsü)
+    max_repeat: int = 2
+
+
+@dataclass(frozen=True)
 class AsrParams:
     num_threads: int = 2
     decoding_method: str = "modified_beam_search"  # yalnızca zipformer
@@ -48,6 +72,7 @@ class AsrParams:
     batch_seconds: float = 10.0
     # Whisper sessizlik/gürültüde bu cümleleri uyduruyor; parça yalnızca bundan ibaretse atılır
     drop_phrases: tuple[str, ...] = ()
+    whisper: WhisperParams = field(default_factory=WhisperParams)  # yalnızca faster-whisper
 
 
 @dataclass(frozen=True)

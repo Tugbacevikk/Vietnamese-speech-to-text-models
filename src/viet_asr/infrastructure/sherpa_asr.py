@@ -179,4 +179,8 @@ def _build_asr(profile: LanguageProfile, normalizer: TextNormalizer):
         return SherpaWhisperAsr(profile.asr_model, profile.asr, normalizer, profile.code)
     if kind == "omnilingual-ctc":
         return SherpaOmnilingualAsr(profile.asr_model, profile.asr, normalizer)
+    if kind == "faster-whisper":  # isteğe bağlı bağımlılık: yalnızca seçilince yüklenir
+        from viet_asr.infrastructure.faster_whisper_asr import FasterWhisperAsr
+
+        return FasterWhisperAsr(profile.asr_model, profile.asr, normalizer, profile.code)
     raise ValueError(f"bilinmeyen model türü: {kind}")

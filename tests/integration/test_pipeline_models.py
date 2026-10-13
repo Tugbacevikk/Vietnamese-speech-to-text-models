@@ -125,9 +125,37 @@ def test_turkce_omnilingual_gercek_zaman_damgasi():
     from viet_asr.infrastructure.sherpa_asr import build_asr
 
     a = load(LIDW / "tr-turkish.wav")
-    words = build_asr(language_profile("tr", M), TrNormalizer()).transcribe([VadSegment(4.0, a)])
+    words = build_asr(language_profile("tr", M, "omnilingual-300m"), TrNormalizer()).transcribe([VadSegment(4.0, a)])
     assert [w.text for w in words] == ["hayal", "edebiliyorsan", "yapabilirsin"]
     assert 4.0 <= words[0].start < words[1].start < words[2].start < 4.0 + len(a) / 16000
+
+
+FW = M / "faster-whisper-small"
+
+
+@need(FW / "model.bin", LIDW / "tr-turkish.wav")
+def test_turkce_faster_whisper_kelime_zamani():
+    """Fine-tuning projesindeki model: gerçek kelime zamanı, parça başına göre mutlak."""
+    from viet_asr.domain import VadSegment
+    from viet_asr.infrastructure.catalog import language_profile
+    from viet_asr.infrastructure.normalizer import TrNormalizer
+    from viet_asr.infrastructure.sherpa_asr import build_asr
+
+    a = load(LIDW / "tr-turkish.wav")
+    asr = build_asr(language_profile("tr", M, "faster-whisper-small"), TrNormalizer(lowercase=True,
+                                                                                    strip_punct=True))
+    for eng in (asr, _unbatched(asr)):
+        words = eng.transcribe([VadSegment(4.0, a)])
+        assert " ".join(w.text for w in words) == "hayal edebiliyorsan yapabilirsin"
+        assert 4.0 <= words[0].start < words[1].start < words[2].start < 4.0 + len(a) / 16000
+
+
+def _unbatched(asr):
+    import copy
+
+    e = copy.copy(asr)
+    e.batched = None  # tek tek çözme yolu da aynı sonucu vermeli
+    return e
 
 
 @VI_OK
