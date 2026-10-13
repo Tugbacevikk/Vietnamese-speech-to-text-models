@@ -65,6 +65,15 @@ class MemoryJobStore:
     def get_transcript(self, job_id: str) -> Transcript | None:
         return self.results.get(job_id)
 
+    def recent_jobs(self, limit: int = 20) -> list[JobRecord]:
+        return sorted(self.jobs.values(), key=lambda r: r.created_at, reverse=True)[:limit]
+
+    def delete_job(self, job_id: str) -> str | None:
+        with self._lock:
+            r = self.jobs.pop(job_id, None)
+            self.results.pop(job_id, None)
+        return r.job.audio_path if r else None
+
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
         for r in self.jobs.values():

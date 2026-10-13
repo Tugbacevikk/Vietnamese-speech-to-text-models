@@ -36,7 +36,7 @@ bench = ["jiwer", "datasets<4.0", "sentencepiece"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-viet_asr = ["infrastructure/db/migrations/script.py.mako"]
+viet_asr = ["infrastructure/db/migrations/script.py.mako", "interface/static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

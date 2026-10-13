@@ -77,6 +77,15 @@ class JobStore(ResultRepository, Protocol):
 
     def get_transcript(self, job_id: str) -> Transcript | None: ...
 
+    def recent_jobs(self, limit: int = 20) -> list[JobRecord]:
+        """En yeni işler (arayüzdeki geçmiş listesi)."""
+        ...
+
+    def delete_job(self, job_id: str) -> str | None:
+        """İşi, sonucunu ve bekleyen bildirimlerini siler; ses dosyasının yolunu döndürür
+        (silinecekse çağıran siler). İş yoksa None."""
+        ...
+
     def fail(self, job_id: str, error: str) -> None:
         """Son karar: iş FAILED ve (callback varsa) 'job.failed' bildirimi tek işlemde.
         set_status(FAILED) yalnızca kaydeder; tekrar denenecek ara hatalar bildirim üretmez."""

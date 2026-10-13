@@ -30,6 +30,7 @@ def record_to_dict(r: JobRecord, transcript: Transcript | None = None) -> dict:
         "status": r.status.value,
         "requested_language": r.job.language,
         "num_speakers": r.job.num_speakers,
+        "external_id": r.job.external_id,
         "language": decision_to_dict(r.decision),
         "error": r.error,
         "created_at": r.created_at.isoformat() if r.created_at else None,

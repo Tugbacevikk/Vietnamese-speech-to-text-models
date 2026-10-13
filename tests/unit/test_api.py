@@ -203,3 +203,17 @@ def test_metrikler(ctx):
     store, queue, c = ctx
     m = c.get("/metrics").json()
     assert m["gecikme"] == {"n": 0}
+
+
+def test_arayuz_gecmis_ses_ve_silme(ctx, tmp_path):
+    store, queue, c = ctx
+    assert c.get("/").status_code == 200 and "Ses Analizi" in c.get("/").text
+    jid = post(c, {"language": "vi"}).json()["job_id"]
+    assert [j["job_id"] for j in c.get("/jobs").json()] == [jid]
+    audio = c.get(f"/jobs/{jid}/audio")
+    assert audio.status_code == 200 and audio.content[:4] == b"RIFF"
+    assert c.delete(f"/jobs/{jid}").status_code == 409          # kuyruktaki iş silinmez
+    store.set_status(jid, JobStatus.FAILED, "x")
+    assert c.delete(f"/jobs/{jid}").status_code == 200
+    assert c.get(f"/jobs/{jid}").status_code == 404 and list(tmp_path.glob("*.wav")) == []
+    assert c.get("/jobs/yok/audio").status_code == 404

@@ -207,6 +207,16 @@ class SqlAlchemyJobStore:
                               language=_decision(j),
                               utterances=[Utterance(r.speaker, r.start_s, r.end_s, r.text) for r in rows])
 
+    def recent_jobs(self, limit: int = 20) -> list[JobRecord]:
+        with self._session() as s:
+            rows = s.scalars(select(JobRow).order_by(JobRow.created_at.desc()).limit(limit)).all()
+            return [_record(r) for r in rows]
+
+    def delete_job(self, job_id: str) -> str | None:
+        with self._tx() as s:
+            path = s.scalar(delete(JobRow).where(JobRow.id == job_id).returning(JobRow.audio_path))
+        return path
+
     def counts(self) -> dict[str, int]:
         with self._session() as s:
             return dict(s.execute(select(JobRow.status, func.count()).group_by(JobRow.status)).all())

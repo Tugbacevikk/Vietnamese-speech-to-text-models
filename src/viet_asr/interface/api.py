@@ -7,7 +7,11 @@
                         external_id (isteğe bağlı: çağıran sistemin kendi kimliği; aynısı tekrar
                         gelirse yeni iş açılmaz, var olan iş 200 ile döner -> ağ hatasında
                         güvenle tekrar gönderilebilir)
+    GET  /jobs          son işler (?limit=20; arayüzdeki geçmiş)
     GET  /jobs/{id}     durum; bittiyse sonuç (konuşmacılı satırlar)
+    GET  /jobs/{id}/audio   yüklenen ses (saklama süresi dolmadıysa; arayüzde dinlemek için)
+    DELETE /jobs/{id}   bitmiş işi, sonucunu ve sesini siler (kuyruktaki/işlenen iş silinmez)
+    GET  /              web arayüzü (dosya yükle, dil seç, sonucu dinle/indir)
     GET  /health        veritabanı ve kuyruk erişimi, durum sayıları (anahtar istemez)
     GET  /metrics       gecikme ve "1 dk ses <= 1 dk" hedefi, kuyruk doluluğu
 
@@ -23,7 +27,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from viet_asr.application.jobs import SubmitJob
 from viet_asr.application.maintenance import latency_stats
@@ -31,11 +35,13 @@ from viet_asr.application.ports import JobQueue, JobStore
 from viet_asr.application.serialization import record_to_dict
 from viet_asr.domain import AudioJob, JobStatus, UnsupportedLanguageError
 from viet_asr.infrastructure.audio import FFMPEG_ONLY, AudioDecodeError, ffmpeg_bin, probe_duration
+from viet_asr.interface.composition import safe_file_remover
 from viet_asr.interface.security import api_key_dependency, callback_problem
 from viet_asr.interface.settings import Settings
 
 log = logging.getLogger(__name__)
 _ALLOWED = {".wav", ".flac", ".ogg", ".mp3", ".opus"} | FFMPEG_ONLY
+_UI = Path(__file__).parent / "static" / "index.html"
 
 
 def create_app(store: JobStore, queue: JobQueue, settings: Settings,
@@ -46,6 +52,7 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
     data_dir = Path(settings.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     max_bytes = settings.max_upload_mb * 1024 * 1024
+    remove_upload = safe_file_remover(data_dir)
 
     @api.post("/jobs", status_code=202, dependencies=[auth])
     def create_job(file: UploadFile | None = File(None), language: str = Form("auto"),
@@ -97,6 +104,38 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
                                  "tekrar": True}, status_code=200)
         return {"job_id": job_id, "status": JobStatus.QUEUED.value,
                 "duration": round(duration, 3), "language": language}
+
+    @api.get("/", include_in_schema=False)
+    def ui():
+        return FileResponse(_UI, media_type="text/html; charset=utf-8")
+
+    @api.get("/jobs", dependencies=[auth])
+    def list_jobs(limit: int = 20):
+        return [record_to_dict(r) for r in store.recent_jobs(max(1, min(limit, 200)))]
+
+    @api.get("/jobs/{job_id}/audio", dependencies=[auth])
+    def get_audio(job_id: str):
+        rec = store.get(job_id)
+        if rec is None:
+            raise HTTPException(404, "iş bulunamadı")
+        p = Path(rec.job.audio_path) if rec.job.audio_path else None
+        if p is None or not p.is_file():
+            raise HTTPException(410, "ses dosyası saklama süresi dolduğu için silinmiş")
+        if data_dir.resolve() not in p.resolve().parents and not settings.allow_local_paths:
+            raise HTTPException(403, "bu ses dosyası sunulamaz")
+        return FileResponse(p)
+
+    @api.delete("/jobs/{job_id}", dependencies=[auth])
+    def delete_job(job_id: str):
+        rec = store.get(job_id)
+        if rec is None:
+            raise HTTPException(404, "iş bulunamadı")
+        if rec.status in (JobStatus.QUEUED, JobStatus.RUNNING):
+            raise HTTPException(409, "iş henüz bitmedi; bitince silinebilir")
+        path = store.delete_job(job_id)
+        if path:
+            remove_upload(path)  # yalnızca yükleme klasöründekiler; kullanıcının kendi dosyası kalır
+        return {"job_id": job_id, "silindi": True}
 
     @api.get("/jobs/{job_id}", dependencies=[auth])
     def get_job(job_id: str):
