@@ -26,7 +26,7 @@ pytestmark = pytest.mark.models
 VI_OK = need(Z68 / "tokens.txt", M / "silero_vad.onnx")
 LID_OK = need(TINY / "tiny-encoder.int8.onnx", SMALL / "small-encoder.int8.onnx",
               LIDW / "tr-turkish.wav", Z68 / "test_wavs")
-DIAR = [M / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"]
+DIAR = [M / "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"]
 
 
 def load(p):

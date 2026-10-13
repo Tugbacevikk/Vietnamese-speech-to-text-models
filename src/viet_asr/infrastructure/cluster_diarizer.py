@@ -1,5 +1,9 @@
 """Konuşmacı ayrıştırma: VAD parçaları -> kısa pencereler -> ses imzası -> kümeleme.
 
+Gerçek ses (13 Ekim, VietMed'den 56 diyalog, CAM++ imzası, eşik 0,70): konuşmacı
+sayısı 47/56 doğru, cümlelerin %91,7'si doğru kişide; sayı istekte verilirse %89,9.
+Aşağıdaki sentetik ölçümler ilk ayardan (ERes2Net, eşik 0,65) kalmadır.
+
 Neden pyannote segmentation yerine bu? (12 Ekim ölçümü, 14 sentetik diyalog,
 1-3 konuşmacı, 1,8-2,8 sn'lik konuşma sıraları):
   - pyannote seg-3.0 + kümeleme: kısa sıralarla konuşan iki Vietnamca sesi

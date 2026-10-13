@@ -43,6 +43,45 @@ Her dosya tek konuşmacının birleştirilmiş kayıtları; doğru cevap çoğun
 | en az 1 sn | 34/50 | 27/28 |
 | en az 1,5 sn ve konuşmanın %8'i | **48/50** | **28/28** |
 
+## VietMed hasta örneği — 35 dosya, 54,1 dk (13 Ekim 2026)
+
+15 hasta, 13 doktor, 7 sunucu kaydı; VietMed_011 görüşmesinde sunucu, doktor ve hasta aynı kayıtta.
+Hastaların çoğu telefonla bağlanıyor (8 kHz, hat gürültüsü).
+
+### ASR
+
+| Model | Genel WER | Doktor | Sunucu | Hasta | Hasta (duraksama sesleri çıkarılınca) |
+|---|---|---|---|---|---|
+| 68M | %10,5 | %6,8 | %7,0 | %17,3 | %14,7 |
+| 30M | %10,0 | %7,3 | %6,7 | %15,5 | – |
+
+Hasta hatalarının bir kısmı modelin "ờ", "ơ", "à" gibi duraksama seslerini yazmasından:
+referansta hastaların bunları yazılmamış (en sık eklenen hece "ờ", 100 kez). Bunlar
+çıkarılınca da hasta %14,7: kendiliğinden konuşma ve yöresel ağız gerçekten daha zor.
+
+### Dil tespiti
+
+35/35 doğru, 1 dosya Whisper-small'a devredildi.
+
+### Konuşmacı ayrıştırma — gerçek seslerden kurulan diyaloglar
+
+`konusmaci_testi.py --kaynak tsv`: 4 gerçek konuşmacının (sunucu, doktor, iki hasta)
+8 sn'lik kesitlerinden 1-3 kişilik diyaloglar, duraksamalı ve duraksamasız, 2 tohum = 56 diyalog.
+
+| İmza modeli | Eşik | Sayı doğru | Cümle doğru kişide | Sayı verilirse cümle | RTF |
+|---|---|---|---|---|---|
+| ERes2Net base (önceki) | 0,65 | 16/56 | %80,8 | %86,2 | 0,049 |
+| ERes2Net base | 0,75 | 40/56 | %85,6 | %86,2 | 0,049 |
+| ERes2NetV2 | 0,70 | 40/56 | %87,1 | %87,2 | 0,103 |
+| TitaNet large | 0,80 | 38/56 | %85,0 | %84,5 | 0,055 |
+| **CAM++ common** | **0,70** | **47/56** | **%91,7** | %89,9 | **0,030** |
+
+CAM++ 0,70 ile tek kişilik dosyalarda: hasta 10/15, diğer roller 68/70 tek kişi buldu.
+Sentetik (temiz TTS) seste 22/28 (eşik 0,65'te 25/28): ayar gerçek sese göre yapıldı.
+**Sınır:** veri küçük (4 konuşmacı); eşik 0,65/0,70/0,75 arasında sonuç çok değişiyor,
+daha fazla gerçek diyalogla yeniden ayarlanmalı. Hasta seslerinde tek kişiyi iki kişi
+sanma hâlâ var (5/15).
+
 ## Sentetik diyaloglar — `benchmarks/konusmaci_testi.py`
 
 Piper sesleri (vi ve tr, her dilde 3 ses), 1–3 kişi, 12 konuşma sırası.
@@ -57,6 +96,5 @@ Piper sesleri (vi ve tr, her dilde 3 ses), 1–3 kişi, 12 konuşma sırası.
 
 - VIVOS test (tarafsız) — `benchmarks/dogruluk_testi.py`; bu ortamdan Hugging Face'e erişim yok.
 - Türkçe gerçek ses (FLEURS tr) — `benchmarks/turkce_dogruluk_testi.py`.
-- Gerçek iki kişilik diyalogda konuşmacı doğruluğu (`konusmaci_testi.py --kaynak tsv`;
-  bu örnekte 3+ dosyası olan konuşmacı az).
-- Hasta (Patient) kayıtları: örnekte çıkmadı.
+- Gerçek, kesintisiz çekilmiş doktor-hasta görüşmesi (şimdiki diyaloglar kesitlerden kuruldu;
+  üst üste konuşma yok).

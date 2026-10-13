@@ -38,7 +38,7 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
         diarizer=DiarizerConfig(
             kind=diarizer,
             segmentation_model=str(d / "sherpa-onnx-pyannote-segmentation-3-0/model.onnx"),
-            embedding_model=str(d / ("3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+            embedding_model=str(d / ("3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
                                      if diarizer == "cluster" else "wespeaker_en_voxceleb_resnet34_LM.onnx")),
             num_speakers=speakers, num_threads=threads))
 

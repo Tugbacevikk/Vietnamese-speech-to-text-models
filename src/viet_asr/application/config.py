@@ -103,18 +103,20 @@ class VadConfig:
 class DiarizerConfig:
     """Konuşmacı ayrıştırma.
 
-    kind="cluster" (varsayılan): VAD parçaları -> pencere -> 3D-Speaker imzası -> kümeleme.
+    kind="cluster" (varsayılan): VAD parçaları -> pencere -> CAM++ imzası -> kümeleme.
     kind="pyannote": pyannote segmentation-3.0 + kümeleme (eski yol; kısa konuşma
     sıralarında Vietnamca sesleri ayıramadı, bkz. cluster_diarizer.py).
     """
 
     kind: str = "cluster"
-    embedding_model: str = "models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+    embedding_model: str = "models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
     segmentation_model: str = "models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
     # konuşmacı sayısı: 0 = sesten bul (istekte verilirse o kullanılır)
     num_speakers: int = 0
-    # kosinüs uzaklığı eşiği; sentetik testte 0,55-0,75 arası doğru, ortası seçildi
-    cluster_threshold: float = 0.65
+    # kosinüs uzaklığı eşiği. Gerçek sesle ayarlandı (13 Ekim, CAM++, VietMed'den 56 diyalog,
+    # telefonla bağlanan hastalar dahil): 0,65 -> sayı 38/56 | 0,70 -> 47/56 | 0,75 -> 29/56.
+    # Temiz sentetik seste 0,65 daha iyi (25/28, 0,70'te 22/28); gerçek ses esas alındı.
+    cluster_threshold: float = 0.70
     # pencere 3 sn/kayma 1,5 sn: duraksamasız konuşmada %89; 1,5/0,75: %99-100 (12 Ekim)
     window: float = 1.5          # sn: imza penceresi
     hop: float = 0.75            # sn: pencere kayması (konuşmacı değişimi çözünürlüğü)

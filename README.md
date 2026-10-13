@@ -22,7 +22,7 @@ ses dosyası ─► 16 kHz mono ─► VAD (Silero) ─► konuşma parçaları 
 | VAD | Silero VAD | MIT | 0,006 |
 | ASR | Zipformer-68M int8 (2025-04-20) | Apache-2.0 | 0,026 |
 | ASR (aday) | Zipformer-30M int8 (2026-02-09) | CC BY-NC-ND 4.0 | 0,024–0,029 |
-| Konuşmacı ayrıştırma | VAD parçaları + 3D-Speaker ERes2Net imzası + kümeleme | 3D-Speaker (Apache-2.0 doğrulanacak) | ~0,04 |
+| Konuşmacı ayrıştırma | VAD parçaları + CAM++ imzası + kümeleme | 3D-Speaker (Apache-2.0 doğrulanacak) | ~0,03 |
 | (eski, seçenek) | pyannote segmentation-3.0 + WeSpeaker | MIT / WeSpeaker | 0,12–0,18 |
 
 RTF = işlem süresi / ses süresi. 0,03 → 1 dakikalık ses yaklaşık 2 saniyede metne çevrilir.
@@ -53,7 +53,9 @@ Omnilingual %3,8). Gerçek ölçüm: `benchmarks/turkce_dogruluk_testi.py` (FLEU
 
 Konuşmacı sayısı **sesten bulunur**; istekte `num_speakers` verilirse tam o sayı kullanılır.
 Yöntem: her konuşma parçası 1,5 sn'lik pencerelere bölünür, her pencereden ses imzası
-(3D-Speaker) çıkarılır, imzalar benzerliğe göre kümelenir. `benchmarks/konusmaci_testi.py`
+(CAM++) çıkarılır, imzalar benzerliğe göre kümelenir. **Gerçek seste** (VietMed'den 56
+diyalog, telefonla bağlanan hastalar dahil): konuşmacı sayısı 47/56 doğru, cümlelerin
+%91,7'si doğru kişide. Ayrıntı: [docs/olcumler.md](docs/olcumler.md). İlk ayar, sentetik seste: `benchmarks/konusmaci_testi.py`
 ile 14 sentetik diyalogda (1-3 kişi, vi + tr):
 
 | Yöntem | Konuşmacı sayısı doğru | Cümle doğru kişide | Hız (RTF) |

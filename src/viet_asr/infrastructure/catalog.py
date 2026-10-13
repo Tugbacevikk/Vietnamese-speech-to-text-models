@@ -58,10 +58,16 @@ AUX_PACKS: dict[str, Pack] = {
         "speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx",
         "wespeaker_en_voxceleb_resnet34_LM.onnx",
         "WeSpeaker (Apache-2.0 kod; VoxCeleb ile eğitilmiş ağırlık lisansı doğrulanacak)"),
-    "3dspeaker": Pack(
+    # Konuşmacı imzası. 13 Ekim, VietMed'den kurulan 56 gerçek diyalog (sayı / cümle / RTF):
+    #   CAM++ common      47/56  %91,7  0,030   <- seçilen
+    #   ERes2Net base     40/56  %85,6  0,049
+    #   ERes2NetV2        40/56  %87,1  0,103
+    #   TitaNet large     38/56  %85,0  0,055
+    #   ResNet293         CPU'da çok yavaş, ölçüm yarıda bırakıldı
+    "campplus": Pack(
         # 'recongition' yazım hatası sherpa-onnx'in kendi adresinde var, düzeltmeyin
-        "speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
-        "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+        "speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+        "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
         "3D-Speaker / ModelScope (Apache-2.0 olduğu doğrulanacak)"),
     "whisper-tiny-lid": Pack(
         "asr-models/sherpa-onnx-whisper-tiny.tar.bz2", "sherpa-onnx-whisper-tiny", "MIT",
