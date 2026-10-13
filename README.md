@@ -1,224 +1,176 @@
-# Ses → Metin + Konuşmacı Ayrıştırma (Vietnamca, Türkçe)
+# Ses → Metin + Konuşmacı Ayrıştırma (Türkçe, Vietnamca)
 
-Vietnamca ve Türkçe ses kayıtlarını metne çevirir ve her cümlenin hangi konuşmacıya
-(ör. doktor / hasta) ait olduğunu bulur. Dil istekte verilebilir ya da sesten tespit edilir. Yalnızca CPU'da, internetsiz
-(air-gapped) sunucuda çalışacak şekilde tasarlandı. PyTorch gerekmez;
-tüm modeller [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) ile çalışır.
+Türkçe ve Vietnamca ses kayıtlarını metne çevirir ve her cümlenin hangi konuşmacıya
+ait olduğunu bulur. Dil istekte seçilir (`tr`, `vi`) ya da sesten bulunur; konuşmacı sayısı
+istekte verilmezse sesten bulunur. Yalnızca CPU'da, internetsiz sunucuda çalışacak şekilde
+tasarlandı. Hedef: **1 dakikalık ses en geç 1 dakikada biter.**
 
-## Hat (pipeline)
+Mimari, fine-tuning projesindekiyle aynı fikirde (API → kuyruk → işçi → PostgreSQL → outbox →
+imzalı webhook); oradaki hatalar düzeltildi, kararlar [docs/adr](docs/adr) altında.
 
-```
-ses dosyası ─► 16 kHz mono ─► VAD (Silero) ─► konuşma parçaları ─► dil kararı ─► ASR (dile göre) ─► kelimeler + zaman
-                    │                                                                     │
-                    └──────────► Konuşmacı ayrıştırma (parça imzaları + kümeleme) ─► konuşmacı aralıkları
-                                                                                          │
-                                                  Birleştirme (Fusion) ◄──────────────────┘
-                                                          │
-                                       [0.07 - 3.71] speaker_00: xin chào bác sĩ ...
+## Hızlı başlangıç (Windows, tek bilgisayar)
+
+```bat
+baslat.bat        :: modelleri indirir (ilk sefer), sunucuyu açar
 ```
 
-| Adım | Model | Lisans | Hız (RTF, 2 çekirdek) |
+Tarayıcıda **http://127.0.0.1:8000**: dosya yükle, dili seç (Otomatik / Türkçe / Vietnamca),
+sonucu dinle, TXT/SRT/JSON/RTTM indir. API belgesi: http://127.0.0.1:8000/docs.
+Durdurmak: `durdur.bat`. Yerel modda Redis, PostgreSQL ya da Docker gerekmez (SQLite + iş
+parçacıkları). Çok makineli tam mod: `baslat_tam.bat` ya da `docker compose up`.
+
+## Hat
+
+```
+ses ─► 16 kHz mono ─► VAD (Silero) ─► dil kararı ─► ASR (dile göre) ─────────► kelimeler + zaman
+                         │                                                            │
+                         └─► konuşmacı ayrıştırma (CAM++ imzası + spektral kümeleme) ─┤
+                                                                                      ▼
+                                              birleştirme ─► [0.1 - 3.7] speaker_00: ...
+```
+
+| Dil | Varsayılan model | Seçenekler | Not |
 |---|---|---|---|
-| VAD | Silero VAD | MIT | 0,006 |
-| ASR | Zipformer-68M int8 (2025-04-20) | Apache-2.0 | 0,026 |
-| ASR (aday) | Zipformer-30M int8 (2026-02-09) | CC BY-NC-ND 4.0 | 0,024–0,029 |
-| Konuşmacı ayrıştırma | VAD parçaları + CAM++ imzası + kümeleme | 3D-Speaker (Apache-2.0 doğrulanacak) | ~0,03 |
-| (eski, seçenek) | pyannote segmentation-3.0 + WeSpeaker | MIT / WeSpeaker | 0,12–0,18 |
+| Vietnamca | Zipformer-68M int8 (Apache-2.0) | Zipformer-30M (CC BY-NC-ND) | Sesin tamamı en sessiz anlardan bölünür |
+| Türkçe | **faster-whisper small** (fine-tuning projesinin modeli, MIT) | Omnilingual-300M, Whisper-turbo | Yalnızca VAD parçaları (Whisper sessizlikte uyduruyor) |
 
-RTF = işlem süresi / ses süresi. 0,03 → 1 dakikalık ses yaklaşık 2 saniyede metne çevrilir.
+**Ölçümler** (ayrıntı: [docs/olcumler.md](docs/olcumler.md)):
+- Vietnamca, VietMed 50 dosya: WER %10,1, CER %7,3. Dil tespiti 85/85 doğru.
+- Konuşmacı ayırma, 9 gerçek görüşme: DER %10,2 (sayı istekte verilirse %5,2).
+- Hız: 3 dk'lık diyalog 2 çekirdekte 28 sn (oran 0,15). 1 dk ses ≈ 9 sn.
+- Türkçe faster-whisper small'un hızı bu ortamda ölçülemedi (model indirilemedi).
+  Kendi bilgisayarında `python benchmarks/kabul_testi.py --dil tr kayit.wav` ile ölç.
+  Oran 1'i aşarsa `.env` içinde `TR_MODEL=omnilingual-300m` yap (24 sentetik cümlede
+  CER %3,8; 60 sn diyalog 25 sn).
 
-**Gerçek veride (VietMed, 50 dosya, 77 dk):** Zipformer-68M hece hata oranı (WER) %10,1,
-harf hata oranı %7,3; dil tespiti 50/50. Ayrıntı ve eski/yeni karşılaştırmaları:
-[docs/olcumler.md](docs/olcumler.md). Zipformer'a sesin **tamamı** verilir (en sessiz
-anlardan bölünerek): VAD müzikli/gürültülü konuşmayı atıyordu ve WER %20,8 çıkıyordu.
-Hangi Zipformer'ın kullanılacağına `benchmarks/dogruluk_testi.py` sonucuna göre karar verilecek.
+### Dil seçimi
 
-## Dil seçimi
+İstekte `language=tr|vi` varsa tespit atlanır. `auto` ise önce Whisper-tiny, emin olamazsa
+Whisper-small; yalnızca desteklenen diller arasında. Desteklenen dillerin toplam olasılığı
+%50'nin altındaysa iş **reddedilir** (`rejected`, yanlış modelle anlamsız metin üretilmez);
+güven %80'in altındaysa sonuçta `uncertain: true`.
 
-İstekte dil verilirse (`--lang vi` / `--lang tr`) o kullanılır. Verilmezse dil sesten
-tespit edilir: önce Whisper-tiny (~0,25 sn), emin olamazsa Whisper-small (~1 sn).
-Tespit yalnızca desteklenen diller arasında yapılır; desteklenen dillerin toplam
-olasılığı %50'nin altındaysa iş **reddedilir** (`rejected`), yanlış modelle anlamsız
-metin üretilmez. Güven %80'in altındaysa sonuç "belirsiz" işaretlenir.
+### Konuşmacı ayrıştırma
 
-| Dil | Varsayılan model | Seçenek | 60 sn diyalog, tüm hat (2 çekirdek) |
-|---|---|---|---|
-| Vietnamca | Zipformer-68M | Zipformer-30M | 13–14 sn |
-| Türkçe | Omnilingual-300M (Meta, Apache-2.0) | Whisper large-v3-turbo (MIT) | 25 sn (turbo: 63 sn) |
+1,5 sn'lik pencerelerden CAM++ ses imzası → NME-SC spektral kümeleme (kişi sayısını kendisi
+bulur) → çok yakın kümeler birleştirilir → konuşmanın %8'inden azını kaplayan "kişi" (gülme,
+gürültü) en yakın kişiye katılır. `num_speakers` verilirse tam o sayı. Üst üste konuşma ayrılmaz.
 
-Türkçe doğruluk henüz yalnızca 24 sentetik cümlede ölçüldü (CER: turbo %3,0,
-Omnilingual %3,8). Gerçek ölçüm: `benchmarks/turkce_dogruluk_testi.py` (FLEURS tr).
+## API
 
-## Konuşmacı ayrıştırma
-
-Konuşmacı sayısı **sesten bulunur**; istekte `num_speakers` verilirse tam o sayı kullanılır.
-Yöntem: her konuşma parçası 1,5 sn'lik pencerelere bölünür, her pencereden ses imzası
-(CAM++) çıkarılır, imzalar benzerliğe göre kümelenir. **Gerçek seste** (VietMed'den 56
-diyalog, telefonla bağlanan hastalar dahil): konuşmacı sayısı 47/56 doğru, cümlelerin
-%91,7'si doğru kişide. Ayrıntı: [docs/olcumler.md](docs/olcumler.md). İlk ayar, sentetik seste: `benchmarks/konusmaci_testi.py`
-ile 14 sentetik diyalogda (1-3 kişi, vi + tr):
-
-| Yöntem | Konuşmacı sayısı doğru | Cümle doğru kişide | Hız (RTF) |
-|---|---|---|---|
-| kümeleme (varsayılan) | 13/14 | %99,4 | 0,038 |
-| pyannote (eski) | 8/14 | %81,0 | 0,121 |
-
-pyannote yolu kısa sıralarla konuşan iki Vietnamca sesi "tam 2 kişi" denince bile ayıramadı.
-Ölçüm sentetik seslerle; gerçek kayıtlarla doğrulanmalı (`--kaynak tsv`). Aynı anda konuşma ayrılmaz.
-
-## Sistem (servisler)
-
-```
-istemci ──POST /jobs──► api ──► PostgreSQL (iş kaydı)
-                         │
-                         └──► Redis kuyrukları
-                                ├─ lid     ─► worker-lid : dil tespiti ─► asr.<dil> kuyruğuna aktarır
-                                ├─ asr.vi  ─► worker-vi  : Zipformer + konuşmacı ayrıştırma
-                                └─ asr.tr  ─► worker-tr  : Omnilingual + konuşmacı ayrıştırma
-                                                   │
-                       sonuç + "bildirim gönder" satırı AYNI işlemde yazılır (outbox)
-                                                   │
-                         dispatcher ──► callback_url'e POST (başarısızsa artan aralıkla tekrar)
-```
-
-- **Dil başına kuyruk:** her ASR worker'ı yalnızca kendi dilinin modelini yükler; diller
-  birbirinden bağımsız ölçeklenir (ör. 4000 Vietnamca mesajlık patlamada yalnızca `worker-vi` artırılır).
-- **Dil verilmişse** iş doğrudan `asr.<dil>` kuyruğuna gider, tespit atlanır.
-- **Güvenilirlik:** worker iş ortasında ölürse iş kuyruğa geri döner (acks_late); aynı iş
-  iki kez gelirse bitmiş iş atlanır; webhook en az bir kez gider (`X-Delivery-Id` ile ayıklanır).
-
-### Docker ile çalıştırma
+API anahtarı tanımlıysa (`API_KEY`, üretimde zorunlu) istekler `X-API-Key` başlığı ister.
 
 ```bash
-python scripts/download_models.py          # ./models (yaklaşık 1,5 GB; bir kez)
-docker compose up -d --build
-curl http://localhost:8000/health
-```
-
-Çekirdek sayısı önceden bilinmek zorunda değil: `worker-vi` süreç sayısını kendisi hesaplar
-(kullanılabilir çekirdek / `ONNX_THREADS`; Docker'da `cpus:` sınırını dikkate alır).
-Elle vermek için `CONCURRENCY=4`. Toplam süreç x `ONNX_THREADS` çekirdek sayısını geçmemeli.
-
-Önemli ortam değişkenleri: `LANGUAGES` (vi,tr), `VI_MODEL`, `TR_MODEL`, `NUM_SPEAKERS`
-(0 = sesten bul), `DIARIZER` (cluster | pyannote), `ONNX_THREADS`, `CONCURRENCY`,
-`TASK_TIME_LIMIT` (sn, tek iş üst sınırı), `MAX_AUDIO_MINUTES`, `MAX_UPLOAD_MB`.
-
-### API
-
-```bash
-# dil otomatik, iş bitince webhook
-curl -F file=@kayit.wav -F callback_url=https://ornek.com/hook http://localhost:8000/jobs
+curl -H "X-API-Key: $K" -F file=@kayit.wav -F callback_url=https://ornek.com/hook http://localhost:8000/jobs
 # -> 202 {"job_id": "...", "status": "queued", "duration": 61.2, "language": "auto"}
-
-curl -F file=@kayit.wav -F language=tr http://localhost:8000/jobs   # dil verilir
-curl -F file=@kayit.wav -F num_speakers=1 http://localhost:8000/jobs # konuşmacı sayısı biliniyorsa
-curl http://localhost:8000/jobs/<job_id>                              # durum + sonuç
+curl -H "X-API-Key: $K" -F file=@kayit.wav -F language=tr -F num_speakers=2 http://localhost:8000/jobs
+curl -H "X-API-Key: $K" -F file=@kayit.wav -F external_id=mesaj-4711 http://localhost:8000/jobs
+curl -H "X-API-Key: $K" http://localhost:8000/jobs/<job_id>        # durum + sonuç
 ```
 
-Durumlar: `queued` → `running` → `done` | `failed` | `rejected` (desteklenmeyen dil).
-Hata kodları: 415 dosya türü (wav, flac, ogg, mp3, opus), 400 bozuk ses, 413 boyut ya da
-süre, 422 dil / num_speakers.
+| Uç | Ne yapar |
+|---|---|
+| `POST /jobs` | ses yükle; `language` (tr, vi, auto), `num_speakers` (1–20), `callback_url`, `external_id` |
+| `GET /jobs/{id}` | durum; bittiyse konuşmacılı satırlar |
+| `GET /jobs?limit=20` | son işler |
+| `GET /jobs/{id}/audio` | yüklenen ses (saklama süresi dolmadıysa) |
+| `DELETE /jobs/{id}` | bitmiş işi, sonucunu ve sesini siler |
+| `GET /health` | veritabanı ve kuyruk (anahtar istemez) |
+| `GET /metrics` | gecikme oranı (hedef p95 ≤ 1), kuyruk doluluğu |
+| `GET /` | web arayüzü |
 
-Webhook gövdesi (`X-Event: job.done`):
+- **`external_id`:** entegre olan sistemin kendi kimliği. Aynısı tekrar gelirse yeni iş açılmaz,
+  var olan iş `200` ile döner; ağ hatasında güvenle tekrar gönderilebilir.
+- **Durumlar:** `queued` → `running` → `done` | `failed` | `rejected`.
+- **Webhook** (`X-Event: job.done | job.failed | job.rejected`, `X-Delivery-Id`): en az bir kez
+  gider; `WEBHOOK_SECRET` varsa `X-Signature: sha256=HMAC(secret, "<X-Timestamp>.<gövde>")`.
+  Callback adresi `WEBHOOK_ALLOWED_HOSTS` ile sınırlanabilir (üretimde iç ağ adresleri kapalı).
 
 ```json
 {"status": "done", "job_id": "...", "duration": 61.2, "model": "zipformer-68m",
  "language": {"code": "vi", "confidence": 0.99, "source": "tespit", "uncertain": false},
- "speakers": 2,
- "text": "...",
+ "speakers": 2, "text": "...",
  "utterances": [{"speaker": "speaker_00", "start": 0.1, "end": 3.5, "text": "..."}]}
 ```
 
-`job.failed` ve `job.rejected` olaylarında gövde `{"job_id", "status", "error"}`.
+## Tam mod (çok süreç / çok makine)
 
-Uçtan uca deneme: `python scripts/smoke_test.py --api http://localhost:8000 a.wav b.wav`
-(dosyaları gönderir, webhook'ları dinler, sonuçları yazar).
+```
+istemci ─► api ─► PostgreSQL (iş) + Redis Streams: asr:lid ─► asr:vi | asr:tr ─► işçiler
+                      ▲                                                            │
+                      └──── sonuç + bildirim satırı AYNI işlemde (outbox) ◄─────────┘
+                                        dispatcher ─► imzalı webhook (artan aralıkla tekrar)
+```
 
-## Kurulum (geliştirme)
+- Dil başına kuyruk: yalnızca yoğun dilin işçisi artırılır (`stream_worker --kuyruk vi --surec N`).
+- Çöken işçinin işi 2 dk sonra başkasına geçer; 3 denemeden sonra `asr:dlq` ve `job.failed`.
+- Süreç sayısı otomatik: kullanılabilir çekirdek / `ONNX_THREADS` (Docker `cpus:` sınırı dahil).
+- `bakim` süreci: 24 saat sonra ses, 30 gün sonra kayıt silinir; askıda kalan iş `failed` olur.
+
+## Veritabanı (code-first)
+
+Şema `src/viet_asr/infrastructure/db/models.py` içinde (SQLAlchemy 2.0); değişiklikler Alembic
+göçüyle, uygulama açılışta kendisi uygular. SQLite (yerel) ve PostgreSQL (tam) aynı kod.
+Eski sürümün veritabanı ilk açılışta veri kaybı olmadan aktarılır.
 
 ```bash
-pip install -e ".[dev,bench,server]"
-python scripts/download_models.py     # models/ klasörüne indirir, bpe.vocab ve MANIFEST.json üretir
-```
-
-## Komut satırı (tek dosya, servis gerekmez)
-
-```bash
-python -m viet_asr.interface.cli kayit.wav                    # dil otomatik
-python -m viet_asr.interface.cli kayit.wav --lang tr --tr-model whisper-turbo --json sonuc.json
-```
-
-Hotword (özel terim) listesi: her satıra bir terim, **BÜYÜK HARFLE** yazılmalı.
-`--hotwords terimler.txt` ile verilir. `bpe.vocab` yoksa program hata verir
-(sherpa-onnx bu durumda hotword'leri sessizce yok sayıyor, bunu engellemek için).
-
-## Klasör yapısı (temiz mimari)
-
-```
-src/viet_asr/
-  domain/          veri tipleri (Word, SpeakerSegment, Utterance, Transcript, JobRecord). Dış kütüphane yok.
-  application/     iş kuralları: TranscribeAndDiarize, LanguageResolver, FusionEngine,
-                   SubmitJob / DetectLanguage / RunTranscription, portlar (arayüzler)
-  infrastructure/  gerçeklemeler: sherpa-onnx (VAD, ASR, diarization), Whisper dil tespiti,
-                   db/ (SQLAlchemy modelleri + Alembic göçleri + iş deposu ve outbox;
-                   SQLite ve PostgreSQL tek kod), Redis Streams kuyruğu, webhook göndericisi
-  interface/       dışarıya açılan kapılar: api.py (FastAPI), stream_worker.py, local_server.py,
-                   dispatcher.py, bakim.py, cli.py; composition.py hepsini aynı şekilde kurar
-benchmarks/        dogruluk_testi.py, turkce_dogruluk_testi.py, dil_tespiti_testi.py, hiz_testi.py
-scripts/           download_models.py, smoke_test.py
-tests/unit         modelsiz hızlı testler (API dahil)
-tests/integration  gerçek modellerle testler (modeller yoksa atlanır)
-tests/db           depo + outbox + webhook: SQLite'ta her zaman, PostgreSQL'de TEST_DATABASE_URL
-                   verilince; Redis Streams TEST_REDIS_URL verilince
-```
-
-Katman kuralı `lint-imports` ile denetlenir: içteki katman dıştakini import edemez,
-domain ve application `sherpa_onnx`, `onnxruntime`, `sqlalchemy`, `redis`, `fastapi` bilmez. Model değişirse yalnızca
-`infrastructure/` altındaki bir sınıf değişir.
-
-## Test
-
-```bash
-pytest            # birim + (modeller varsa) entegrasyon testleri
-TEST_DATABASE_URL=postgresql://postgres@localhost/asr_test pytest tests/db
-lint-imports      # katman kuralları
-```
-
-### Veritabanı şeması (code-first)
-
-Tablolar `src/viet_asr/infrastructure/db/models.py` içinde tanımlıdır; uygulama açılırken
-göçleri kendisi uygular (`alembic upgrade head`). Şema değişikliği:
-
-```bash
-# 1) models.py'yi değiştir  2) göç üret  3) gözden geçir  4) test et
+# models.py'yi değiştir -> göç üret -> gözden geçir -> test et
 set DATABASE_URL=sqlite:///data/gelistirme.db
 alembic upgrade head
 alembic revision --autogenerate -m "aciklama"
-pytest tests/db   # test_sema_modellerle_ayni: göç unutulursa kırılır
+pytest tests/db          # göç unutulursa test_sema_modellerle_ayni kırılır
 ```
 
-## Ölçüm
+## Vietnamca ince ayar (Faz 2)
+
+Zipformer-68M tıbbi veriyle WSL2 + GPU'da ince ayarlanır; çıkan model Kapı 2'yi geçerse
+`VI_MODEL=models/<klasör>` ile kullanılır. Adımlar: [finetune/README.md](finetune/README.md).
+
+## Rust'a geçiş
+
+Parça parça: Python sürümü başvuru kaynağı, Rust sürümü `native/` içinde, rastgele binlerce
+girdide birebir aynı sonuç şartı. İlk parça birleştirme (`pip install ./native`; kurulu değilse
+Python sürümü çalışır). Sıra ve kurallar: [docs/adr/0005-rust-gecisi.md](docs/adr/0005-rust-gecisi.md).
+
+## Geliştirme
 
 ```bash
-python benchmarks/dogruluk_testi.py   # VIVOS test + VietMed dev, iki Zipformer: WER, CER, RTF
-python benchmarks/hiz_testi.py        # üretim sunucusunda hız ve bellek
-python benchmarks/turkce_dogruluk_testi.py            # FLEURS tr: Omnilingual ve Whisper turbo
-python benchmarks/dil_tespiti_testi.py liste.tsv      # kendi seslerinde dil tespiti doğruluğu
-python benchmarks/konusmaci_testi.py [--bosluksuz]     # konuşmacı sayısı ve atama doğruluğu
-python benchmarks/yerel_dogruluk_testi.py liste.tsv    # kendi kayıtlarınla WER/CER (dosya, metin, rol)
+pip install -e ".[dev,bench,server]"
+python scripts/download_models.py      # models/ + MANIFEST.json (sha256; internetsiz sunucuya taşınır)
+pytest                                 # birim + (modeller varsa) entegrasyon
+TEST_DATABASE_URL=postgresql://postgres@localhost/asr_test TEST_REDIS_URL=redis://localhost:6379/15 pytest tests/db
+lint-imports                           # katman kuralları
+python benchmarks/kabul_testi.py a.wav b.wav --es-zamanli 4   # 1 dk ses <= 1 dk mı (bu donanımda)
 ```
 
-Seçim kuralı: VIVOS (tarafsız set) CER'i düşük olan model; fark 1 puandan azsa daha hızlı olan.
-Zipformer-30M, VietMed ve FLEURS ile eğitildiği için onun VietMed sonucu iyimser çıkar.
+Diğer ölçümler: `benchmarks/diyalog_testi.py` (DER, cpWER), `yerel_dogruluk_testi.py` (WER/CER),
+`dil_tespiti_testi.py`, `konusmaci_testi.py`, `turkce_dogruluk_testi.py`.
+VietMed'den bölüm bazında test seti: `scripts/vietmed_hazirla.py`.
+
+```
+src/viet_asr/
+  domain/          veri tipleri; dış kütüphane yok
+  application/     iş kuralları (TranscribeAndDiarize, LanguageResolver, FusionEngine, SubmitJob...)
+                   ve portlar; sherpa-onnx, SQLAlchemy, Redis, FastAPI bilmez (lint-imports)
+  infrastructure/  sherpa-onnx ve faster-whisper adaptörleri, kümeleme, db/ (modeller + göçler +
+                   depo), Redis Streams, iş parçacığı kuyruğu, webhook, Rust birleştirme sarmalayıcısı
+  interface/       api.py, local_server.py, stream_worker.py, dispatcher.py, bakim.py, cli.py,
+                   static/index.html; composition.py hepsini aynı şekilde kurar
+native/            Rust çekirdeği (PyO3)
+finetune/          Vietnamca ince ayar hattı ve Kapı 2
+benchmarks/ scripts/ tests/{unit,db,integration} docs/{adr,olcumler.md}
+```
+
+CI (GitHub Actions): Linux (PostgreSQL + Redis ile), Windows (yerel mod), Rust (eşlik testi).
 
 ## Yol haritası
 
-- [x] Faz 0.1 — iskelet, domain, portlar, PipelineConfig, katman denetimi
-- [x] Faz 0.2 — VAD, ASR, diarization adaptörleri + birleştirme motoru + testler
-- [x] Faz 0.3 — model indirme betiği (sha256 manifest), doğruluk ve hız testleri
-- [ ] Faz 0.4 — doğruluk testini çalıştır, 30M/68M seçimi, kabul eşiği
-- [x] Dil seçimi — istekte dil ya da otomatik tespit (tiny → small kademesi), Türkçe desteği
-- [x] Faz 1 — FastAPI, Celery + Redis (`lid`, `asr.vi`, `asr.tr`), PostgreSQL + outbox, webhook, Docker
-- [x] Konuşmacı sayısı otomatik (kümeleme), istekte num_speakers, çekirdeğe göre worker sayısı
-- [ ] Faz 1.1 — gerçek verilerle ölçüm (VietMed, FLEURS tr), 4000 mesajlık yük testi
-- [ ] Faz 2 — tıbbi hotword sözlüğü, noktalama geri getirme, DER/cpWER ölçümü
+- [x] Faz 0 — hat, dil seçimi, konuşmacı sayısı otomatik, DER/cpWER ölçütleri, VietMed bölümlü test seti
+- [x] Faz 1 — API, Redis Streams, PostgreSQL/SQLite (code-first), outbox + imzalı webhook, güvenlik,
+      saklama, `/metrics`, web arayüzü, kabul testi, CI, ADR'ler
+- [x] Türkçe — fine-tuning projesindeki faster-whisper small (kelime zamanlı)
+- [x] Faz 2 hazırlığı — ince ayar hattı + Kapı 2 (eğitim GPU'lu makinede çalıştırılacak)
+- [ ] Kabul testi hedef bilgisayarda (özellikle Türkçe faster-whisper hızı) ve 4000 mesajlık yük testi
+- [ ] Türkçe gerçek kayıtlarla WER/DER ölçümü
+- [ ] İnce ayarın çalıştırılması ve Kapı 2 kararı
+- [ ] Rust adım 2: `tokens_to_words`, `EnergyChunker`
