@@ -6,6 +6,8 @@ Değişken yoksa atlanır. Her test kendi şemasında çalışır, sonra silinir
 import os
 import uuid
 
+from datetime import timedelta
+
 import httpx
 import pytest
 
@@ -106,6 +108,7 @@ def test_webhook_gonderimi_basari_ve_tekrar(store):
 
     gelen.clear()
     assert d.run_once() == 0 and gelen == []  # bekleme süresi dolmadan tekrar denenmez
+    assert store.claim_outbox(10, 8, timedelta(seconds=60)) == []
     with store.pool.connection() as c:
         c.execute("UPDATE outbox SET next_attempt_at = now()")
     d.run_once()

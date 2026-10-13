@@ -155,22 +155,32 @@ class PostgresJobStore:
         return {r["status"]: r["n"] for r in rows}
 
     # --- outbox gönderici için ---
-    def claim_outbox(self, conn, limit: int, max_attempts: int) -> list[dict]:
-        """Gönderilecek satırları kilitler. SKIP LOCKED: birden çok gönderici çakışmaz."""
-        return conn.execute(
-            "SELECT * FROM outbox WHERE sent_at IS NULL AND next_attempt_at <= now() "
-            "AND attempts < %s ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED",
-            (max_attempts, limit)).fetchall()
+    def claim_outbox(self, limit: int, max_attempts: int, lease: timedelta) -> list[dict]:
+        """Gönderilecek satırları alır ve 'lease' süresince başka göndericilere görünmez yapar.
+        Kilit HTTP isteği boyunca TUTULMAZ (yavaş bir alıcı veritabanını bekletmesin);
+        gönderici çökerse satır lease bitince yeniden görünür. SKIP LOCKED: çakışma yok."""
+        with self.pool.connection() as c:
+            return c.execute(
+                "UPDATE outbox SET next_attempt_at = now() + %s WHERE id IN ("
+                " SELECT id FROM outbox WHERE sent_at IS NULL AND next_attempt_at <= now()"
+                " AND attempts < %s ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED) RETURNING *",
+                (lease, max_attempts, limit)).fetchall()
 
-    @staticmethod
-    def mark_sent(conn, outbox_id: int) -> None:
-        conn.execute("UPDATE outbox SET sent_at=now(), attempts=attempts+1, last_error=NULL "
-                     "WHERE id=%s", (outbox_id,))
+    def mark_sent(self, outbox_id: int) -> None:
+        with self.pool.connection() as c:
+            c.execute("UPDATE outbox SET sent_at=now(), attempts=attempts+1, last_error=NULL "
+                      "WHERE id=%s", (outbox_id,))
 
-    @staticmethod
-    def mark_failed(conn, outbox_id: int, error: str, retry_in: timedelta) -> None:
-        conn.execute("UPDATE outbox SET attempts=attempts+1, last_error=%s, "
-                     "next_attempt_at=now() + %s WHERE id=%s", (error[:500], retry_in, outbox_id))
+    def mark_failed(self, outbox_id: int, error: str, retry_in: timedelta) -> None:
+        with self.pool.connection() as c:
+            c.execute("UPDATE outbox SET attempts=attempts+1, last_error=%s, "
+                      "next_attempt_at=now() + %s WHERE id=%s", (error[:500], retry_in, outbox_id))
+
+    def unfinished(self) -> list[JobRecord]:
+        with self.pool.connection() as c:
+            rows = c.execute("SELECT * FROM jobs WHERE status IN (%s, %s) ORDER BY created_at",
+                             (JobStatus.QUEUED.value, JobStatus.RUNNING.value)).fetchall()
+        return [_record(r) for r in rows]
 
 
 def _decision(r: dict) -> LanguageDecision | None:
