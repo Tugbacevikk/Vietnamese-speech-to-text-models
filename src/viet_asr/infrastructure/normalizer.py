@@ -3,21 +3,28 @@
 Vietnamca (Zipformer): çıktı BÜYÜK HARF ve noktalamasız gelir -> NFC + küçük harf.
   NFC önemli: aynı aksanlı harfin iki farklı kodlanışı tek biçime iner, yoksa
   WER yapay olarak artar.
-Türkçe (Whisper): çıktı zaten büyük/küçük harf ve noktalama içerir -> korunur,
-  yalnızca NFC ve boşluk temizliği. Küçük harfe çevirmek gerekirse Türkçe
-  kuralı kullanılır (I -> ı, İ -> i); Python'un lower() bunu yanlış yapar.
+Türkçe (Whisper): çıktı büyük/küçük harf ve noktalama içerir. Sistem çıktısında
+  (normalizer_for) iki dil aynı biçimde olsun diye küçük harfe çevrilir ve noktalama
+  silinir (13 Ekim kararı: noktalama gerekmiyor, entegre sistem tek biçim alır).
+  Küçük harf Türkçe kuralıyla (I -> ı, İ -> i); Python'un lower() bunu yanlış yapar.
+  Kesme işareti kelime içindeyse kalır ("istanbul'da"), ondalık ayırıcı da ("3,5").
 """
 from __future__ import annotations
 
 import re
 import unicodedata
 
-_PUNCT = re.compile(r"[^\w\s]")
+# kelime içi kesme ('da) ve rakam arası nokta/virgül (3,5) korunur, diğer işaretler silinir
+_PUNCT = re.compile(r"(?<=\w)['’](?=\w)|(?<=\d)[.,](?=\d)|([^\w\s])")
+
+
+def _strip(text: str) -> str:
+    return _PUNCT.sub(lambda m: " " if m.group(1) else m.group(0).replace("’", "'"), text)
 
 
 def _clean(text: str, strip_punct: bool) -> str:
     if strip_punct:
-        text = _PUNCT.sub(" ", text)
+        text = _strip(text)
     return " ".join(text.split())
 
 
@@ -44,8 +51,8 @@ class TrNormalizer:
         return _clean(text, self.strip_punct)
 
 
-NORMALIZERS = {"vi": ViNormalizer, "tr": TrNormalizer}
-
-
 def normalizer_for(lang: str):
-    return NORMALIZERS.get(lang, TrNormalizer)()
+    """Sistem çıktısının biçimi: iki dilde de küçük harf, noktalamasız."""
+    if lang == "vi":
+        return ViNormalizer(strip_punct=True)
+    return TrNormalizer(lowercase=True, strip_punct=True)

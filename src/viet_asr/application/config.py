@@ -181,6 +181,10 @@ class FusionConfig:
     max_gap: float = 0.5
     # aynı konuşmacının arasında bu kadar sessizlik varsa yeni satır başlar (sn)
     new_utterance_gap: float = 1.5
+    # tek satır en fazla bu kadar sürer (sn); uzun konuşma en uzun duraklamadan bölünür.
+    # 13 Ekim arayüz denemesi: bir doktorun 92 sn'si tek satırdı (okuması ve altyazısı zor).
+    # 0 = bölme yok.
+    max_utterance: float = 25.0
 
 
 @dataclass(frozen=True)

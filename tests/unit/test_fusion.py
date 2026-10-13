@@ -56,3 +56,22 @@ def test_tek_konusmaci_varsa_tum_kelimeler_ona():
     w = [Y("a", 0.1, 0.3), Y("b", 10.0, 10.2)]
     assert eng(max_gap=0.5).assign(w, [S(A, 0, 1)]) == [A, A]
     assert eng().assign(w, []) == ["speaker_00", "speaker_00"]
+
+
+def test_uzun_satir_en_uzun_duraklamadan_bolunur():
+    # ~60 sn, kelimeler 0,5 sn arayla; iki yerde 1 sn'lik duraklama
+    ws, t = [], 0.0
+    while t < 60:
+        ws.append(Y("x", t, t + 0.4))
+        t += 1.4 if len(ws) in (37, 83) else 0.5   # 18. ve 41,9. sn'den sonra duraklama
+    utts = eng(max_utterance=25).fuse(ws, [S(A, 0, 61)])
+    assert [round(u.start, 1) for u in utts] == [0, 19.4, 43.3]   # iki duraklamadan
+    assert all(u.end - u.start <= 25 for u in utts) and {u.speaker for u in utts} == {A}
+    assert sum(len(u.text.split()) for u in utts) == len(ws)       # kelime kaybı yok
+    assert len(eng(max_utterance=0).fuse(ws, [S(A, 0, 61)])) == 1  # 0 = bölme yok
+
+
+def test_duraklamasiz_uzun_satir_sinirdan_bolunur():
+    ws = [Y("x", i * 0.5, i * 0.5 + 0.5) for i in range(120)]       # 60 sn, hiç boşluk yok
+    utts = eng(max_utterance=25).fuse(ws, [S(A, 0, 61)])
+    assert all(u.end - u.start <= 25 for u in utts) and len(utts) == 3

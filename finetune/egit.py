@@ -1,16 +1,17 @@
 """Zipformer-68M ince ayarı: icefall'ın zipformer/finetune.py'si, kendi verimizle.
 
-    python finetune/egit.py --icefall ~/icefall --veri ft_veri --model ft_model \\
-        --exp-dir ft_exp --num-epochs 10 --max-duration 300
+    python finetune/egit.py --icefall ~/ft/icefall --veri ~/ft/veri --model ~/ft/temel_model \\
+        --exp-dir ~/ft/exp --num-epochs 10
 
 icefall'ın betiği GigaSpeech/LibriSpeech kesitlerini okuyor; dosyasını değiştirmek yerine
 veri modülünün üç yöntemi burada bizim kesitlerimize yönlendirilir (icefall güncellense de
 yama yok). Mimari ayarları Zipformer-68M ile aynı (icefall varsayılanı = VietASR ayarı);
 farklı olursa ağırlık yüklenirken hata verir, sessizce yanlış model eğitilmez.
 
-Önerilen başlangıç (12 GB GPU, ~50 saat veri): --base-lr 0.0045 (icefall ince ayar örneği),
---num-epochs 10, --max-duration 300. Her epoch sonunda dev kaybı yazılır; dev kaybı
-yükselmeye başlarsa erken bırakın (aşırı uyum).
+--max-duration = bir adımda işlenen toplam ses (sn); GPU belleğini bu belirler.
+Varsayılan 100: 4 GB'lık kart (RTX 3050 Ti Laptop) için. Bellek hatası (CUDA out of memory)
+alırsanız 70'e indirin; 12 GB kartta 300 olabilir. --base-lr 0.0045 (icefall ince ayar
+örneği). Her epoch sonunda dev kaybı yazılır; yükselmeye başlarsa erken bırakın (aşırı uyum).
 """
 from __future__ import annotations
 
@@ -47,7 +48,8 @@ def main():
     defaults = ["--do-finetune", "1", "--use-mux", "0", "--finetune-ckpt", str(ckpt),
                 "--bpe-model", str(model / "data/Vietnam_bpe_2000_new/bpe.model"),
                 "--manifest-dir", str(veri), "--enable-musan", "0", "--causal", "0",
-                "--base-lr", "0.0045", "--use-fp16", "1", "--world-size", "1", "--start-epoch", "1"]
+                "--base-lr", "0.0045", "--use-fp16", "1", "--world-size", "1", "--start-epoch", "1",
+                "--max-duration", "100"]
     given = {x for x in rest if x.startswith("--")}
     args = [x for i in range(0, len(defaults), 2) if defaults[i] not in given
             for x in defaults[i:i + 2]] + rest

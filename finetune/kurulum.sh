@@ -7,6 +7,12 @@ ROOT=${1:-$HOME/ft}
 ICEFALL_COMMIT=c1eda5427c46502b2cfdcbeb910bf35f2134a0d4   # 8 Ekim 2026; denenmiş sürüm
 mkdir -p "$ROOT" && cd "$ROOT"
 
+# Betik Ubuntu 22.04 için (Python 3.10: k2'nin hazır paketleri var). Başka dağıtımda
+# (ör. Kali: daha yeni Python) k2 paketi bulunamayabilir. Windows'ta: wsl --install -d Ubuntu-22.04
+if ! grep -q 'VERSION_ID="22.04"' /etc/os-release 2>/dev/null; then
+  echo "UYARI: Ubuntu 22.04 değil ($(. /etc/os-release; echo "$PRETTY_NAME")). Önerilen: wsl --install -d Ubuntu-22.04"
+  read -r -p "Yine de devam edilsin mi? [e/H] " ans; [ "$ans" = "e" ] || exit 1
+fi
 nvidia-smi > /dev/null || { echo "GPU görünmüyor: Windows NVIDIA sürücüsünü güncelleyin"; exit 1; }
 
 if [ ! -d venv ]; then

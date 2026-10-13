@@ -5,7 +5,8 @@ Kural (yol haritasındaki gibi):
   2. Birden fazla konuşmacıya düşüyorsa (üst üste konuşma) kelimenin süresinin
      en çok örtüştüğü konuşmacı; payı min_dominance altındaysa BELIRSIZ.
   3. Hiçbirine düşmüyorsa en yakın aralık, uzaklık max_gap'ten küçükse; yoksa BELIRSIZ.
-Sonra aynı konuşmacının art arda kelimeleri tek satırda (Utterance) toplanır.
+Sonra aynı konuşmacının art arda kelimeleri tek satırda (Utterance) toplanır; satır
+max_utterance'tan uzunsa en uzun duraklamadan bölünür (konuşmacı değişmez, yalnızca satır).
 """
 from __future__ import annotations
 
@@ -83,12 +84,29 @@ class FusionEngine:
         cur_spk, cur = None, []
         for w, spk in zip(words, labels):
             if cur and (spk != cur_spk or w.start - cur[-1].end > self.cfg.new_utterance_gap):
-                out.append(_utt(cur_spk, cur))
+                out += [_utt(cur_spk, part) for part in self._split(cur)]
                 cur = []
             cur_spk = spk
             cur.append(w)
         if cur:
-            out.append(_utt(cur_spk, cur))
+            out += [_utt(cur_spk, part) for part in self._split(cur)]
+        return out
+
+    def _split(self, ws: list[Word]) -> list[list[Word]]:
+        """Uzun satırı, her parça en fazla max_utterance sn olacak şekilde böler. Kesim,
+        satırın ilk %40'ı geçtikten sonraki en uzun duraklamaya konur (çok kısa parça olmasın)."""
+        limit = self.cfg.max_utterance
+        out = []
+        while limit > 0 and len(ws) > 1 and ws[-1].end - ws[0].start > limit:
+            t0 = ws[0].start
+            cand = [i for i in range(1, len(ws)) if 0.4 * limit <= ws[i].start - t0 <= limit]
+            if not cand:  # tek kelime çok uzun ya da sıkışık: sınırdaki ilk kelimeden kes
+                cand = [next((i for i in range(1, len(ws)) if ws[i].start - t0 > limit), len(ws) - 1)]
+            # en uzun duraklama; eşitse en geç olan (parçalar gereksiz kısalmasın)
+            cut = max(cand, key=lambda i: (round(ws[i].start - ws[i - 1].end, 2), i))
+            out.append(ws[:cut])
+            ws = ws[cut:]
+        out.append(ws)
         return out
 
     def fuse(self, words: list[Word], speakers: list[SpeakerSegment]) -> list[Utterance]:

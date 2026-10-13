@@ -58,8 +58,8 @@ def engine(batched=None, model=None, **wp):
 def test_toplu_cozme_mutlak_zaman_ve_suzgecler():
     b = FakeBatched()
     words = engine(b).transcribe([seg(1.0, 2.2), seg(5.0, 7.0)])
-    # Türkçe çıktı büyük harf/noktalamayla korunur (TrNormalizer); tekrar süzgeci noktalamaya bakmaz
-    assert [x.text for x in words] == ["Merhaba,", "nasılsınız?", "evet", "evet,"]
+    # sistem çıktısı küçük harf, noktalamasız (iki dilde aynı); tekrar süzgeci noktalamaya bakmaz
+    assert [x.text for x in words] == ["merhaba", "nasılsınız", "evet", "evet"]
     assert words[0].start == 1.0 and words[1].end == 2.1
     audio, clips, bs, opt = b.calls[0]
     assert clips == [{"start": 1.0, "end": 2.2}, {"start": 5.0, "end": 7.0}] and bs == 8
@@ -73,7 +73,7 @@ def test_toplu_cozme_hatasinda_tek_tek_cozer():
     words = engine(FakeBatched(fail=True), m).transcribe([seg(10.0, 11.0), seg(20.0, 21.5)])
     assert m.calls == [16000, 24000]
     # parçaya göreli zaman mutlak zamana çevrilir
-    assert [(x.text, x.start) for x in words] == [("İyi", 10.1), ("günler", 10.4), ("İyi", 20.1), ("günler", 20.4)]
+    assert [(x.text, x.start) for x in words] == [("iyi", 10.1), ("günler", 10.4), ("iyi", 20.1), ("günler", 20.4)]
 
 
 def test_istem_ciktida_tekrar_edilirse_atilir():

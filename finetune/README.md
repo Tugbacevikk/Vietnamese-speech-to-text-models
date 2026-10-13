@@ -9,9 +9,10 @@ sistemin kullandığı biçimdedir (int8 ONNX); sistem Windows'ta olduğu gibi �
 
 | # | Ne | Nerede | Komut |
 |---|----|--------|-------|
-| 1 | Ortam (bir kez) | WSL2 | `bash finetune/kurulum.sh ~/ft` |
+| 0 | Ubuntu (bir kez) | PowerShell | `wsl --install -d Ubuntu-22.04` (Kali'ye dokunmaz; içinde `nvidia-smi` çalışmalı) |
+| 1 | Ortam (bir kez) | WSL2 Ubuntu | `bash finetune/kurulum.sh ~/ft` |
 | 2 | Veri | WSL2 | `python finetune/veri_hazirla.py --vietmed --cikti ~/ft/veri` |
-| 3 | Eğitim | WSL2 + GPU | `python finetune/egit.py --icefall ~/ft/icefall --veri ~/ft/veri --model ~/ft/temel_model --exp-dir ~/ft/exp --num-epochs 10 --max-duration 300` |
+| 3 | Eğitim | WSL2 + GPU | `python finetune/egit.py --icefall ~/ft/icefall --veri ~/ft/veri --model ~/ft/temel_model --exp-dir ~/ft/exp --num-epochs 10` |
 | 4 | Dışa aktarma | WSL2 | `bash finetune/disari_aktar.sh ~/ft ~/ft/exp 10 3 /mnt/c/.../models/vi-ince-ayar-2026-11` |
 | 5 | Kapı 2 (karar) | Windows | `python finetune/kapi2.py --yeni models/vi-ince-ayar-2026-11 --tibbi <test.tsv> --genel <genel.tsv>` |
 | 6 | Kullanım | Windows | `.env` içinde `VI_MODEL=models/vi-ince-ayar-2026-11` |
@@ -38,11 +39,16 @@ Yeni model ancak hepsi sağlanırsa kullanılır:
 2. Genel konuşmada WER en fazla **0,5 puan** kötüleşir.
 3. Hız en fazla **1,2 kat** yavaşlar (aynı mimari; beklenmez).
 
-## Başlangıç ayarları
+## Başlangıç ayarları (RTX 3050 Ti Laptop, 4 GB)
 
-12 GB GPU ve ~50 saat veri için: `--base-lr 0.0045` (icefall'ın ince ayar örneği),
-`--num-epochs 10`, `--max-duration 300` (bellek yetmezse 200). Dev kaybı yükselmeye
-başlarsa erken bırakın; `disari_aktar.sh` son birkaç epoch'un ortalamasını alır (`AVG`).
+- `--max-duration 100` (varsayılan): bir adımda en fazla 100 sn ses. Bellek hatası
+  (CUDA out of memory) olursa 70. 12 GB kartta 300 olabilir.
+- `--use-fp16 1` (varsayılan): yarım hassasiyet, belleği yaklaşık yarıya indirir.
+- Önce küçük deneme: veriyi `--train` ile birkaç saatlik bir TSV'ye sınırlayıp 1 epoch
+  çalıştırın; hata yoksa ve süre makulse tüm veriye geçin. Laptop kartı ısınınca yavaşlar;
+  şarjda ve iyi havalandırmayla çalıştırın.
+- `--base-lr 0.0045` (icefall'ın ince ayar örneği), `--num-epochs 10`. Dev kaybı yükselmeye
+  başlarsa erken bırakın; `disari_aktar.sh` son birkaç epoch'un ortalamasını alır (`AVG`).
 
 ## Lisans
 
