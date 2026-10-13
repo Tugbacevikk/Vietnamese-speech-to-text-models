@@ -1,0 +1,22 @@
+[package]
+name = "viet_asr_native"
+version = "0.1.0"
+edition = "2021"
+description = "viet_asr hattının Rust'a taşınan saf algoritmaları (önce: birleştirme)"
+license = "Apache-2.0"
+
+[lib]
+name = "viet_asr_native"
+# rlib: saf Rust çekirdeği ileride Rust servisinden de kullanılsın; cdylib: Python modülü
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.25", features = ["extension-module", "abi3-py310"], optional = true }
+
+[features]
+default = ["python"]
+python = ["dep:pyo3"]
+
+[profile.release]
+lto = true
+codegen-units = 1

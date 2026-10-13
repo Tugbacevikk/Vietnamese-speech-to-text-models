@@ -1,0 +1,12 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "viet-asr-native"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "viet_asr hızlandırıcıları (Rust). Kurulu değilse Python sürümü kullanılır."
+
+[tool.maturin]
+features = ["python"]

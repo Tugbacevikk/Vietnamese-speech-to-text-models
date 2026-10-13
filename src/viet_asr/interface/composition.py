@@ -4,12 +4,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from viet_asr.application.config import DiarizerConfig, LidConfig, PipelineConfig, VadConfig
-from viet_asr.application.fusion import FusionEngine
 from viet_asr.application.language import LanguageResolver
 from viet_asr.application.ports import ResultRepository
 from viet_asr.application.transcribe import TranscribeAndDiarize
 from viet_asr.infrastructure.audio import SoundfileLoader
 from viet_asr.infrastructure.chunker import EnergyChunker
+from viet_asr.infrastructure.native_fusion import build_fusion
 from viet_asr.infrastructure.catalog import language_profile, lid_stages
 from viet_asr.infrastructure.engines import LazyAsrEngines
 from viet_asr.infrastructure.normalizer import normalizer_for
@@ -73,7 +73,7 @@ def build_pipeline(cfg: PipelineConfig, repo: ResultRepository,
     return TranscribeAndDiarize(
         loader=SoundfileLoader(), vad=SileroVad(cfg.vad),
         language=build_resolver(cfg, with_detection), engines=build_engines(cfg),
-        diarizer=build_diarizer(cfg.diarizer), fusion=FusionEngine(cfg.fusion), repo=repo,
+        diarizer=build_diarizer(cfg.diarizer), fusion=build_fusion(cfg.fusion), repo=repo,
         chunker=EnergyChunker(cfg.chunk.max_len, cfg.chunk.min_len))
 
 
