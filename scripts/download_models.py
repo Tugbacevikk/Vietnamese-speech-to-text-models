@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from viet_asr.infrastructure.catalog import (  # noqa: E402
-    ASR_PACKS, AUX_PACKS, BASE, DEFAULT_MODELS, MODEL_CHOICES, Pack,
+    ASR_PACKS, AUX_PACKS, BASE, DEFAULT_MODELS, MODEL_CHOICES, Pack, is_folder_model,
 )
 
 
@@ -88,7 +88,9 @@ def _env_model(lang: str) -> str:
         load_dotenv()
     except ImportError:
         pass
-    return os.environ.get(f"{lang.upper()}_MODEL") or DEFAULT_MODELS[lang]
+    v = os.environ.get(f"{lang.upper()}_MODEL")
+    # klasör yolu verilmişse (ince ayarlı model) indirilecek bir şey yok; yedek olarak varsayılan iner
+    return DEFAULT_MODELS[lang] if not v or is_folder_model(v) else v
 
 
 def main():

@@ -122,12 +122,42 @@ def model_ref(key: str, models_dir: str | Path) -> ModelRef:
                     files=dict(p.files), license=p.license)
 
 
+def _pick(folder: Path, pattern: str, prefer_int8: bool) -> str:
+    found = sorted(folder.glob(pattern))
+    int8 = [f for f in found if f.name.endswith(".int8.onnx")]
+    fp32 = [f for f in found if not f.name.endswith(".int8.onnx")]
+    order = (int8 + fp32) if prefer_int8 else (fp32 + int8)
+    if not order:
+        raise FileNotFoundError(f"{folder} içinde {pattern} yok")
+    return order[0].name
+
+
+def folder_ref(folder: str | Path) -> ModelRef:
+    """Katalogda olmayan, klasörü verilen Zipformer (ör. ince ayarlı model; finetune/ çıktısı).
+    icefall export-onnx.py adlandırması: encoder/joiner int8, decoder fp32 (sherpa-onnx önerisi)."""
+    d = Path(folder)
+    files = {"encoder": _pick(d, "encoder*.onnx", True), "decoder": _pick(d, "decoder*.onnx", False),
+             "joiner": _pick(d, "joiner*.onnx", True), "tokens": "tokens.txt"}
+    if (d / "bpe.vocab").exists():
+        files["bpe_vocab"] = "bpe.vocab"
+    lic = (d / "LICENSE").read_text(encoding="utf-8").strip()[:200] if (d / "LICENSE").exists() else ""
+    return ModelRef(name=d.name, kind="zipformer-transducer", folder=d, files=files, license=lic)
+
+
+def is_folder_model(model: str | None) -> bool:
+    return bool(model) and ("/" in model or "\\" in model or Path(model).is_dir())
+
+
 def language_profile(code: str, models_dir: str | Path, model: str | None = None,
                      **params) -> LanguageProfile:
     key = model or DEFAULT_MODELS[code]
-    if key not in MODEL_CHOICES.get(code, []):
-        raise ValueError(f"'{key}' modeli '{code}' dili için tanımlı değil: {MODEL_CHOICES.get(code)}")
     params.setdefault("drop_phrases", DROP_PHRASES.get(code, ()))
+    if is_folder_model(key):  # VI_MODEL=models/vi-ince-ayar-2026-11 gibi
+        ref = folder_ref(key)
+        return LanguageProfile(code=code, asr_model=ref, asr=AsrParams(**params), segmentation="full")
+    if key not in MODEL_CHOICES.get(code, []):
+        raise ValueError(f"'{key}' modeli '{code}' dili için tanımlı değil: {MODEL_CHOICES.get(code)} "
+                         "(ya da model klasörünün yolunu verin)")
     ref = model_ref(key, models_dir)
     # Whisper sessizlik/müzikte metin uyduruyor: ona yalnızca VAD parçaları
     seg = "vad" if ref.kind in ("whisper", "faster-whisper") else "full"
