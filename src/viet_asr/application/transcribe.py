@@ -6,10 +6,11 @@ import time
 
 from viet_asr.domain import (
     PROFILES, AudioJob, JobStatus, LanguageDecision, SpeakerSegment, Transcript,
-    UnsupportedLanguageError,
+    UnsupportedLanguageError, VadSegment,
 )
 
-from .config import ProfileConfig
+from .config import ProfileConfig, SafetyNetConfig
+from .coverage import add_rescued, coverage
 
 from .fusion import FusionEngine
 from .language import LanguageResolver
@@ -22,11 +23,13 @@ class TranscribeAndDiarize:
     def __init__(self, loader: AudioLoader, vad: Vad, language: LanguageResolver,
                  engines: AsrEngines, diarizer: Diarizer, fusion: FusionEngine,
                  repo: ResultRepository, notifier: Notifier | None = None,
-                 chunker: Vad | None = None, profiles: ProfileConfig | None = None):
+                 chunker: Vad | None = None, profiles: ProfileConfig | None = None,
+                 safety: SafetyNetConfig | None = None):
         """chunker: 'full' bölmeli motorlar için sesin tamamını parçalayan bölücü."""
         self.loader, self.vad, self.language, self.engines = loader, vad, language, engines
         self.chunker = chunker
         self.profiles = profiles or ProfileConfig()
+        self.safety = safety or SafetyNetConfig()
         self.diarizer, self.fusion, self.repo, self.notifier = diarizer, fusion, repo, notifier
 
     def run(self, job: AudioJob, decision: LanguageDecision | None = None) -> Transcript:
@@ -78,6 +81,19 @@ class TranscribeAndDiarize:
         else:
             words = asr.transcribe(asr_segments)
         lap("asr")
+        quality: dict[str, float] = {}
+        if segments and self.safety.enabled:
+            gaps, quality = coverage(segments, words, self.safety.min_gap)
+            if gaps and not fast and getattr(asr, "supports_rescue", False):
+                m, sr = self.safety.margin, 16000
+                clips = []
+                for a, b in gaps:
+                    a, b = max(0.0, a - m), min(duration, b + m)
+                    clips.append(VadSegment(start=a, samples=audio[int(a * sr):int(b * sr)]))
+                words, n = add_rescued(words, asr.rescue(clips))
+                gaps, quality = coverage(segments, words, self.safety.min_gap)
+                quality["kurtarilan_kelime"] = n
+                lap("guvenlik_agi")
         if not segments:
             speakers = []
         elif job.num_speakers == 1 or (fast and duration < self.profiles.min_diarize_sec):
@@ -88,6 +104,8 @@ class TranscribeAndDiarize:
         lap("konusmaci")
         utterances = self.fusion.fuse(words, speakers)
         lap("birlestirme")
+        if any(u.conf is not None for u in utterances):
+            quality["dusuk_guvenli_kelime"] = sum(len(u.low_conf) for u in utterances)
 
         dt = time.perf_counter() - t0
         timings["toplam"] = round(dt, 4)
@@ -96,4 +114,5 @@ class TranscribeAndDiarize:
                  " BELIRSIZ" if lang.uncertain else "", profile, duration, dt / max(duration, 1e-9),
                  len(asr_segments), len(words), len(utterances))
         return Transcript(job_id=job.job_id, duration=duration, utterances=utterances,
-                          model=asr.name, language=lang, profile=profile, timings=timings)
+                          model=asr.name, language=lang, profile=profile, timings=timings,
+                          quality=quality)

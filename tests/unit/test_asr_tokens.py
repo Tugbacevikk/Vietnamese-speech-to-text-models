@@ -82,3 +82,16 @@ def test_baska_alfabedeki_uydurma_kelime_atilir():
     assert normalizer_for("vi").normalize("Xin chào bác sĩ ạ Привет") == "xin chào bác sĩ ạ"
     assert normalizer_for("tr").normalize("कजतच") == ""
     assert normalizer_for("tr").normalize("nasыsыn") == "nasısın"            # karışık: düzeltilir
+
+
+def test_kelime_guveni_parca_olasiliklarindan():
+    import math
+
+    from viet_asr.infrastructure.normalizer import ViNormalizer
+    from viet_asr.infrastructure.sherpa_asr import tokens_to_words
+
+    w = tokens_to_words(["▁BÁC", "▁S", "Ĩ"], [0.0, 0.5, 0.7], 0.0, 1.0, ViNormalizer(),
+                        log_probs=[-0.1, -1.0, -2.0])
+    assert [x.text for x in w] == ["bác", "sĩ"]
+    assert w[0].conf == round(math.exp(-0.1), 3) and w[1].conf == round(math.exp(-1.5), 3)
+    assert tokens_to_words(["▁A"], [0.0], 0, 1, ViNormalizer())[0].conf is None

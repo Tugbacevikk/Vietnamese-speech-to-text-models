@@ -187,10 +187,12 @@ class SqlAlchemyJobStore:
                 s, t.job_id, must=True, status=JobStatus.DONE.value, model=t.model,
                 duration=t.duration, lang_code=d.code, lang_confidence=d.confidence,
                 lang_source=d.source.value, lang_uncertain=d.uncertain, error=None,
-                profile=t.profile, timings=t.timings or None)
+                profile=t.profile, timings=t.timings or None, quality=t.quality or None)
             s.execute(delete(UtteranceRow).where(UtteranceRow.job_id == t.job_id))  # tekrar işlenirse
             s.add_all(UtteranceRow(job_id=t.job_id, idx=i, speaker=u.speaker, start_s=u.start,
-                                   end_s=u.end, text=u.text) for i, u in enumerate(t.utterances))
+                                   end_s=u.end, text=u.text, conf=u.conf,
+                                   low_conf=",".join(map(str, u.low_conf)) or None)
+                      for i, u in enumerate(t.utterances))
             if cb and "done" in events:
                 self._outbox(s, t.job_id, "job.done", cb,
                              {"status": JobStatus.DONE.value, **transcript_to_dict(t)})
@@ -217,9 +219,11 @@ class SqlAlchemyJobStore:
                              .order_by(UtteranceRow.idx)).all()
             return Transcript(job_id=job_id, duration=j.duration or 0.0, model=j.model or "",
                               language=_decision(j), profile=j.profile or "full",
-                              timings=dict(j.timings or {}),
+                              timings=dict(j.timings or {}), quality=dict(j.quality or {}),
                               utterances=[Utterance(r.speaker, r.start_s, r.end_s, r.text,
-                                                    r.edited_at is not None, r.idx) for r in rows])
+                                                    r.edited_at is not None, r.idx, r.conf,
+                                                    _ints(r.low_conf) if r.edited_at is None else ())
+                                          for r in rows])
 
     def delete_utterance(self, job_id: str, idx: int) -> bool:
         """Satırı sonuçtan kaldırır (uydurma satır). Kayıtta kalır: modelin hatası olarak
@@ -423,3 +427,7 @@ def _record(r: JobRow) -> JobRecord:
                    r.profile, tuple(r.notify.split(",")) if r.notify is not None else None)
     return JobRecord(job=job, status=JobStatus(r.status), decision=_decision(r), error=r.error,
                      created_at=r.created_at, updated_at=r.updated_at)
+
+
+def _ints(v: str | None) -> tuple[int, ...]:
+    return tuple(int(x) for x in v.split(",")) if v else ()

@@ -169,6 +169,9 @@ class DiarizerConfig:
     # kişi ayrı çıkmaz; sayı biliniyorsa istekte num_speakers verilince kural uygulanmaz.
     min_speaker_duration: float = 1.5
     min_speaker_share: float = 0.08
+    # Az konuşan küme en yakın kişiden bu kosinüs uzaklığından daha uzaksa birleştirilmez
+    # (projedeki "benzerlik koruması", benzerlik 0,5 = uzaklık 0,5). 0 = kapalı. Ölçüme göre.
+    small_keep_distance: float = 0.0
     min_duration_on: float = 0.3   # yalnızca pyannote
     min_duration_off: float = 0.5  # yalnızca pyannote
     num_threads: int = 2
@@ -196,6 +199,9 @@ class FusionConfig:
     # girme ("ừ", "evet", "hı hı") yok; düzeltme tam da onları siler ve bu sette ölçülemez.
     # Gerçek, kesintisiz görüşme kaydıyla ölçülünce açılabilir (FUSION_SANDWICH_MAX).
     sandwich_max: float = 0.0
+    # kelime güveni bunun altındaysa satırda işaretlenir (Zipformer: parça olasılıkları,
+    # faster-whisper: kelime olasılığı); düzeltme yapan kişi önce bunlara bakar
+    low_conf: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -215,6 +221,20 @@ class ProfileConfig:
 
 
 @dataclass(frozen=True)
+class SafetyNetConfig:
+    """Yazıya dökülmemiş konuşma (fine-tuning projesindeki güvenlik ağı + kapsama ölçüsü).
+
+    VAD'ın konuşma dediği ama hiç kelime çıkmayan, min_gap'ten uzun aralıklar bulunur;
+    motor destekliyorsa (Whisper) kenar payıyla yeniden çözülür. Zipformer/Omnilingual'e zaten
+    sesin tamamı verildiği için onlarda yalnızca kapsama ölçülür.
+    """
+
+    enabled: bool = True
+    min_gap: float = 2.0
+    margin: float = 0.3
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     languages: dict[str, LanguageProfile]
     lid: LidConfig | None = field(default_factory=LidConfig)  # None: dil istekte zorunlu
@@ -223,3 +243,4 @@ class PipelineConfig:
     diarizer: DiarizerConfig = field(default_factory=DiarizerConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)
     profile: ProfileConfig = field(default_factory=ProfileConfig)
+    safety: SafetyNetConfig = field(default_factory=SafetyNetConfig)

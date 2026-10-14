@@ -21,9 +21,12 @@ def transcript_to_dict(t: Transcript) -> dict:
         "text": t.text,
         "utterances": [{"index": u.index if u.index >= 0 else i, "speaker": u.speaker,
                         "start": round(u.start, 3), "end": round(u.end, 3), "text": u.text,
-                        **({"edited": True} if u.edited else {})}
+                        **({"edited": True} if u.edited else {}),
+                        **({"confidence": u.conf} if u.conf is not None else {}),
+                        **({"low_confidence_words": list(u.low_conf)} if u.low_conf else {})}
                        for i, u in enumerate(t.utterances)],
         **({"profile": t.profile} if t.profile != "full" else {}),
+        **({"quality": t.quality} if t.quality else {}),
     }
 
 

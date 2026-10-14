@@ -122,6 +122,21 @@ değerlendirildi. 2 çekirdekli bulut makinesi; dil verilmedi (sesten bulundu).
   tek kişi çıktı; `num_speakers=2` verilince cümleler doğru ayrıldı. Eşiği 0,34'e indirmek bu
   dosyayı düzeltiyor ama 17 sn'lik telefon kaydını 6 kişiye bölüyor; değiştirilmedi.
 
+## Kelime güveni — VietMed 8 dosya, 2808 hece (14 Ekim 2026)
+
+Zipformer parça olasılıklarından kelime güveni (exp(log olasılık ortalaması)), doğru metinle
+hizalanarak:
+
+| eşik | işaretlenen | işaretlilerde hata | diğerlerinde hata | yakalanan hata |
+|---|---|---|---|---|
+| < 0,3 | %0,7 | %42,9 | %11,9 | %3 |
+| < 0,5 (seçilen) | %3,0 | %36,5 | %11,3 | %9 |
+| < 0,7 | %17,0 | %21,8 | %10,1 | %31 |
+
+Model aşırı emin (transducer'larda bilinen durum): güven hatayı tek başına bulmaz ama
+işaretli kelime 3 kat daha sık yanlış. Arayüzde 0,5 altı altı çizili gösterilir; düzeltme
+yapan kişi önce onlara bakar. Genel hata (%12,1) burada kapsama ölçüsünden bağımsızdır.
+
 ## Başka alfabeden uydurma — Türkçe 22 dosya (14 Ekim 2026)
 
 Omnilingual (1600 dil) 3174 kelimenin 5'inde başka alfabe kullandı: podcast sonundaki müzikte

@@ -143,10 +143,16 @@ class EmbeddingClusterDiarizer:
         if not big:
             return np.zeros(len(E), dtype=int)
         cents = {c: E[lab == c].mean(axis=0) for c in big}
+        keep = self.cfg.small_keep_distance
         for c in set(lab) - set(big):
             idx = lab == c
             m = E[idx].mean(axis=0)
-            lab[idx] = max(big, key=lambda b: float(m @ cents[b]) / (np.linalg.norm(cents[b]) + 1e-9))
+            m = m / (np.linalg.norm(m) + 1e-9)
+            sims = {b: float(m @ cents[b]) / (np.linalg.norm(cents[b]) + 1e-9) for b in big}
+            best = max(sims, key=sims.get)
+            if keep > 0 and not (k and k > 1) and 1 - sims[best] > keep:
+                continue  # kimseye benzemiyor: az konuşan gerçek bir kişi olabilir, ayrı kalır
+            lab[idx] = best
         return lab
 
     def embed(self, segments: list[VadSegment]):

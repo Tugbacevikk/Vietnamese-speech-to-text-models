@@ -9,6 +9,8 @@ Zaman bilgisi modele göre değişir:
 """
 from __future__ import annotations
 
+import math
+
 import sherpa_onnx
 
 from viet_asr.application.config import AsrParams, LanguageProfile, ModelRef
@@ -20,7 +22,7 @@ _SEP = ("▁", " ")  # BPE'de "▁" ya da boşluk: yeni kelime başlıyor
 
 def tokens_to_words(tokens: list[str], timestamps: list[float], seg_start: float,
                     seg_end: float, normalizer: TextNormalizer,
-                    max_duration: float = 1.0) -> list[Word]:
+                    max_duration: float = 1.0, log_probs: list[float] | None = None) -> list[Word]:
     """Model parçalarını kelimeye birleştirir ve mutlak zaman verir.
 
     İki biçimi de anlar:
@@ -28,24 +30,30 @@ def tokens_to_words(tokens: list[str], timestamps: list[float], seg_start: float
       - harf (Omnilingual): "m","e"," ","d" -> tek başına " " ayırıcı
     Zaman damgası VAD parçasının başına göredir; seg_start eklenir.
     Bitiş = sonraki kelimenin başlangıcı (en fazla max_duration sonra).
+    log_probs verilirse (Zipformer) kelime güveni = exp(parçaların log olasılık ortalaması).
     """
+    lps = log_probs if log_probs and len(log_probs) == len(tokens) else None
     words: list[list] = []
     new_word = True
-    for tok, t in zip(tokens, timestamps):
+    for n, (tok, t) in enumerate(zip(tokens, timestamps)):
         if tok.strip(" ▁") == "":  # yalnızca ayırıcı
             new_word = True
             continue
+        lp = [lps[n]] if lps else []
         if tok.startswith(_SEP) or new_word or not words:
-            words.append([tok.lstrip(" ▁"), seg_start + t])
+            words.append([tok.lstrip(" ▁"), seg_start + t, lp])
             new_word = False
         else:
             words[-1][0] += tok
+            words[-1][2] += lp
     out = []
-    for i, (text, start) in enumerate(words):
+    for i, (text, start, lp) in enumerate(words):
         nxt = words[i + 1][1] if i + 1 < len(words) else seg_end
         text = normalizer.normalize(text)
         if text:
-            out.append(Word(text=text, start=start, end=max(start, min(nxt, start + max_duration))))
+            conf = round(math.exp(sum(lp) / len(lp)), 3) if lp else None
+            out.append(Word(text=text, start=start, end=max(start, min(nxt, start + max_duration)),
+                            conf=conf))
     return out
 
 
@@ -107,7 +115,8 @@ class _SherpaAsr:
 
     def _words(self, r, seg: VadSegment) -> list[Word]:
         return tokens_to_words(list(r.tokens), list(r.timestamps), seg.start, seg.end,
-                               self.normalizer, self.params.max_word_duration)
+                               self.normalizer, self.params.max_word_duration,
+                               list(getattr(r, "ys_log_probs", []) or []))
 
 
 class SherpaZipformerAsr(_SherpaAsr):

@@ -62,6 +62,7 @@ audio { width: 100%; margin-bottom: 12px; }
             padding: 2px 8px; font-size: .75rem; cursor: pointer; white-space: nowrap; }
 .edit-btn:hover { color: var(--text); border-color: var(--accent); }
 .mark { font-size: .7rem; color: var(--ok); margin-left: 6px; font-weight: 500; }
+.low { text-decoration: underline wavy var(--warn); text-underline-offset: 3px; }
 .editor { display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .editor textarea { font: inherit; background: var(--input); color: var(--text); border: 1px solid var(--accent);
                    border-radius: 8px; padding: 8px; min-height: 70px; resize: vertical; }
@@ -259,6 +260,8 @@ function show(job) {
     ["İşlem süresi", `${took.toFixed(1)} sn (oran ${(took / Math.max(r.duration, 0.001)).toFixed(2)})`],
     ["Konuşmacı", String(r.speakers)],
     ["Model", r.model],
+    ...(r.quality && r.quality.kapsama_yuzde !== undefined ? [["Kapsama",
+      `%${r.quality.kapsama_yuzde}` + (r.quality.kurtarilan_kelime ? ` (+${r.quality.kurtarilan_kelime} kurtarılan)` : "")]] : []),
   ];
   for (const [k, v] of items) meta.append(el("div", {}, el("b", {}, k), el("span", {}, v)));
   const box = $("utts");
@@ -268,6 +271,18 @@ function show(job) {
   loadAudio(job.job_id);
 }
 
+// düşük güvenli kelimeler altı çizili: düzeltme yapan kişi önce bunlara baksın
+function textWithLowConf(u) {
+  const p = el("p", {});
+  const low = new Set(u.low_confidence_words || []);
+  if (!low.size) { p.textContent = u.text; return p; }
+  u.text.split(" ").forEach((w, k) => {
+    if (k) p.append(" ");
+    p.append(low.has(k) ? el("span", { class: "low", title: "model bu kelimeden emin değil" }, w) : w);
+  });
+  return p;
+}
+
 function uttRow(u, i) {
   const who = el("div", { class: "who", style: `color:${colorOf(u.speaker)}` }, speakerName(u.speaker));
   if (u.edited) who.append(el("span", { class: "mark", title: "elle düzeltildi" }, "düzeltildi"));
@@ -275,7 +290,7 @@ function uttRow(u, i) {
   const del = el("button", { class: "edit-btn", type: "button", title: "uydurma ya da yanlış satırı kaldır" }, "Sil");
   const row = el("div", { class: "utt", title: "dinlemek için tıklayın" },
     el("div", {}, who, el("div", { class: "t" }, `${fmt(u.start)} – ${fmt(u.end)}`)),
-    el("div", { class: "body" }, el("p", {}, u.text), btn, del));
+    el("div", { class: "body" }, textWithLowConf(u), btn, del));
   row.addEventListener("click", () => play(u.start, u.end));
   btn.addEventListener("click", (e) => { e.stopPropagation(); openEditor(row, u, i); });
   del.addEventListener("click", async (e) => {
@@ -316,7 +331,8 @@ function openEditor(row, u, i) {
     try {
       const res = await (await api(`/jobs/${encodeURIComponent(current.job_id)}/utterances/${u.index ?? i}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })).json();
-      const nu = Object.assign({}, u, { text: res.text, speaker: res.speaker, edited: true });
+      const nu = Object.assign({}, u, { text: res.text, speaker: res.speaker, edited: true,
+                                        low_confidence_words: [] });
       const pos = current.result.utterances.indexOf(u);
       if (pos >= 0) current.result.utterances[pos] = nu;
       row.replaceWith(uttRow(nu, i));

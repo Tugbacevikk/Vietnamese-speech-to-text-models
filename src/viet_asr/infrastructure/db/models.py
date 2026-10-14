@@ -76,6 +76,12 @@ class JobRow(Base):
     notify: Mapped[str | None] = mapped_column(Text)        # "done,failed" (None: varsayılan)
     # aşama süreleri {"vad": 0.2, "asr": 4.1, ...}: metrikler bütün süreçlerden buradan toplanır
     timings: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB(), "postgresql"))
+    # kapsama yüzdesi, yazısız konuşma, kurtarılan kelime, düşük güvenli kelime sayısı
+    quality: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB(), "postgresql"))
+    # veri setine aktarma onayı (kim, ne zaman, hangi amaçla: test | egitim); yoksa aktarılmaz
+    consent_by: Mapped[str | None] = mapped_column(Text)
+    consent_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    consent_use: Mapped[str | None] = mapped_column(Text)
     lang_code: Mapped[str | None] = mapped_column(Text)
     lang_confidence: Mapped[float | None] = mapped_column(Float)
     lang_source: Mapped[str | None] = mapped_column(Text)
@@ -106,6 +112,8 @@ class UtteranceRow(Base):
     original_text: Mapped[str | None] = mapped_column(Text)
     original_speaker: Mapped[str | None] = mapped_column(Text)
     edited_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    conf: Mapped[float | None] = mapped_column(Float)        # kelime güvenlerinin ortalaması
+    low_conf: Mapped[str | None] = mapped_column(Text)       # düşük güvenli kelime sıraları "2,5"
     # arayüzden silindi (uydurma satır): sonuçta görünmez, ince ayar için kayıtta kalır
     deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 

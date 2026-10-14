@@ -81,6 +81,7 @@ class Word:
     text: str
     start: float
     end: float
+    conf: float | None = None  # 0-1, modelin bu kelimeden eminliği (modeli vermiyorsa None)
 
     @property
     def mid(self) -> float:
@@ -106,6 +107,8 @@ class Utterance:
     text: str
     edited: bool = False  # bir kişi arayüzden düzeltti
     index: int = -1       # kayıttaki sıra numarası (silinen satırlar atlansa da değişmez)
+    conf: float | None = None          # kelime güvenlerinin ortalaması
+    low_conf: tuple[int, ...] = ()     # metinde düşük güvenli kelimelerin sırası (0'dan)
 
 
 @dataclass(frozen=True)
@@ -155,6 +158,9 @@ class Transcript:
     profile: str = "full"
     # aşama süreleri (sn): yukleme, vad, dil, asr, konusmaci, birlestirme, toplam
     timings: dict[str, float] = field(default_factory=dict)
+    # kalite: konuşma süresi, yazıya dökülmemiş konuşma, kapsama yüzdesi, kurtarılan kelime,
+    # düşük güvenli satır sayısı
+    quality: dict[str, float] = field(default_factory=dict)
 
     @property
     def text(self) -> str:

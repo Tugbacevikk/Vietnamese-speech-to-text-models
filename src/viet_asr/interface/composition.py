@@ -81,7 +81,8 @@ def build_pipeline(cfg: PipelineConfig, repo: ResultRepository,
         loader=SoundfileLoader(), vad=SileroVad(cfg.vad),
         language=build_resolver(cfg, with_detection), engines=build_engines(cfg),
         diarizer=build_diarizer(cfg.diarizer), fusion=build_fusion(cfg.fusion), repo=repo,
-        chunker=EnergyChunker(cfg.chunk.max_len, cfg.chunk.min_len), profiles=cfg.profile)
+        chunker=EnergyChunker(cfg.chunk.max_len, cfg.chunk.min_len), profiles=cfg.profile,
+        safety=cfg.safety)
 
 
 # geriye dönük ad (CLI ve testler)

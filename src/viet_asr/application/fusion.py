@@ -11,6 +11,7 @@ max_utterance'tan uzunsa en uzun duraklamadan bölünür (konuşmacı değişmez
 from __future__ import annotations
 
 from bisect import bisect_right
+from dataclasses import replace
 from collections import defaultdict
 
 from viet_asr.domain import BELIRSIZ, SpeakerSegment, Utterance, Word
@@ -80,17 +81,17 @@ class FusionEngine:
 
     def merge(self, words: list[Word], labels: list[str]) -> list[Utterance]:
         """Etiketlenmiş kelimeleri konuşma satırlarına toplar."""
-        out: list[Utterance] = []
+        out: list[tuple[Utterance, list[Word]]] = []
         cur_spk, cur = None, []
         for w, spk in zip(words, labels):
             if cur and (spk != cur_spk or w.start - cur[-1].end > self.cfg.new_utterance_gap):
-                out += [_utt(cur_spk, part) for part in self._split(cur)]
+                out += [(_utt(cur_spk, part), part) for part in self._split(cur)]
                 cur = []
             cur_spk = spk
             cur.append(w)
         if cur:
-            out += [_utt(cur_spk, part) for part in self._split(cur)]
-        return out
+            out += [(_utt(cur_spk, part), part) for part in self._split(cur)]
+        return [_with_conf(u, ws, self.cfg.low_conf) for u, ws in out]
 
     def _split(self, ws: list[Word]) -> list[list[Word]]:
         """Uzun satırı, her parça en fazla max_utterance sn olacak şekilde böler. Kesim,
@@ -143,3 +144,11 @@ class FusionEngine:
 def _utt(speaker: str, ws: list[Word]) -> Utterance:
     return Utterance(speaker=speaker, start=ws[0].start, end=ws[-1].end,
                      text=" ".join(s.text for s in ws))
+
+
+def _with_conf(u: Utterance, ws: list[Word], low: float) -> Utterance:
+    confs = [w.conf for w in ws if w.conf is not None]
+    if not confs:
+        return u
+    return replace(u, conf=round(sum(confs) / len(confs), 3),
+                   low_conf=tuple(i for i, w in enumerate(ws) if w.conf is not None and w.conf < low))
