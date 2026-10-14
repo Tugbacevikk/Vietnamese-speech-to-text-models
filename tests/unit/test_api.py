@@ -217,3 +217,29 @@ def test_arayuz_gecmis_ses_ve_silme(ctx, tmp_path):
     assert c.delete(f"/jobs/{jid}").status_code == 200
     assert c.get(f"/jobs/{jid}").status_code == 404 and list(tmp_path.glob("*.wav")) == []
     assert c.get("/jobs/yok/audio").status_code == 404
+
+
+def test_asiri_yuk_ve_istek_siniri(tmp_path):
+    from viet_asr.infrastructure.rate_limit import MemoryRateLimiter
+
+    store, queue = MemoryJobStore(), Queue()
+    s = Settings(data_dir=str(tmp_path), languages=["vi", "tr"], max_pending_jobs=2,
+                 rate_limit_per_minute=0)
+    c = TestClient(create_app(store, queue, s))
+    assert post(c).status_code == 202 and post(c).status_code == 202
+    r = post(c)
+    assert r.status_code == 503 and r.headers["Retry-After"] == "60"     # 2 iş bekliyor: dolu
+    assert len(list(tmp_path.glob("*.wav"))) == 2                         # reddedilen dosya yazılmadı
+    for j in list(store.jobs):
+        store.set_status(j, JobStatus.FAILED, "x")
+    assert post(c).status_code == 202                                     # yer açıldı
+
+    now = [120.0]
+    lim = MemoryRateLimiter(2, clock=lambda: now[0])
+    s2 = Settings(data_dir=str(tmp_path), languages=["vi"], max_pending_jobs=0)
+    c2 = TestClient(create_app(MemoryJobStore(), Queue(), s2, rate_limiter=lim))
+    assert [post(c2).status_code for _ in range(3)] == [202, 202, 429]
+    assert c2.post("/jobs", files={"file": ("a.wav", wav_bytes(), "audio/wav")},
+                   headers={"X-API-Key": "baska"}).status_code == 202     # her istemcinin kendi sayacı
+    now[0] += 60                                                          # yeni dakika
+    assert post(c2).status_code == 202

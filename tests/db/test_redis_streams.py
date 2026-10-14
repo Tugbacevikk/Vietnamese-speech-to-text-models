@@ -78,3 +78,20 @@ def test_coken_worker_isini_baskasi_devralir(r):
     c2 = consumer(r, "vi", done.append, [], claim_idle_ms=200)
     c2.run_once()
     assert done == ["y"] and r.xpending(stream_name("vi"), GROUP)["pending"] == 0
+
+
+def test_redis_istek_siniri():
+    import os
+
+    import redis
+
+    from viet_asr.infrastructure.rate_limit import RedisRateLimiter
+
+    r = redis.Redis.from_url(os.environ["TEST_REDIS_URL"])
+    now = [600.0]
+    lim = RedisRateLimiter(r, 2, clock=lambda: now[0], prefix="test:rl")
+    r.delete(*[k for k in r.scan_iter("test:rl:*")] or ["yok"])
+    assert [lim.check("a") for _ in range(3)][:2] == [None, None] and lim.check("a") == 61
+    assert lim.check("b") is None
+    now[0] += 60
+    assert lim.check("a") is None

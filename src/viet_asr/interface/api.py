@@ -21,12 +21,13 @@ API_KEY tanımlıysa /jobs istekleri "X-API-Key" başlığı ister (production'd
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
 from viet_asr.application.jobs import SubmitJob
@@ -45,7 +46,7 @@ _UI = Path(__file__).parent / "static" / "index.html"
 
 
 def create_app(store: JobStore, queue: JobQueue, settings: Settings,
-               health_checks: dict | None = None, queue_stats=None) -> FastAPI:
+               health_checks: dict | None = None, queue_stats=None, rate_limiter=None) -> FastAPI:
     api = FastAPI(title="Ses -> metin + konuşmacı (vi, tr)", version="0.3.0")
     auth = Depends(api_key_dependency(settings))
     submit = SubmitJob(store, queue, settings.languages)
@@ -54,7 +55,27 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
     max_bytes = settings.max_upload_mb * 1024 * 1024
     remove_upload = safe_file_remover(data_dir)
 
-    @api.post("/jobs", status_code=202, dependencies=[auth])
+    if rate_limiter is None and settings.rate_limit_per_minute > 0:
+        from viet_asr.infrastructure.rate_limit import MemoryRateLimiter
+
+        rate_limiter = MemoryRateLimiter(settings.rate_limit_per_minute)
+
+    def admit(request: Request):
+        """Yükleme işlenmeden önce: istek sınırı ve bekleyen iş üst sınırı."""
+        if rate_limiter is not None:
+            key = request.headers.get("X-API-Key") or (request.client.host if request.client else "?")
+            wait = rate_limiter.check(hashlib.sha256(key.encode()).hexdigest()[:16])
+            if wait is not None:
+                raise HTTPException(429, f"dakikada en fazla {settings.rate_limit_per_minute} istek",
+                                    headers={"Retry-After": str(wait)})
+        if settings.max_pending_jobs > 0:
+            c = store.counts()
+            pending = c.get(JobStatus.QUEUED.value, 0) + c.get(JobStatus.RUNNING.value, 0)
+            if pending >= settings.max_pending_jobs:
+                raise HTTPException(503, f"sistem dolu: {pending} iş bekliyor; biraz sonra tekrar deneyin",
+                                    headers={"Retry-After": "60"})
+
+    @api.post("/jobs", status_code=202, dependencies=[auth, Depends(admit)])
     def create_job(file: UploadFile | None = File(None), language: str = Form("auto"),
                    callback_url: str | None = Form(None), audio_path: str | None = Form(None),
                    num_speakers: int | None = Form(None), external_id: str | None = Form(None)):
@@ -188,8 +209,13 @@ def _production_app() -> FastAPI:
     store.migrate()
     r = redis.Redis.from_url(s.redis_url)
     queue = RedisStreamJobQueue(r)
+    limiter = None
+    if s.rate_limit_per_minute > 0:  # birden çok API süreci aynı sayacı görsün
+        from viet_asr.infrastructure.rate_limit import RedisRateLimiter
+
+        limiter = RedisRateLimiter(r, s.rate_limit_per_minute)
     return create_app(store, queue, s, {"veritabani": store.ping, "kuyruk": r.ping},
-                      queue_stats=lambda: queue.stats(["lid", *s.languages]))
+                      queue_stats=lambda: queue.stats(["lid", *s.languages]), rate_limiter=limiter)
 
 
 def __getattr__(name):  # uvicorn viet_asr.interface.api:app -> ilk erişimde kurulur

@@ -65,6 +65,14 @@ class Settings:
     # RUNNING'de bundan uzun kalan iş askıda sayılır; MAX_JOB_ATTEMPTS denemeden sonra FAILED
     processing_stale_sec: int = field(default_factory=lambda: int(os.environ.get(
         "PROCESSING_STALE_SEC", "1800")))
+    # Aşırı yük koruması. Kuyrukta/işlemde bekleyen iş bu sayıyı aşınca yeni istek 503 +
+    # Retry-After alır (sistem çökmeden "sonra tekrar dene" der). 0 = sınırsız.
+    # Varsayılan 10000: beklenen 4000 mesajlık ani yükün 2,5 katı.
+    max_pending_jobs: int = field(default_factory=lambda: int(os.environ.get("MAX_PENDING_JOBS", "10000")))
+    # İstemci (API anahtarı ya da IP) başına dakikada en fazla istek; 0 = kapalı (varsayılan).
+    # Kapalı, çünkü tek entegre sistem 4000 mesajı bir anda gönderebilir; açılırsa 429 alır.
+    rate_limit_per_minute: int = field(default_factory=lambda: int(os.environ.get(
+        "RATE_LIMIT_PER_MINUTE", "0")))
     max_job_attempts: int = field(default_factory=lambda: int(os.environ.get("MAX_JOB_ATTEMPTS", "3")))
     # modeller yüklenirken MANIFEST.json'daki sha256 ile karşılaştır
     verify_models: bool = field(default_factory=lambda: os.environ.get("VERIFY_MODELS", "1") == "1")
