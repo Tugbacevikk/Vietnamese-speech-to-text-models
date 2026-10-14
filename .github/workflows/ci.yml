@@ -55,7 +55,7 @@ jobs:
       - run: cargo test --no-default-features
         working-directory: native
       - run: pip install -e ".[dev]" ./native
-      - run: pytest -q tests/unit/test_native.py tests/unit/test_fusion.py
+      - run: pytest -q tests/unit/test_native.py tests/unit/test_fusion.py tests/unit/test_chunker.py
 
   windows:
     # Asıl çalışma ortamı Windows: yerel mod (SQLite + iş parçacıkları) burada da sınansın

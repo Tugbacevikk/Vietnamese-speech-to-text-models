@@ -21,29 +21,55 @@ from viet_asr.domain import VadSegment
 SR = 16000
 
 
+def energy_cuts(audio: np.ndarray, sr: int = SR, max_len: float = 15.0, min_len: float = 5.0,
+                frame: float = 0.1, silence_rms: float = 1e-3) -> list[tuple[int, int]]:
+    """Başvuru sürümü (Rust'taki native/src/chunker.rs bununla birebir aynı olmalı).
+    Sessiz olmayan parçaların [başlangıç, bitiş) örnek indeksleri. Enerji float64 ile hesaplanır
+    (toplama sırası farkı iki dilde sonucu değiştirmesin)."""
+    n, f = len(audio), int(frame * sr)
+    if n == 0:
+        return []
+    frames = n // f
+    x = np.asarray(audio, dtype=np.float64)
+    energy = np.sqrt(np.mean(x[: frames * f].reshape(frames, f) ** 2, axis=1)) if frames else np.zeros(0)
+    out, start = [], 0
+    while start < n:
+        if n - start <= max_len * sr:
+            end = n
+        else:
+            lo = (start + int(min_len * sr)) // f
+            hi = min(frames, (start + int(max_len * sr)) // f)
+            k = lo + int(np.argmin(energy[lo:hi])) if hi > lo else hi
+            end = k * f + f // 2
+        if float(np.sqrt(np.mean(x[start:end] ** 2))) >= silence_rms:
+            out.append((start, end))
+        start = end
+    return out
+
+
 class EnergyChunker:
     def __init__(self, max_len: float = 15.0, min_len: float = 5.0, frame: float = 0.1,
-                 silence_rms: float = 1e-3):
+                 silence_rms: float = 1e-3, native: bool | None = None):
+        """native: Rust sürümü (viet_asr_native); None = kuruluysa kullan."""
         self.max_len, self.min_len, self.frame, self.silence_rms = max_len, min_len, frame, silence_rms
+        if native is None:
+            from viet_asr.infrastructure.native_fusion import native_available
+
+            native = native_available() and hasattr(_native(), "energy_cuts")
+        self.native = native
+
+    def cuts(self, audio: np.ndarray) -> list[tuple[int, int]]:
+        if self.native:
+            return [tuple(c) for c in _native().energy_cuts(
+                np.ascontiguousarray(audio, dtype=np.float32), SR, self.max_len, self.min_len,
+                self.frame, self.silence_rms)]
+        return energy_cuts(audio, SR, self.max_len, self.min_len, self.frame, self.silence_rms)
 
     def split(self, audio: np.ndarray) -> list[VadSegment]:
-        n, f = len(audio), int(self.frame * SR)
-        if n == 0:
-            return []
-        frames = n // f
-        energy = (np.sqrt(np.mean(audio[: frames * f].reshape(frames, f) ** 2, axis=1))
-                  if frames else np.zeros(0))
-        out, start = [], 0
-        while start < n:
-            if n - start <= self.max_len * SR:
-                end = n
-            else:
-                lo = (start + int(self.min_len * SR)) // f
-                hi = min(frames, (start + int(self.max_len * SR)) // f)
-                k = lo + int(np.argmin(energy[lo:hi])) if hi > lo else hi
-                end = k * f + f // 2
-            chunk = audio[start:end]
-            if float(np.sqrt(np.mean(chunk ** 2))) >= self.silence_rms:
-                out.append(VadSegment(start=start / SR, samples=chunk, sample_rate=SR))
-            start = end
-        return out
+        return [VadSegment(start=a / SR, samples=audio[a:b], sample_rate=SR) for a, b in self.cuts(audio)]
+
+
+def _native():
+    import viet_asr_native
+
+    return viet_asr_native

@@ -6,6 +6,7 @@ build-backend = "maturin"
 name = "viet-asr-native"
 version = "0.1.0"
 requires-python = ">=3.10"
+dependencies = ["numpy"]
 description = "viet_asr hızlandırıcıları (Rust). Kurulu değilse Python sürümü kullanılır."
 
 [tool.maturin]

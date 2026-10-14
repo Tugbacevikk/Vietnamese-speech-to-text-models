@@ -51,3 +51,30 @@ def test_tek_konusmaci_ve_bos():
     assert e.assign([], [SpeakerSegment("speaker_00", 0, 1), SpeakerSegment("speaker_01", 1, 2)]) == []
     with pytest.raises(ValueError):
         native.assign_labels([0.0], [], [], [], [], 0.6, 0.5)
+
+
+def test_enerji_bolucu_python_ile_ayni():
+    import numpy as np
+
+    from viet_asr.infrastructure.chunker import energy_cuts
+
+    rng = np.random.default_rng(3)
+    for case in range(300):
+        n = int(rng.integers(0, 16000 * 70))
+        a = (rng.standard_normal(n) * rng.choice([0.0005, 0.01, 0.2])).astype(np.float32)
+        for _ in range(int(rng.integers(0, 6))):                      # sessiz bölgeler (tam sıfır)
+            s = int(rng.integers(0, max(1, n)))
+            a[s:s + int(rng.integers(0, 16000 * 3))] = 0
+        args = (16000, float(rng.choice([10.0, 15.0, 20.0])), 5.0, 0.1, 1e-3)
+        assert [tuple(c) for c in native.energy_cuts(a, *args)] == energy_cuts(a, *args), case
+
+
+def test_enerji_bolucu_secimi():
+    import numpy as np
+
+    from viet_asr.infrastructure.chunker import EnergyChunker
+
+    a = np.full(16000 * 40, 0.1, dtype=np.float32)
+    py, rs = EnergyChunker(native=False), EnergyChunker(native=True)
+    assert rs.native and [(s.start, len(s.samples)) for s in py.split(a)] == \
+        [(s.start, len(s.samples)) for s in rs.split(a)]

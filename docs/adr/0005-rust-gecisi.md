@@ -23,7 +23,8 @@ Alembic (0002), dış biçim `serialization.py`'deki JSON (API yanıtı = webhoo
 | Adım | Parça | Neden bu sırada | Durum |
 |------|-------|-----------------|-------|
 | 1 | Birleştirme (`fusion.assign`) | Saf, küçük, iyi tanımlı: kalıbı kurmak için düşük risk | Yapıldı: 9000 rastgele girdide eşit; 16 bin kelimede 112 ms → 4,5 ms |
-| 2 | Parça → kelime (`tokens_to_words`), enerji bölücü (`EnergyChunker`) | Saf; numpy yerine dilim | — |
+| 2a | Enerji bölücü (`energy_cuts`) | Saf, sayısal; numpy dizisi kopyasız okunur | Yapıldı (14 Ekim): 300 rastgele seste eşit; 10 dk seste 70 ms → 30 ms |
+| 2b | Parça → kelime (`tokens_to_words`) | Saf; metin işleme | — |
 | 3 | Konuşmacı kümeleme (NME-SC) | Özdeğer çözümü gerekir (nalgebra/faer); DER ile doğrulanır | — |
 | 4 | İşçi süreci (Redis Streams tüketici + depo) | sherpa-onnx'in C API'si ve `ort` crate'i ile; model çağrıları aynı | — |
 | 5 | HTTP API (axum) | En son: dış sözleşme `serialization.py` + OpenAPI | — |
