@@ -12,7 +12,8 @@ from typing import Protocol
 import numpy as np
 
 from viet_asr.domain import (
-    AudioJob, JobRecord, JobStatus, LanguageDecision, SpeakerSegment, Transcript, VadSegment, Word,
+    AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, SpeakerSegment, Transcript,
+    Utterance, VadSegment, Word,
 )
 
 
@@ -79,6 +80,15 @@ class JobStore(ResultRepository, Protocol):
 
     def recent_jobs(self, limit: int = 20) -> list[JobRecord]:
         """En yeni işler (arayüzdeki geçmiş listesi)."""
+        ...
+
+    def update_utterance(self, job_id: str, idx: int, speaker: str | None = None,
+                         text: str | None = None) -> Utterance | None:
+        """Biten işin bir satırını düzeltir; modelin ilk hali saklanır. Yoksa None."""
+        ...
+
+    def corrections(self, limit: int = 10_000) -> list[Correction]:
+        """Düzeltilmiş satırlar (en yenisi önce): ince ayar verisi."""
         ...
 
     def delete_job(self, job_id: str) -> str | None:

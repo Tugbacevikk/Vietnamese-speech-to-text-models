@@ -75,6 +75,8 @@ curl -H "X-API-Key: $K" http://localhost:8000/jobs/<job_id>        # durum + son
 | `GET /jobs?limit=20` | son işler |
 | `GET /jobs/{id}/audio` | yüklenen ses (saklama süresi dolmadıysa) |
 | `DELETE /jobs/{id}` | bitmiş işi, sonucunu ve sesini siler |
+| `PATCH /jobs/{id}/utterances/{n}` | n. satırın metnini ve/veya konuşmacısını düzelt (`{"text", "speaker"}`) |
+| `GET /corrections` | düzeltilen satırlar (modelin ilk hali ile birlikte) |
 | `GET /health` | veritabanı ve kuyruk (anahtar istemez) |
 | `GET /metrics` | gecikme oranı (hedef p95 ≤ 1), kuyruk doluluğu |
 | `GET /` | web arayüzü |
@@ -82,6 +84,12 @@ curl -H "X-API-Key: $K" http://localhost:8000/jobs/<job_id>        # durum + son
 - **`external_id`:** entegre olan sistemin kendi kimliği. Aynısı tekrar gelirse yeni iş açılmaz,
   var olan iş `200` ile döner; ağ hatasında güvenle tekrar gönderilebilir.
 - **Durumlar:** `queued` → `running` → `done` | `failed` | `rejected`.
+- **Aşırı yük:** `MAX_PENDING_JOBS` (varsayılan 10000) iş beklerken yeni istek `503` + `Retry-After`
+  alır. İstemci başına dakikalık sınır `RATE_LIMIT_PER_MINUTE` (varsayılan kapalı) → `429`.
+- **Düzeltmeler:** arayüzde her satırda "Düzelt" var. Modelin ilk yazdığı saklanır; düzeltilen
+  işin sesi 24 saatte silinmez (kayıt silinene kadar kalır), çünkü ince ayar verisidir:
+  `python scripts/duzeltmeleri_disa_aktar.py --cikti duzeltmeler --dil vi` →
+  `finetune/veri_hazirla.py --train duzeltmeler/liste.tsv`.
 - **Webhook** (`X-Event: job.done | job.failed | job.rejected`, `X-Delivery-Id`): en az bir kez
   gider; `WEBHOOK_SECRET` varsa `X-Signature: sha256=HMAC(secret, "<X-Timestamp>.<gövde>")`.
   Callback adresi `WEBHOOK_ALLOWED_HOSTS` ile sınırlanabilir (üretimde iç ağ adresleri kapalı).
@@ -104,7 +112,8 @@ istemci ─► api ─► PostgreSQL (iş) + Redis Streams: asr:lid ─► asr:v
 
 - Dil başına kuyruk: yalnızca yoğun dilin işçisi artırılır (`stream_worker --kuyruk vi --surec N`).
 - Çöken işçinin işi 2 dk sonra başkasına geçer; 3 denemeden sonra `asr:dlq` ve `job.failed`.
-- Süreç sayısı otomatik: kullanılabilir çekirdek / `ONNX_THREADS` (Docker `cpus:` sınırı dahil).
+- Süreç sayısı otomatik: çekirdek / `ONNX_THREADS` ile belleğin izin verdiğinin küçüğü
+  (Docker `cpus:`/bellek sınırı dahil); seçilen sayı ve gerekçesi açılışta yazılır.
 - `bakim` süreci: 24 saat sonra ses, 30 gün sonra kayıt silinir; askıda kalan iş `failed` olur.
 
 ## Veritabanı (code-first)

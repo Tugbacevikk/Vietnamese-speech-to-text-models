@@ -20,7 +20,8 @@ def transcript_to_dict(t: Transcript) -> dict:
         "speakers": len({u.speaker for u in t.utterances} - {"BELIRSIZ"}),
         "text": t.text,
         "utterances": [{"speaker": u.speaker, "start": round(u.start, 3), "end": round(u.end, 3),
-                        "text": u.text} for u in t.utterances],
+                        "text": u.text, **({"edited": True} if u.edited else {})}
+                       for u in t.utterances],
     }
 
 

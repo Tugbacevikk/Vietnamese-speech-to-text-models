@@ -98,6 +98,10 @@ class UtteranceRow(Base):
     start_s: Mapped[float] = mapped_column(Float)
     end_s: Mapped[float] = mapped_column(Float)
     text: Mapped[str] = mapped_column(Text)
+    # Arayüzden düzeltildiyse: modelin ilk yazdığı metin ve düzeltme zamanı (ince ayar verisi)
+    original_text: Mapped[str | None] = mapped_column(Text)
+    original_speaker: Mapped[str | None] = mapped_column(Text)
+    edited_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
 
 class OutboxRow(Base):

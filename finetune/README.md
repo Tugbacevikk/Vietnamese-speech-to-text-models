@@ -11,7 +11,7 @@ sistemin kullandığı biçimdedir (int8 ONNX); sistem Windows'ta olduğu gibi �
 |---|----|--------|-------|
 | 0 | Ubuntu (bir kez) | PowerShell | `wsl --install -d Ubuntu-22.04` (Kali'ye dokunmaz; içinde `nvidia-smi` çalışmalı) |
 | 1 | Ortam (bir kez) | WSL2 Ubuntu | `bash finetune/kurulum.sh ~/ft` |
-| 2 | Veri | WSL2 | `python finetune/veri_hazirla.py --vietmed --cikti ~/ft/veri` |
+| 2 | Veri | WSL2 | `python finetune/veri_hazirla.py --vietmed --cikti ~/ft/veri` (ya da arayüzde düzeltilen satırlar: `scripts/duzeltmeleri_disa_aktar.py` çıktısı `--train` olarak) |
 | 3 | Eğitim | WSL2 + GPU | `python finetune/egit.py --icefall ~/ft/icefall --veri ~/ft/veri --model ~/ft/temel_model --exp-dir ~/ft/exp --num-epochs 10` |
 | 4 | Dışa aktarma | WSL2 | `bash finetune/disari_aktar.sh ~/ft ~/ft/exp 10 3 /mnt/c/.../models/vi-ince-ayar-2026-11` |
 | 5 | Kapı 2 (karar) | Windows | `python finetune/kapi2.py --yeni models/vi-ince-ayar-2026-11 --tibbi <test.tsv> --genel <genel.tsv>` |

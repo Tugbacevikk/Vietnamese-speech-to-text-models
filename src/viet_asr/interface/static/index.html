@@ -56,6 +56,18 @@ audio { width: 100%; margin-bottom: 12px; }
 .utt .who { font-size: .8rem; font-weight: 600; }
 .utt .t { font-size: .75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .utt p { line-height: 1.5; overflow-wrap: anywhere; }
+.utt .body { display: flex; gap: 8px; align-items: flex-start; }
+.utt .body p { flex: 1; }
+.edit-btn { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 6px;
+            padding: 2px 8px; font-size: .75rem; cursor: pointer; white-space: nowrap; }
+.edit-btn:hover { color: var(--text); border-color: var(--accent); }
+.mark { font-size: .7rem; color: var(--ok); margin-left: 6px; font-weight: 500; }
+.editor { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.editor textarea { font: inherit; background: var(--input); color: var(--text); border: 1px solid var(--accent);
+                   border-radius: 8px; padding: 8px; min-height: 70px; resize: vertical; }
+.editor input { font: inherit; background: var(--input); color: var(--text); border: 1px solid var(--line);
+                border-radius: 8px; padding: 6px 8px; max-width: 220px; }
+.editor .row { justify-content: flex-start; }
 .hist { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .hist button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; text-align: left; background: var(--input);
        border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--text); cursor: pointer; }
@@ -167,8 +179,18 @@ async function api(path, opts = {}) {
 
 function setStatus(text, err = false) { $("status").textContent = text; $("status").className = "status" + (err ? " err" : ""); }
 function fmt(s) { const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`; }
-function speakerName(s) { return s === "BELIRSIZ" ? "Belirsiz" : "Konuşmacı " + (parseInt(s.replace(/\D/g, ""), 10) + 1); }
-function colorOf(s) { return s === "BELIRSIZ" ? "var(--muted)" : COLORS[(parseInt(s.replace(/\D/g, ""), 10) || 0) % COLORS.length]; }
+// speaker_00 -> "Konuşmacı 1"; elle verilen ad (ör. "doktor") olduğu gibi gösterilir
+function speakerName(s) {
+  if (s === "BELIRSIZ") return "Belirsiz";
+  const m = /^speaker_(\d+)$/.exec(s);
+  return m ? "Konuşmacı " + (parseInt(m[1], 10) + 1) : s;
+}
+function colorOf(s) {
+  if (s === "BELIRSIZ") return "var(--muted)";
+  const m = /^speaker_(\d+)$/.exec(s);
+  const k = m ? parseInt(m[1], 10) : [...s].reduce((a, ch) => a + ch.charCodeAt(0), 0);
+  return COLORS[k % COLORS.length];
+}
 
 // --- dosya seçimi ---
 for (let i = 1; i <= 10; i++) $("speakers").append(el("option", { value: String(i) }, `${i} kişi`));
@@ -233,16 +255,54 @@ function show(job) {
   for (const [k, v] of items) meta.append(el("div", {}, el("b", {}, k), el("span", {}, v)));
   const box = $("utts");
   box.replaceChildren();
-  r.utterances.forEach((u) => {
-    const row = el("div", { class: "utt", title: "dinlemek için tıklayın" },
-      el("div", {}, el("div", { class: "who", style: `color:${colorOf(u.speaker)}` }, speakerName(u.speaker)),
-                    el("div", { class: "t" }, `${fmt(u.start)} – ${fmt(u.end)}`)),
-      el("p", {}, u.text));
-    row.addEventListener("click", () => play(u.start, u.end));
-    box.append(row);
-  });
+  r.utterances.forEach((u, i) => box.append(uttRow(u, i)));
   if (!r.utterances.length) box.append(el("p", { class: "sub" }, "Konuşma bulunamadı."));
   loadAudio(job.job_id);
+}
+
+function uttRow(u, i) {
+  const who = el("div", { class: "who", style: `color:${colorOf(u.speaker)}` }, speakerName(u.speaker));
+  if (u.edited) who.append(el("span", { class: "mark", title: "elle düzeltildi" }, "düzeltildi"));
+  const btn = el("button", { class: "edit-btn", type: "button", title: "metni ya da konuşmacıyı düzelt" }, "Düzelt");
+  const row = el("div", { class: "utt", title: "dinlemek için tıklayın" },
+    el("div", {}, who, el("div", { class: "t" }, `${fmt(u.start)} – ${fmt(u.end)}`)),
+    el("div", { class: "body" }, el("p", {}, u.text), btn));
+  row.addEventListener("click", () => play(u.start, u.end));
+  btn.addEventListener("click", (e) => { e.stopPropagation(); openEditor(row, u, i); });
+  return row;
+}
+
+function openEditor(row, u, i) {
+  const ta = el("textarea", { "aria-label": "doğru metin" });
+  ta.value = u.text;
+  const names = [...new Set(current.result.utterances.map((x) => x.speaker))];
+  const list = el("datalist", { id: `spk-${i}` }, ...names.map((n) => el("option", { value: n }, speakerName(n))));
+  const spk = el("input", { list: `spk-${i}`, "aria-label": "konuşmacı", maxlength: "40" });
+  spk.value = u.speaker;
+  const save = el("button", { class: "btn", type: "button" }, "Kaydet");
+  const cancel = el("button", { class: "btn ghost", type: "button" }, "Vazgeç");
+  const ed = el("div", { class: "editor" }, ta,
+    el("div", { class: "row" }, el("span", { class: "sub" }, "Konuşmacı:"), spk, list, save, cancel));
+  const body = row.querySelector(".body");
+  body.replaceChildren(ed);
+  ed.addEventListener("click", (e) => e.stopPropagation());
+  ta.focus();
+  cancel.addEventListener("click", () => row.replaceWith(uttRow(u, i)));
+  save.addEventListener("click", async () => {
+    const patch = {};
+    if (ta.value.trim() !== u.text) patch.text = ta.value;
+    if (spk.value.trim() && spk.value.trim() !== u.speaker) patch.speaker = spk.value.trim();
+    if (!Object.keys(patch).length) { row.replaceWith(uttRow(u, i)); return; }
+    save.disabled = true;
+    try {
+      const res = await (await api(`/jobs/${encodeURIComponent(current.job_id)}/utterances/${i}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })).json();
+      const nu = Object.assign({}, u, { text: res.text, speaker: res.speaker, edited: true });
+      current.result.utterances[i] = nu;
+      row.replaceWith(uttRow(nu, i));
+      setStatus("Düzeltme kaydedildi (ince ayar verisine eklenir).");
+    } catch (e) { setStatus("Kaydedilemedi: " + e.message, true); save.disabled = false; }
+  });
 }
 
 async function loadAudio(jobId) {

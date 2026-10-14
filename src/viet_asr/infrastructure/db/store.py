@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from viet_asr.application.serialization import transcript_to_dict
 from viet_asr.domain import (
-    AudioJob, JobRecord, JobStatus, LanguageDecision, LanguageSource, Transcript, Utterance,
+    AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, LanguageSource, Transcript, Utterance,
 )
 from viet_asr.infrastructure.db.models import JobRow, OutboxRow, UtteranceRow, utcnow
 from viet_asr.infrastructure.db.url import normalize_url
@@ -205,7 +205,34 @@ class SqlAlchemyJobStore:
                              .order_by(UtteranceRow.idx)).all()
             return Transcript(job_id=job_id, duration=j.duration or 0.0, model=j.model or "",
                               language=_decision(j),
-                              utterances=[Utterance(r.speaker, r.start_s, r.end_s, r.text) for r in rows])
+                              utterances=[Utterance(r.speaker, r.start_s, r.end_s, r.text,
+                                                    r.edited_at is not None) for r in rows])
+
+    def update_utterance(self, job_id: str, idx: int, speaker: str | None = None,
+                         text: str | None = None) -> Utterance | None:
+        with self._tx() as s:
+            j = s.get(JobRow, job_id)
+            u = s.get(UtteranceRow, (job_id, idx))
+            if j is None or u is None or j.status != JobStatus.DONE.value:
+                return None
+            if u.edited_at is None:  # modelin ilk hali bir kez saklanır
+                u.original_text, u.original_speaker = u.text, u.speaker
+            if speaker is not None:
+                u.speaker = speaker
+            if text is not None:
+                u.text = text
+            u.edited_at = utcnow()
+            return Utterance(u.speaker, u.start_s, u.end_s, u.text, True)
+
+    def corrections(self, limit: int = 10_000) -> list[Correction]:
+        with self._session() as s:
+            rows = s.execute(select(UtteranceRow, JobRow.audio_path, JobRow.lang_code)
+                             .join(JobRow, JobRow.id == UtteranceRow.job_id)
+                             .where(UtteranceRow.edited_at.is_not(None))
+                             .order_by(UtteranceRow.edited_at.desc()).limit(limit)).all()
+            return [Correction(u.job_id, path, lang, u.idx, u.start_s, u.end_s, u.speaker, u.text,
+                               u.original_speaker or u.speaker, u.original_text or u.text, u.edited_at)
+                    for u, path, lang in rows]
 
     def recent_jobs(self, limit: int = 20) -> list[JobRecord]:
         with self._session() as s:
@@ -233,7 +260,10 @@ class SqlAlchemyJobStore:
         with self._session() as s:
             return [tuple(r) for r in s.execute(
                 select(JobRow.id, JobRow.audio_path).where(
-                    JobRow.status.in_(_FINISHED), JobRow.updated_at < before, JobRow.audio_path != ""))]
+                    JobRow.status.in_(_FINISHED), JobRow.updated_at < before, JobRow.audio_path != "",
+                    # düzeltilmiş işin sesi kayıt silinene kadar kalır (ince ayar verisi)
+                    ~select(UtteranceRow.idx).where(UtteranceRow.job_id == JobRow.id,
+                                                   UtteranceRow.edited_at.is_not(None)).exists()))]
 
     def clear_audio(self, job_id: str) -> None:
         with self._tx() as s:

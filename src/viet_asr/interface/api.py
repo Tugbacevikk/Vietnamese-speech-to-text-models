@@ -11,6 +11,9 @@
     GET  /jobs/{id}     durum; bittiyse sonuç (konuşmacılı satırlar)
     GET  /jobs/{id}/audio   yüklenen ses (saklama süresi dolmadıysa; arayüzde dinlemek için)
     DELETE /jobs/{id}   bitmiş işi, sonucunu ve sesini siler (kuyruktaki/işlenen iş silinmez)
+    PATCH /jobs/{id}/utterances/{n}   n. satırın metnini/konuşmacısını düzelt ({"text", "speaker"});
+                        modelin ilk hali saklanır, düzeltilen işin sesi silinmez (ince ayar verisi)
+    GET  /corrections   düzeltilen satırlar (scripts/duzeltmeleri_disa_aktar.py ince ayar verisine çevirir)
     GET  /              web arayüzü (dosya yükle, dil seç, sonucu dinle/indir)
     GET  /health        veritabanı ve kuyruk erişimi, durum sayıları (anahtar istemez)
     GET  /metrics       gecikme ve "1 dk ses <= 1 dk" hedefi, kuyruk doluluğu
@@ -29,6 +32,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field
 
 from viet_asr.application.jobs import SubmitJob
 from viet_asr.application.maintenance import latency_stats
@@ -43,6 +47,12 @@ from viet_asr.interface.settings import Settings
 log = logging.getLogger(__name__)
 _ALLOWED = {".wav", ".flac", ".ogg", ".mp3", ".opus"} | FFMPEG_ONLY
 _UI = Path(__file__).parent / "static" / "index.html"
+
+
+class UtteranceEdit(BaseModel):
+    text: str | None = Field(None, max_length=5000)
+    # konuşmacı etiketi: speaker_00, BELIRSIZ ya da arayüzde verilen kısa bir ad (ör. doktor)
+    speaker: str | None = Field(None, pattern=r"^[\w\- ]{1,40}$")
 
 
 def create_app(store: JobStore, queue: JobQueue, settings: Settings,
@@ -157,6 +167,26 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         if path:
             remove_upload(path)  # yalnızca yükleme klasöründekiler; kullanıcının kendi dosyası kalır
         return {"job_id": job_id, "silindi": True}
+
+    @api.patch("/jobs/{job_id}/utterances/{idx}", dependencies=[auth])
+    def edit_utterance(job_id: str, idx: int, body: UtteranceEdit):
+        if body.speaker is None and body.text is None:
+            raise HTTPException(422, "text ya da speaker verilmeli")
+        u = store.update_utterance(job_id, idx, body.speaker,
+                                   " ".join(body.text.split()) if body.text is not None else None)
+        if u is None:
+            raise HTTPException(404, "bitmiş iş ya da satır bulunamadı")
+        return {"index": idx, "speaker": u.speaker, "start": round(u.start, 3), "end": round(u.end, 3),
+                "text": u.text, "edited": True}
+
+    @api.get("/corrections", dependencies=[auth])
+    def list_corrections(limit: int = 1000):
+        return [{"job_id": c.job_id, "index": c.idx, "language": c.language,
+                 "start": round(c.start, 3), "end": round(c.end, 3), "speaker": c.speaker,
+                 "text": c.text, "original_speaker": c.original_speaker,
+                 "original_text": c.original_text, "edited_at": c.edited_at.isoformat(),
+                 "audio_available": bool(c.audio_path)}
+                for c in store.corrections(max(1, min(limit, 10_000)))]
 
     @api.get("/jobs/{job_id}", dependencies=[auth])
     def get_job(job_id: str):

@@ -5,7 +5,7 @@ import threading
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from viet_asr.domain import AudioJob, JobRecord, JobStatus, LanguageDecision, Transcript
+from viet_asr.domain import AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, Transcript
 
 
 def _now():
@@ -18,6 +18,8 @@ class MemoryJobStore:
         self.results: dict[str, Transcript] = {}
         self.events: list[tuple[str, str]] = []  # (job_id, olay) — outbox yerine
         self._lock = threading.Lock()
+        self._originals: dict = {}
+        self._edits: dict = {}
 
     def create(self, job: AudioJob) -> str:
         with self._lock:
@@ -64,6 +66,29 @@ class MemoryJobStore:
 
     def get_transcript(self, job_id: str) -> Transcript | None:
         return self.results.get(job_id)
+
+    def update_utterance(self, job_id, idx, speaker=None, text=None):
+        with self._lock:
+            t, r = self.results.get(job_id), self.jobs.get(job_id)
+            if t is None or r is None or r.status != JobStatus.DONE or not 0 <= idx < len(t.utterances):
+                return None
+            old = t.utterances[idx]
+            new = replace(old, speaker=speaker if speaker is not None else old.speaker,
+                          text=text if text is not None else old.text, edited=True)
+            utts = list(t.utterances)
+            utts[idx] = new
+            self.results[job_id] = replace(t, utterances=utts)
+            orig = self._originals.setdefault((job_id, idx), (old.speaker, old.text))
+            self._edits[(job_id, idx)] = (orig, _now())
+            return new
+
+    def corrections(self, limit=10_000):
+        out = []
+        for (jid, idx), ((osp, otx), at) in self._edits.items():
+            u, r = self.results[jid].utterances[idx], self.jobs[jid]
+            out.append(Correction(jid, r.job.audio_path, r.decision.code if r.decision else None, idx,
+                                  u.start, u.end, u.speaker, u.text, osp, otx, at))
+        return sorted(out, key=lambda c: c.edited_at, reverse=True)[:limit]
 
     def recent_jobs(self, limit: int = 20) -> list[JobRecord]:
         return sorted(self.jobs.values(), key=lambda r: r.created_at, reverse=True)[:limit]

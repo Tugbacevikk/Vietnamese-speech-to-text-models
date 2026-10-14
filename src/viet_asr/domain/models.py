@@ -93,6 +93,24 @@ class Utterance:
     start: float
     end: float
     text: str
+    edited: bool = False  # bir kişi arayüzden düzeltti
+
+
+@dataclass(frozen=True)
+class Correction:
+    """Bir kişinin düzelttiği satır: ince ayar verisi (ses aralığı + doğru metin)."""
+
+    job_id: str
+    audio_path: str
+    language: str | None
+    idx: int
+    start: float
+    end: float
+    speaker: str
+    text: str
+    original_speaker: str
+    original_text: str
+    edited_at: datetime
 
 
 @dataclass(frozen=True)

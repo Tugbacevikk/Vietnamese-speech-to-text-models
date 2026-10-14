@@ -243,3 +243,20 @@ def test_asiri_yuk_ve_istek_siniri(tmp_path):
                    headers={"X-API-Key": "baska"}).status_code == 202     # her istemcinin kendi sayacı
     now[0] += 60                                                          # yeni dakika
     assert post(c2).status_code == 202
+
+
+def test_satir_duzeltme(ctx):
+    from viet_asr.domain import LanguageDecision, LanguageSource, Transcript, Utterance
+
+    store, _, c = ctx
+    jid = post(c, {"language": "tr"}).json()["job_id"]
+    assert c.patch(f"/jobs/{jid}/utterances/0", json={"text": "x"}).status_code == 404   # bitmedi
+    store.save(Transcript(jid, 3.0, [Utterance("speaker_00", 0, 1, "merhba doktor")], "m",
+                          LanguageDecision("tr", 1.0, LanguageSource.REQUEST)))
+    r = c.patch(f"/jobs/{jid}/utterances/0", json={"text": "  merhaba   doktor ", "speaker": "hasta"})
+    assert r.status_code == 200 and r.json()["text"] == "merhaba doktor" and r.json()["speaker"] == "hasta"
+    assert c.get(f"/jobs/{jid}").json()["result"]["utterances"][0]["edited"] is True
+    assert c.patch(f"/jobs/{jid}/utterances/0", json={}).status_code == 422
+    assert c.patch(f"/jobs/{jid}/utterances/0", json={"speaker": "<script>"}).status_code == 422
+    (k,) = c.get("/corrections").json()
+    assert k["original_text"] == "merhba doktor" and k["text"] == "merhaba doktor" and k["language"] == "tr"

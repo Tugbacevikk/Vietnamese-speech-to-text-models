@@ -235,3 +235,27 @@ def test_eski_sqlite_veritabani_aktarilir(tmp_path):
     s.fail("yeni", "x")
     assert [o["id"] for o in s.outbox_rows()] == [7, 8]  # sayaç kaldığı yerden
     s.close()
+
+
+def test_duzeltme_ilk_hali_saklar_ve_sesi_korur(store):
+    from datetime import timedelta as td
+
+    from viet_asr.infrastructure.db.models import utcnow
+
+    store.create(AudioJob("d", "/up/d.wav", "vi"))
+    assert store.update_utterance("d", 0, text="x") is None          # bitmemiş iş düzeltilmez
+    store.save(transcript("d"))
+    u = store.update_utterance("d", 1, text="chào bác sĩ ạ")
+    assert u.text == "chào bác sĩ ạ" and u.edited and u.speaker == "speaker_01"
+    store.update_utterance("d", 1, speaker="doktor")                 # ikinci düzeltme
+    assert store.update_utterance("d", 9, text="x") is None          # olmayan satır
+    t = store.get_transcript("d")
+    assert [(x.speaker, x.edited) for x in t.utterances] == [("speaker_00", False), ("doktor", True)]
+    (c,) = store.corrections()
+    assert (c.original_text, c.original_speaker, c.text, c.speaker) == \
+        ("chào bác sĩ", "speaker_01", "chào bác sĩ ạ", "doktor")      # ilk hal ilk düzeltmeden
+    assert c.language == "vi" and c.audio_path == "/up/d.wav" and (c.start, c.end) == (2.5, 4.0)
+    store.create(AudioJob("e", "/up/e.wav", "vi"))
+    store.save(transcript("e"))
+    later = utcnow() + td(days=2)
+    assert [j for j, _ in store.finished_with_audio_before(later)] == ["e"]   # düzeltilenin sesi kalır
