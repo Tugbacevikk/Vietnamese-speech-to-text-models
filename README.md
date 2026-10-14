@@ -59,6 +59,8 @@ gürültü) en yakın kişiye katılır. `num_speakers` verilirse tam o sayı. �
 ## API
 
 API anahtarı tanımlıysa (`API_KEY`, üretimde zorunlu) istekler `X-API-Key` başlığı ister.
+Bağlanacak sistem için ayrıntılı rehber (alanlar, durumlar, bildirim başlıkları, imza doğrulama
+örnekleri Python/Node/C#, tekrar kuralları): [docs/entegrasyon.md](docs/entegrasyon.md).
 
 ```bash
 curl -H "X-API-Key: $K" -F file=@kayit.wav -F callback_url=https://ornek.com/hook http://localhost:8000/jobs
@@ -83,6 +85,8 @@ curl -H "X-API-Key: $K" http://localhost:8000/jobs/<job_id>        # durum + son
 | `POST /webhooks/test` | `{"url"}` adresine imzalı deneme bildirimi (entegrasyon kurarken) |
 | `GET /webhooks/dead`, `POST /webhooks/{id}/retry` | teslim edilemeyen bildirimler ve yeniden deneme |
 | `DELETE /jobs/{id}/utterances/{n}` | uydurma satırı sonuçtan kaldır (kayıtta kalır) |
+| `POST /jobs/{id}/reanalyze` | aynı sesi yeni konuşmacı sayısıyla yeniden analiz (`{"num_speakers"}`, 0 = sesten bul) |
+| `POST /jobs/{id}/dataset` | kontrol edilmiş sonucu veri setinin onay kuyruğuna koy (`ENABLE_DATASET_EXPORT=1`, onay zorunlu) |
 | `GET /metrics` | gecikme oranı (hedef p95 ≤ 1), kuyruk doluluğu |
 | `GET /` | web arayüzü |
 
@@ -98,7 +102,15 @@ curl -H "X-API-Key: $K" http://localhost:8000/jobs/<job_id>        # durum + son
 - **Düzeltmeler:** arayüzde her satırda "Düzelt" var. Modelin ilk yazdığı saklanır; düzeltilen
   işin sesi 24 saatte silinmez (kayıt silinene kadar kalır), çünkü ince ayar verisidir:
   `python scripts/duzeltmeleri_disa_aktar.py --cikti duzeltmeler --dil vi` →
-  `finetune/veri_hazirla.py --train duzeltmeler/liste.tsv`.
+  `finetune/veri_hazirla.py --train duzeltmeler/liste.tsv`. Yalnızca veri setine aktarma onayı
+  verilmiş işler dışa aktarılır.
+- **Veri seti** (varsayılan kapalı): arayüzde "Veri setine ekle" → `DATASET_DIR/bekleyen/` →
+  `python scripts/veri_seti.py listele | onayla <iş> | reddet <iş>`. Test bölümü doğrudan
+  `benchmarks/diyalog_testi.py` ile, eğitim bölümü `finetune/veri_hazirla.py` ile kullanılır;
+  aynı ses iki bölüme giremez.
+- **Güven:** satırlarda `confidence` ve güveni 0,5 altındaki kelimelerin sırası
+  (`low_confidence_words`; arayüzde altı çizili). `quality.kapsama_yuzde`: konuşmanın ne kadarı
+  metne döndü; boşluklar Whisper ile yeniden denenir (güvenlik ağı).
 - **Webhook** (`X-Event: job.done | job.failed | job.rejected`, `X-Delivery-Id`): en az bir kez
   gider; `WEBHOOK_SECRET` varsa `X-Signature: sha256=HMAC(secret, "<X-Timestamp>.<gövde>")`.
   Callback adresi `WEBHOOK_ALLOWED_HOSTS` ile sınırlanabilir (üretimde iç ağ adresleri kapalı).
@@ -107,7 +119,9 @@ curl -H "X-API-Key: $K" http://localhost:8000/jobs/<job_id>        # durum + son
 {"status": "done", "job_id": "...", "duration": 61.2, "model": "zipformer-68m",
  "language": {"code": "vi", "confidence": 0.99, "source": "tespit", "uncertain": false},
  "speakers": 2, "text": "...",
- "utterances": [{"speaker": "speaker_00", "start": 0.1, "end": 3.5, "text": "..."}]}
+ "utterances": [{"index": 0, "speaker": "speaker_00", "start": 0.1, "end": 3.5, "text": "...",
+                 "confidence": 0.93, "low_confidence_words": [2]}],
+ "quality": {"kapsama_yuzde": 98.1, "kurtarilan_kelime": 0}}
 ```
 
 ## Tam mod (çok süreç / çok makine)
@@ -176,7 +190,7 @@ src/viet_asr/
                    static/index.html; composition.py hepsini aynı şekilde kurar
 native/            Rust çekirdeği (PyO3)
 finetune/          Vietnamca ince ayar hattı ve Kapı 2
-benchmarks/ scripts/ tests/{unit,db,integration} docs/{adr,olcumler.md}
+benchmarks/ scripts/ tests/{unit,db,integration} docs/{adr,olcumler.md,entegrasyon.md}
 ```
 
 CI (GitHub Actions): Linux (PostgreSQL + Redis ile), Windows (yerel mod), Rust (eşlik testi).
@@ -191,4 +205,5 @@ CI (GitHub Actions): Linux (PostgreSQL + Redis ile), Windows (yerel mod), Rust (
 - [ ] Kabul testi hedef bilgisayarda (özellikle Türkçe faster-whisper hızı) ve 4000 mesajlık yük testi
 - [ ] Türkçe gerçek kayıtlarla WER/DER ölçümü
 - [ ] İnce ayarın çalıştırılması ve Kapı 2 kararı
-- [ ] Rust adım 2: `tokens_to_words`, `EnergyChunker`
+- [x] Rust adım 2a: `EnergyChunker` (enerji kesimi)
+- [ ] Rust adım 2b: `tokens_to_words`

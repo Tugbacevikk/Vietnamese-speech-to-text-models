@@ -165,3 +165,19 @@ görünmez. Kesintisiz gerçek görüşme kaydıyla ölçülünce `FUSION_SANDWI
 - Türkçe doğru metinli ölçüm (FLEURS tr ya da elle yazılmış metin) — `benchmarks/turkce_dogruluk_testi.py`, `yerel_dogruluk_testi.py --dil tr`.
 - Gerçek, kesintisiz çekilmiş doktor-hasta görüşmesi (şimdiki diyaloglar kesitlerden kuruldu;
   üst üste konuşma yok).
+
+## Kişi sayısı tahmini: silhouette (fine-tuning projesi) ve NME-SC — 14 Ekim 2026
+
+Aynı CAM++ gömmeleri (önbellek), yalnızca kişi sayısını bulan adım değişiyor. Doğru tahmin sayısı:
+
+| Set | Silhouette (proje) | NME-SC (burada) |
+|---|---|---|
+| Tek kişilik kayıt | 34/84 | 72/84 |
+| Gerçek diyalog | 6/9 | 7/9 |
+| Kesit | 11/56 | 34/56 |
+| Sentetik diyalog | 14/28 | 26/28 |
+
+Silhouette tek kişiyi hiç bulamaz (en az 2 küme ister); projedeki eşikle de 1'e düşmesi zor.
+Ayrıca köşegeni sıfırlanmamış uzaklık matrisinde sklearn hata veriyor. Alınmadı.
+
+"Küçük konuşmacıyı koru" (SpeakerMerger): hasta setinde 7 → 6. Alınmadı, ayar olarak kaldı.
