@@ -32,29 +32,50 @@ def tokens_to_words(tokens: list[str], timestamps: list[float], seg_start: float
     Bitiş = sonraki kelimenin başlangıcı (en fazla max_duration sonra).
     log_probs verilirse (Zipformer) kelime güveni = exp(parçaların log olasılık ortalaması).
     """
+    nat = _native_tokens()
+    if nat is not None:
+        raw = nat.group_tokens(tokens, timestamps, seg_start, seg_end, max_duration,
+                                   log_probs if log_probs else None)
+    else:
+        raw = _group_tokens(tokens, timestamps, seg_start, seg_end, max_duration, log_probs)
+    out = []
+    for text, start, end, mlp in raw:
+        text = normalizer.normalize(text)
+        if text:
+            out.append(Word(text=text, start=start, end=end,
+                            conf=round(math.exp(mlp), 3) if mlp is not None else None))
+    return out
+
+
+def _group_tokens(tokens, timestamps, seg_start, seg_end, max_duration, log_probs):
+    """Başvuru sürümü: native/src/tokens.rs bununla birebir aynı olmalı.
+    -> [(ham metin, başlangıç, bitiş, log olasılık ortalaması | None)]"""
     lps = log_probs if log_probs and len(log_probs) == len(tokens) else None
-    words: list[list] = []
+    words: list[list] = []  # [metin, başlangıç, log olasılık toplamı, sayısı]
     new_word = True
     for n, (tok, t) in enumerate(zip(tokens, timestamps)):
         if tok.strip(" ▁") == "":  # yalnızca ayırıcı
             new_word = True
             continue
-        lp = [lps[n]] if lps else []
         if tok.startswith(_SEP) or new_word or not words:
-            words.append([tok.lstrip(" ▁"), seg_start + t, lp])
+            words.append([tok.lstrip(" ▁"), seg_start + t, lps[n] if lps else 0.0, 1 if lps else 0])
             new_word = False
         else:
             words[-1][0] += tok
-            words[-1][2] += lp
+            if lps:  # sırayla toplama (Python sum() 3.12'den beri telafili; Rust'la aynı olsun)
+                words[-1][2] += lps[n]
+                words[-1][3] += 1
     out = []
-    for i, (text, start, lp) in enumerate(words):
+    for i, (text, start, total, k) in enumerate(words):
         nxt = words[i + 1][1] if i + 1 < len(words) else seg_end
-        text = normalizer.normalize(text)
-        if text:
-            conf = round(math.exp(sum(lp) / len(lp)), 3) if lp else None
-            out.append(Word(text=text, start=start, end=max(start, min(nxt, start + max_duration)),
-                            conf=conf))
+        out.append((text, start, max(start, min(nxt, start + max_duration)), total / k if k else None))
     return out
+
+
+def _native_tokens():
+    """Rust sürümü kurulu ve açıksa modül, değilse None (VIET_ASR_NATIVE=0 ile kapanır)."""
+    from viet_asr.infrastructure import native_fusion as nf
+    return nf._native if nf.native_available() and hasattr(nf._native, "group_tokens") else None
 
 
 def spread_words(text: str, seg_start: float, seg_end: float,

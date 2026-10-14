@@ -206,4 +206,4 @@ CI (GitHub Actions): Linux (PostgreSQL + Redis ile), Windows (yerel mod), Rust (
 - [ ] Türkçe gerçek kayıtlarla WER/DER ölçümü
 - [ ] İnce ayarın çalıştırılması ve Kapı 2 kararı
 - [x] Rust adım 2a: `EnergyChunker` (enerji kesimi)
-- [ ] Rust adım 2b: `tokens_to_words`
+- [x] Rust adım 2b: `tokens_to_words` (gruplama Rust'ta, yazım düzeltmesi Python'da)

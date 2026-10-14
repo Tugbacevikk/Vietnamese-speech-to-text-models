@@ -3,10 +3,11 @@
 
 pub mod chunker;
 pub mod fusion;
+pub mod tokens;
 
 #[cfg(feature = "python")]
 mod py {
-    use super::{chunker, fusion};
+    use super::{chunker, fusion, tokens};
     use numpy::PyReadonlyArray1;
     use pyo3::prelude::*;
 
@@ -55,10 +56,35 @@ mod py {
         Ok(py.allow_threads(|| fusion::assign(&words, &segs, p)))
     }
 
+    type RawWordTuple = (String, f64, f64, Option<f64>);
+
+    /// group_tokens(tokens, timestamps, seg_start, seg_end, max_duration, log_probs=None)
+    ///   -> list[(metin, başlangıç, bitiş, log olasılık ortalaması | None)]
+    /// Normalizer uygulanmamış ham kelimeler; boş çıkanları Python ayıklar.
+    #[pyfunction]
+    #[pyo3(signature = (tokens, timestamps, seg_start, seg_end, max_duration, log_probs=None))]
+    fn group_tokens(
+        py: Python<'_>,
+        tokens: Vec<String>,
+        timestamps: Vec<f64>,
+        seg_start: f64,
+        seg_end: f64,
+        max_duration: f64,
+        log_probs: Option<Vec<f64>>,
+    ) -> PyResult<Vec<RawWordTuple>> {
+        Ok(py.allow_threads(|| {
+            tokens::group(&tokens, &timestamps, seg_start, seg_end, max_duration, log_probs.as_deref())
+                .into_iter()
+                .map(|w| (w.text, w.start, w.end, w.mean_log_prob))
+                .collect()
+        }))
+    }
+
     #[pymodule]
     fn viet_asr_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(assign_labels, m)?)?;
         m.add_function(wrap_pyfunction!(energy_cuts, m)?)?;
+        m.add_function(wrap_pyfunction!(group_tokens, m)?)?;
         m.add("__version__", env!("CARGO_PKG_VERSION"))?;
         Ok(())
     }
