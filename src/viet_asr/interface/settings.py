@@ -79,15 +79,83 @@ class Settings:
 
     @property
     def concurrency(self) -> int:
-        """CONCURRENCY=auto (varsayılan): kullanılabilir çekirdek / ONNX_THREADS."""
+        """Yerel mod (tek süreç, iş parçacıkları) için aynı anda işlenen ses sayısı."""
+        return self.concurrency_plan()[0]
+
+    def model_for(self, lang: str) -> str:
+        from viet_asr.infrastructure.catalog import DEFAULT_MODELS
+
+        return self.models.get(lang) or DEFAULT_MODELS.get(lang, "zipformer-68m")
+
+    def concurrency_plan(self, queue: str | None = None) -> tuple[int, str]:
+        """(iş sayısı, gerekçe). CONCURRENCY sayıysa o; 'auto' (varsayılan) ise çekirdek ve
+        belleğin küçüğü.
+
+        queue=None: yerel mod — tek süreç, modeller bir kez yüklenir, işler paylaşır.
+        queue='vi'|'tr': tam mod — her süreç kendi modelini yükler (stream_worker --surec).
+        Bellek: toplam belleğin %75'i (işletim sistemi ve diğer programlara pay bırakılır).
+        """
+        from viet_asr.infrastructure.catalog import AUX_MEMORY_GB, memory_estimate
+
         v = os.environ.get("CONCURRENCY", "auto")
         if v != "auto":
-            return max(1, int(v))
-        return max(1, available_cpus() // max(1, self.threads))
+            return max(1, int(v)), "CONCURRENCY ayarı"
+        by_cpu = max(1, available_cpus() // max(1, self.threads))
+        total = total_memory_gb()
+        if total is None:
+            return by_cpu, f"çekirdek: {available_cpus()} / {self.threads} (bellek okunamadı)"
+        usable = total * 0.75
+        langs = [queue] if queue else list(self.languages)
+        est = {lang: memory_estimate(self.model_for(lang)) for lang in langs}
+        if queue:  # her süreç: model + yardımcı modeller + bir iş
+            fixed, per_job = 0.0, est[queue][0] + est[queue][1] + AUX_MEMORY_GB
+        else:      # tek süreç: tüm modeller bir kez, her eşzamanlı iş en ağır dilin çalışma belleği
+            fixed = AUX_MEMORY_GB + sum(f for f, _ in est.values())
+            per_job = max(p for _, p in est.values())
+        by_mem = max(1, int((usable - fixed) // per_job))
+        n = min(by_cpu, by_mem)
+        why = (f"çekirdek {available_cpus()}/{self.threads}={by_cpu}, bellek {total:.0f} GB "
+               f"(%75: {usable:.1f}, sabit {fixed:.1f} + iş başı {per_job:.1f}) = {by_mem}")
+        return n, why
 
     @property
     def models(self) -> dict[str, str]:
         return {k: v for k, v in (("vi", self.vi_model), ("tr", self.tr_model)) if v}
+
+
+def total_memory_gb() -> float | None:
+    """Bu sürecin kullanabileceği toplam bellek (GB): Docker sınırı, yoksa makinenin belleği."""
+    try:
+        v = Path("/sys/fs/cgroup/memory.max").read_text().strip()
+        if v != "max":
+            return int(v) / 2**30
+    except (OSError, ValueError):
+        pass
+    try:
+        import psutil
+
+        return psutil.virtual_memory().total / 2**30
+    except ImportError:
+        pass
+    if os.name == "nt":  # psutil yoksa Windows API'si
+        import ctypes
+
+        class MemoryStatus(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        st = MemoryStatus()
+        st.dwLength = ctypes.sizeof(MemoryStatus)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+            return st.ullTotalPhys / 2**30
+        return None
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30
+    except (ValueError, OSError, AttributeError):
+        return None
 
 
 def available_cpus() -> int:

@@ -113,6 +113,27 @@ MODEL_CHOICES = {"vi": ["zipformer-68m", "zipformer-30m"],
                  "tr": ["faster-whisper-medium", "faster-whisper-small", "omnilingual-300m",
                         "whisper-turbo"]}
 
+# Bellek tahmini (GB): (model ağırlığı — bir süreçte bir kez, iş başına çalışma belleği).
+# Ölçülen: Zipformer-68M 10 sn'lik gruplarla tüm süreç 0,46 GB (12 Ekim). Diğerleri model
+# boyutundan (int8) ve kütüphane belgelerinden tahmin; faster-whisper'da iş başına değer, aynı
+# anda çalışan her işçinin modelin kopyasını tutma olasılığına göre ihtiyatlı seçildi.
+MODEL_MEMORY_GB: dict[str, tuple[float, float]] = {
+    "zipformer-68m": (0.2, 0.3),
+    "zipformer-30m": (0.1, 0.3),
+    "omnilingual-300m": (0.4, 0.5),
+    "whisper-turbo": (0.9, 0.8),
+    "faster-whisper-small": (0.3, 0.5),
+    "faster-whisper-medium": (0.8, 1.0),
+}
+# her süreçte bir kez: VAD + konuşmacı imzası + dil tespiti (Whisper tiny/small) + Python
+AUX_MEMORY_GB = 0.9
+
+
+def memory_estimate(model: str) -> tuple[float, float]:
+    """Katalogda olmayan (klasör yolu verilen, ör. ince ayarlı Zipformer) model: Zipformer gibi."""
+    return MODEL_MEMORY_GB.get(model, MODEL_MEMORY_GB["zipformer-68m"])
+
+
 # Whisper'ın sessizlik/gürültüde uydurduğu, gözlenmiş cümleler
 DROP_PHRASES = {"tr": ("İzlediğiniz için teşekkür ederim.",)}
 

@@ -53,6 +53,10 @@ class WhisperParams:
     hotwords: str | None = None       # boşlukla ayrılmış terimler (ör. ilaç adları)
     # aynı kelime art arda bu sayıdan fazla gelirse fazlası atılır (Whisper döngüsü)
     max_repeat: int = 2
+    # Aynı modeli aynı anda kullanabilecek iş sayısı. 1 iken yerel moddaki iş parçacıkları
+    # Türkçe işlerde birbirini BEKLER (CTranslate2 bir çağrıyı bir işçide çalıştırır);
+    # yerel modda eşzamanlı iş sayısına eşitlenir (composition.default_config workers=).
+    num_workers: int = 1
 
 
 @dataclass(frozen=True)

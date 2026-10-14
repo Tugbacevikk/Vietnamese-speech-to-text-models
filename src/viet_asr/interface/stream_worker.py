@@ -81,8 +81,13 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(processName)s %(message)s")
     s = Settings()
     verify_models_or_exit(s)
-    n = a.surec or (1 if a.kuyruk == "lid" else s.concurrency)
-    log.info("kuyruk=%s süreç=%d ONNX_THREADS=%d", a.kuyruk, n, s.threads)
+    if a.surec:
+        n, why = a.surec, "--surec"
+    elif a.kuyruk == "lid":
+        n, why = 1, "dil tespiti kısa sürer"
+    else:
+        n, why = s.concurrency_plan(a.kuyruk)
+    log.info("kuyruk=%s süreç=%d ONNX_THREADS=%d (%s)", a.kuyruk, n, s.threads, why)
     if n == 1:
         _run(a.kuyruk)
         return

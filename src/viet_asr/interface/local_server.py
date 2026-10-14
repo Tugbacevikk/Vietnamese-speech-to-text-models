@@ -38,9 +38,11 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
     """Yerel sistemi kurar; (app, store, queue, dispatcher) döndürür (testler de kullanır)."""
     store = SqlAlchemyJobStore(settings.local_db)
     store.migrate()
+    n = workers or settings.concurrency
     cfg = default_config(settings.models_dir, tuple(settings.languages), settings.models,
-                         settings.threads, settings.speakers, settings.hotwords, settings.diarizer)
-    queue = ThreadJobQueue(asr_workers=workers or settings.concurrency,
+                         settings.threads, settings.speakers, settings.hotwords, settings.diarizer,
+                         workers=n)
+    queue = ThreadJobQueue(asr_workers=n,
                            max_attempts=settings.max_job_attempts)
     pipeline = build_pipeline(cfg, store, with_detection=False)
     detect = DetectLanguage(store, queue, SoundfileLoader(), SileroVad(cfg.vad), build_resolver(cfg))
@@ -85,8 +87,9 @@ def main(argv=None):
             time.sleep(60)
 
     threading.Thread(target=bakim, daemon=True, name="bakim").start()
-    log.info("hazır: http://%s:%d  (diller: %s, eşzamanlı iş: %d)", a.host, a.port,
-             ",".join(s.languages), a.workers or s.concurrency)
+    n, why = (a.workers, "--workers") if a.workers else s.concurrency_plan()
+    log.info("hazır: http://%s:%d  (diller: %s, eşzamanlı iş: %d — %s)", a.host, a.port,
+             ",".join(s.languages), n, why)
     try:
         uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
     finally:

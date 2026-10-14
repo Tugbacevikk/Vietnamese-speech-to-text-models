@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from viet_asr.application.config import DiarizerConfig, LidConfig, PipelineConfig, VadConfig
+from viet_asr.application.config import (
+    DiarizerConfig, LidConfig, PipelineConfig, VadConfig, WhisperParams,
+)
 from viet_asr.application.language import LanguageResolver
 from viet_asr.application.ports import ResultRepository
 from viet_asr.application.transcribe import TranscribeAndDiarize
@@ -23,11 +25,13 @@ from viet_asr.infrastructure.whisper_lid import LazyDetector, WhisperLanguageDet
 def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                    models: dict[str, str] | None = None, threads: int = 2,
                    speakers: int = 0, hotwords: str | None = None,
-                   diarizer: str = "cluster") -> PipelineConfig:
+                   diarizer: str = "cluster", workers: int = 1) -> PipelineConfig:
+    """workers: aynı süreçte aynı anda işlenecek ses sayısı (yerel mod); motorlar buna göre
+    paralel çağrıya hazırlanır."""
     d, models = Path(models_dir), models or {}
     profiles = {}
     for code in languages:
-        extra = {"num_threads": threads}
+        extra = {"num_threads": threads, "whisper": WhisperParams(num_workers=max(1, workers))}
         if code == "vi" and hotwords:
             extra["hotwords_file"] = hotwords
         profiles[code] = language_profile(code, d, models.get(code), **extra)

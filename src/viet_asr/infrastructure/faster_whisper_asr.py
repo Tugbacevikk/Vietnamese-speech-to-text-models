@@ -72,7 +72,8 @@ class FasterWhisperAsr:
                     f"{model.folder}/model.bin yok: python scripts/download_models.py --tr {model.name}")
             whisper_model = WhisperModel(str(model.folder), device="cpu",
                                          compute_type=self.wp.compute_type,
-                                         cpu_threads=params.num_threads, local_files_only=True)
+                                         cpu_threads=params.num_threads, local_files_only=True,
+                                         num_workers=self.wp.num_workers)
             batched = BatchedInferencePipeline(model=whisper_model)
         self.model = whisper_model
         self.batched = batched
