@@ -1,14 +1,23 @@
 """Bakım süreci (tam modda; yerel modda local_server bunu kendi içinde çalıştırır).
 
     python -m viet_asr.interface.bakim            # her 60 sn
+
+Görevler: saklama süreleri, askıda kalan işler, kuyruğa girememiş işlerin yeniden kuyruğa
+konması. Birden çok kopya çalıştırılırsa Redis kilidi sayesinde aynı anda yalnız biri çalışır
+(diğerleri bekler, sahibi çökerse kilit 2 dk sonra boşalır ve biri devralır).
 """
 from __future__ import annotations
 
 import logging
 import time
 
+import redis
+
+from viet_asr.infrastructure.redis_streams import RedisLock, RedisStreamJobQueue
 from viet_asr.interface.composition import build_maintenance, store_from_settings
 from viet_asr.interface.settings import Settings
+
+log = logging.getLogger(__name__)
 
 
 def main():
@@ -16,12 +25,18 @@ def main():
     s = Settings()
     store = store_from_settings(s, pool_size=1)
     store.migrate()
-    m = build_maintenance(store, s)
+    r = redis.Redis.from_url(s.redis_url)
+    queue = RedisStreamJobQueue(r)
+    m = build_maintenance(store, s, queue=queue, queue_idle=queue.is_idle)
+    lock = RedisLock(r, "asr:bakim:kilit", ttl_s=120)
     while True:
         try:
-            m.run_once()
+            if lock.acquire():
+                m.run_once()
+            else:
+                log.debug("bakımı başka bir kopya yürütüyor")
         except Exception:
-            logging.exception("bakım turu başarısız")
+            log.exception("bakım turu başarısız")
         time.sleep(60)
 
 

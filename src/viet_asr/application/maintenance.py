@@ -4,6 +4,10 @@ fine-tuning reposundaki sweeper + retention_service'ten uyarlandı:
   - biten işlerin ses dosyası audio_hours sonra silinir (hasta kaydı: gereğinden uzun tutulmaz)
   - biten işin kaydı ve sonucu result_days sonra silinir
   - RUNNING'de stale_sec'ten uzun kalan iş FAILED olur ve (callback varsa) bildirim gider
+  - QUEUED'da queued_stale_sec'ten uzun kalan iş, ilgili kuyruk tamamen boşsa yeniden kuyruğa
+    konur: API kaydı yazıp mesajı kuyruğa koyamadan çöktüyse iş sonsuza dek beklerdi.
+    Kuyruk boş değilse dokunulmaz (4000 mesajlık yükte iş sadece sırasını bekliyordur;
+    yeniden koymak aynı işi iki kez işletirdi). Projedeki süpürücü bu kontrolü yapmıyordu.
 Kuyruktaki çöken işlerin devralınması bakımın değil kuyruğun işi (Redis XAUTOCLAIM).
 """
 from __future__ import annotations
@@ -18,13 +22,16 @@ log = logging.getLogger(__name__)
 class Maintenance:
     def __init__(self, store, remove_file: Callable[[str], bool], audio_hours: int,
                  result_days: int, stale_sec: int,
-                 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+                 queue=None, queue_idle: Callable[[str], bool] | None = None,
+                 queued_stale_sec: int = 300):
         self.store, self.remove_file, self.now = store, remove_file, now
         self.audio_hours, self.result_days, self.stale_sec = audio_hours, result_days, stale_sec
+        self.queue, self.queue_idle, self.queued_stale_sec = queue, queue_idle, queued_stale_sec
 
     def run_once(self) -> dict[str, int]:
         now = self.now()
-        out = {"ses_silindi": 0, "kayit_silindi": 0, "askida_kaldi": 0}
+        out = {"ses_silindi": 0, "kayit_silindi": 0, "askida_kaldi": 0, "yeniden_kuyrukta": 0}
         if self.audio_hours > 0:
             for job_id, path in self.store.finished_with_audio_before(now - timedelta(hours=self.audio_hours)):
                 if self.remove_file(path):
@@ -35,6 +42,22 @@ class Maintenance:
         for job_id in self.store.stale_running(now - timedelta(seconds=self.stale_sec)):
             self.store.fail(job_id, f"askıda kaldı: {self.stale_sec} sn'den uzun süre işleniyor görünüyordu")
             out["askida_kaldi"] += 1
+        if self.queue is not None and self.queue_idle is not None:
+            idle: dict[str, bool] = {}
+            for rec in self.store.stale_queued(now - timedelta(seconds=self.queued_stale_sec)):
+                lang = rec.decision.code if rec.decision else rec.job.language
+                q = lang or "lid"
+                if q not in idle:
+                    idle[q] = self.queue_idle(q)
+                if not idle[q]:
+                    continue
+                if lang:
+                    self.queue.enqueue_transcription(rec.job.job_id, lang)
+                else:
+                    self.queue.enqueue_detection(rec.job.job_id)
+                self.store.touch(rec.job.job_id)  # bir sonraki turda tekrar koyulmasın
+                out["yeniden_kuyrukta"] += 1
+                log.warning("kuyruğa girmemiş iş yeniden kuyrukta: %s (%s)", rec.job.job_id, q)
         if any(out.values()):
             log.info("bakım: %s", out)
         return out

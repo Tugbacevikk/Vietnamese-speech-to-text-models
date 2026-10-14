@@ -145,6 +145,12 @@ class MemoryJobStore:
     def stale_running(self, before):
         return [j for j, r in self.jobs.items() if r.status == JobStatus.RUNNING and r.updated_at < before]
 
+    def stale_queued(self, before):
+        return [r for r in self.jobs.values() if r.status == JobStatus.QUEUED and r.updated_at < before]
+
+    def touch(self, job_id):
+        self._update(job_id)
+
     def recent_timings(self, limit=500):
         done = [self.results[j] for j, r in self.jobs.items() if r.status == JobStatus.DONE and j in self.results]
         return [(t.language.code, t.duration, dict(t.timings)) for t in done if t.timings][:limit]

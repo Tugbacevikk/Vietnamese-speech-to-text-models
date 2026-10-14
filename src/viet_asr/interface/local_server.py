@@ -59,7 +59,13 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
 
     dispatcher = OutboxDispatcher(store, secret=settings.webhook_secret,
                                   max_attempts=settings.webhook_max_attempts)
-    app = create_app(store, queue, settings, {"veritabani": store.ping}, queue_stats=queue.stats)
+    def models_ready():
+        loaded = set(pipeline.engines.loaded())
+        missing = [lang for lang in settings.languages if lang not in loaded]
+        return not missing, (f"yüklenmemiş: {missing}" if missing else f"yüklü: {sorted(loaded)}")
+
+    app = create_app(store, queue, settings, {"veritabani": store.ping}, queue_stats=queue.stats,
+                     readiness={"modeller": models_ready})
     app.state.maintenance = build_maintenance(store, settings)
     return app, store, queue, dispatcher
 

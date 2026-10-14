@@ -304,6 +304,17 @@ class SqlAlchemyJobStore:
             return list(s.scalars(select(JobRow.id).where(JobRow.status == JobStatus.RUNNING.value,
                                                           JobRow.updated_at < before)))
 
+    def stale_queued(self, before: datetime) -> list[JobRecord]:
+        with self._session() as s:
+            rows = s.scalars(select(JobRow).where(JobRow.status == JobStatus.QUEUED.value,
+                                                  JobRow.updated_at < before)
+                             .order_by(JobRow.created_at).limit(1000)).all()
+            return [_record(r) for r in rows]
+
+    def touch(self, job_id: str) -> None:
+        with self._tx() as s:
+            s.execute(update(JobRow).where(JobRow.id == job_id).values(updated_at=utcnow()))
+
     def recent_done(self, limit: int = 500) -> list[tuple[float, float]]:
         """(ses süresi, istekten bitişe geçen süre) — son biten işler."""
         with self._session() as s:

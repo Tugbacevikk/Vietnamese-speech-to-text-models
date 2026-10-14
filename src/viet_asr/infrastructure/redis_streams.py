@@ -68,6 +68,20 @@ class RedisStreamJobQueue:
         out["dlq"] = {"toplam": int(self.r.xlen(DLQ)) if self.r.exists(DLQ) else 0}
         return out
 
+    def is_idle(self, queue: str) -> bool:
+        """Kuyrukta ne bekleyen ne işlenmekte olan mesaj var mı (bakımın yeniden kuyruğa koyma
+        kararı için)."""
+        st = self.stats([queue])[queue]
+        return st["bekleyen"] == 0 and st["islenmekte"] == 0
+
+    def live_consumers(self, queue: str, max_idle_ms: int = 60_000) -> int:
+        """Son max_idle_ms içinde kuyruğu okuyan işçi sayısı (hazır olma kontrolü)."""
+        try:
+            return sum(1 for c in self.r.xinfo_consumers(stream_name(queue), GROUP)
+                       if int(c.get("idle", 10**12)) <= max_idle_ms)
+        except redis.ResponseError:
+            return 0
+
     def _oldest_age(self, stream: str, group) -> float:
         """Henüz hiçbir işçiye verilmemiş en eski mesajın yaşı (sn): kuyruk tıkanmasını gösterir.
         Mesaj kimliğinin ilk kısmı eklenme zamanıdır (ms)."""
@@ -183,3 +197,33 @@ class StreamConsumer:
 
 def _s(v) -> str:
     return v.decode() if isinstance(v, bytes) else str(v)
+
+
+class RedisLock:
+    """Tek sahipli kilit (ör. bakım süreci birden çok kopyada çalışırsa yalnız biri çalışsın).
+
+    Yenileme ve bırakma Lua ile atomik: "kilit hâlâ bende mi" kontrolü ile süre uzatma tek
+    adımdır. Projedeki süpürücüde GET ile EXPIRE ayrıydı; arada kilidin süresi dolup başkası
+    alırsa, eski sahip yenisinin kilidini uzatabiliyordu.
+    """
+
+    _RENEW = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end"
+    _RELEASE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
+
+    def __init__(self, client, name: str, ttl_s: float = 120.0):
+        import uuid
+
+        self.r, self.name, self.ttl_ms = client, name, int(ttl_s * 1000)
+        self.token = uuid.uuid4().hex
+        self.held = False
+
+    def acquire(self) -> bool:
+        """Kilidi al ya da (zaten bendeyse) süresini uzat. Sahibi başkasıysa False."""
+        if self.held and self.r.eval(self._RENEW, 1, self.name, self.token, self.ttl_ms):
+            return True
+        self.held = bool(self.r.set(self.name, self.token, nx=True, px=self.ttl_ms))
+        return self.held
+
+    def release(self) -> None:
+        self.r.eval(self._RELEASE, 1, self.name, self.token)
+        self.held = False

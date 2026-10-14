@@ -52,3 +52,30 @@ def test_webhook_imzasi():
     assert not verify_signature("baska", "1700000000", body, sig, now=1700000100)
     assert not verify_signature("s3cr3t", "1700000000", body + b" ", sig, now=1700000100)
     assert not verify_signature("s3cr3t", "1700000000", body, sig, now=1700009999)  # eski
+
+
+def test_kuyruga_girmemis_isler_bos_kuyrukta_yeniden_konur():
+    from viet_asr.infrastructure.memory_store import MemoryJobStore
+
+    store = MemoryJobStore()
+    store.create(AudioJob("kayip_vi", "/a.wav", "vi"))
+    store.create(AudioJob("kayip_lid", "/b.wav"))
+    store.create(AudioJob("sirada_tr", "/c.wav", "tr"))
+    sent = []
+
+    class Q:
+        def enqueue_transcription(self, j, lang):
+            sent.append((j, lang))
+
+        def enqueue_detection(self, j):
+            sent.append((j, "lid"))
+
+    busy = {"tr"}                                                  # tr kuyruğu dolu: dokunma
+    now = datetime.now(timezone.utc) + timedelta(minutes=10)
+    m = Maintenance(store, lambda p: False, 0, 0, 600, now=lambda: now, queue=Q(),
+                    queue_idle=lambda q: q not in busy, queued_stale_sec=300)
+    assert m.run_once()["yeniden_kuyrukta"] == 2
+    assert sorted(sent) == [("kayip_lid", "lid"), ("kayip_vi", "vi")]
+    sent.clear()
+    m.now = lambda: datetime.now(timezone.utc)                     # hemen sonraki tur: tekrar koymaz
+    assert m.run_once()["yeniden_kuyrukta"] == 0 and sent == []

@@ -322,3 +322,14 @@ def test_webhook_deneme_bildirimi(ctx, monkeypatch):
     assert c.post("/webhooks/test", json={"url": "https://x/h"}).json() == {"ok": True, "url": "https://x/h"}
     assert c.get("/webhooks/dead").json() == []
     assert c.post("/webhooks/5/retry").status_code == 404
+
+
+def test_hazir_olma(tmp_path):
+    store, queue = MemoryJobStore(), Queue()
+    s = Settings(data_dir=str(tmp_path), languages=["vi"])
+    durum = {"ok": False}
+    c = TestClient(create_app(store, queue, s, readiness={"modeller": lambda: (durum["ok"], "x")}))
+    assert c.get("/health/ready").status_code == 503
+    durum["ok"] = True
+    r = c.get("/health/ready")
+    assert r.status_code == 200 and r.json()["ready"] is True

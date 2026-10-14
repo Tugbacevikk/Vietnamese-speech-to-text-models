@@ -108,3 +108,20 @@ def test_kuyruk_istatistikleri_en_eski_ve_dlq():
     q.enqueue_transcription("a", "vi")
     s = q.stats(["vi"])
     assert s["vi"]["bekleyen"] == 1 and s["vi"]["en_eski_sn"] >= 0 and s["dlq"]["toplam"] == 0
+
+
+def test_kilit_tek_sahip_ve_bosta_kontrolu(r):
+    from viet_asr.infrastructure.redis_streams import RedisLock, RedisStreamJobQueue
+
+    a, b = RedisLock(r, "test:kilit", ttl_s=5), RedisLock(r, "test:kilit", ttl_s=5)
+    r.delete("test:kilit")
+    assert a.acquire() and not b.acquire() and a.acquire()        # a yeniler, b alamaz
+    r.set("test:kilit", "baskasi")                               # süre doldu, başkası aldı
+    assert not a.acquire()                                       # eski sahip yenisininkini uzatamaz
+    assert r.get("test:kilit") == b"baskasi"
+    r.delete("test:kilit")
+    assert b.acquire()
+    b.release()
+    assert r.get("test:kilit") is None
+    q = RedisStreamJobQueue(r)
+    assert q.is_idle("tr") and q.live_consumers("tr") == 0

@@ -181,8 +181,10 @@ def safe_file_remover(data_dir: str | Path):
     return remove
 
 
-def build_maintenance(store, settings):
+def build_maintenance(store, settings, queue=None, queue_idle=None):
+    """queue/queue_idle verilirse (tam mod) kuyruğa girememiş işler de yeniden kuyruğa konur."""
     from viet_asr.application.maintenance import Maintenance
 
     return Maintenance(store, safe_file_remover(settings.data_dir), settings.audio_retention_hours,
-                       settings.result_retention_days, settings.processing_stale_sec)
+                       settings.result_retention_days, settings.processing_stale_sec,
+                       queue=queue, queue_idle=queue_idle, queued_stale_sec=settings.queued_stale_sec)

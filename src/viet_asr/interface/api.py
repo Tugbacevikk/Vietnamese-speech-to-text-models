@@ -21,6 +21,7 @@
     GET  /corrections   düzeltilen satırlar (scripts/duzeltmeleri_disa_aktar.py ince ayar verisine çevirir)
     GET  /              web arayüzü (dosya yükle, dil seç, sonucu dinle/indir)
     GET  /health        veritabanı ve kuyruk erişimi, durum sayıları (anahtar istemez)
+    GET  /health/ready  hazır mı: modeller yüklü / her kuyrukta çalışan işçi var (anahtar istemez)
     GET  /metrics       gecikme ve "1 dk ses <= 1 dk" hedefi, kuyruk doluluğu (JSON)
     GET  /metrics/prometheus   aynı ve daha fazlası Prometheus biçiminde (aşama süreleri, webhook)
 
@@ -66,7 +67,9 @@ class UtteranceEdit(BaseModel):
 
 
 def create_app(store: JobStore, queue: JobQueue, settings: Settings,
-               health_checks: dict | None = None, queue_stats=None, rate_limiter=None) -> FastAPI:
+               health_checks: dict | None = None, queue_stats=None, rate_limiter=None,
+               readiness: dict | None = None) -> FastAPI:
+    """readiness: ad -> () -> (hazır mı, açıklama); /health/ready bunları da sorar."""
     api = FastAPI(title="Ses -> metin + konuşmacı (vi, tr)", version="0.3.0")
     auth = Depends(api_key_dependency(settings))
     submit = SubmitJob(store, queue, settings.languages)
@@ -255,6 +258,26 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             pass
         return JSONResponse(body, status_code=200 if ok else 503)
 
+    @api.get("/health/ready")
+    def ready():
+        """Hazır olma: veritabanı/kuyruk erişimi ve modellerin yüklü, işçilerin çalışır olması.
+        Yük dengeleyici ya da Docker bu 200 dönmeden trafiği bu kopyaya göndermemeli."""
+        checks, ok = {}, True
+        for name, fn in (health_checks or {}).items():
+            try:
+                fn()
+                checks[name] = "ok"
+            except Exception as e:
+                checks[name], ok = f"hata: {type(e).__name__}", False
+        for name, fn in (readiness or {}).items():
+            try:
+                good, detail = fn()
+            except Exception as e:
+                good, detail = False, f"hata: {type(e).__name__}"
+            checks[name] = detail
+            ok = ok and good
+        return JSONResponse({"ready": ok, "checks": checks}, status_code=200 if ok else 503)
+
     @api.get("/metrics/prometheus", dependencies=[auth], response_class=PlainTextResponse)
     def metrics_prometheus():
         """Prometheus biçiminde: iş sayıları, kuyruk derinliği ve en eski mesaj yaşı, aşama süre
@@ -295,8 +318,15 @@ def _production_app() -> FastAPI:
         from viet_asr.infrastructure.rate_limit import RedisRateLimiter
 
         limiter = RedisRateLimiter(r, s.rate_limit_per_minute)
+    def workers():
+        alive = {q: queue.live_consumers(q) for q in ["lid", *s.languages]}
+        missing = [q for q, n in alive.items() if n == 0]
+        return not missing, (f"çalışan işçi yok: {missing}" if missing else
+                             ", ".join(f"{q}={n}" for q, n in alive.items()))
+
     return create_app(store, queue, s, {"veritabani": store.ping, "kuyruk": r.ping},
-                      queue_stats=lambda: queue.stats(["lid", *s.languages]), rate_limiter=limiter)
+                      queue_stats=lambda: queue.stats(["lid", *s.languages]), rate_limiter=limiter,
+                      readiness={"isciler": workers})
 
 
 def __getattr__(name):  # uvicorn viet_asr.interface.api:app -> ilk erişimde kurulur

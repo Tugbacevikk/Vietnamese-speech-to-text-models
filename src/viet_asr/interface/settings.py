@@ -84,6 +84,8 @@ class Settings:
     # webhook teslimi en fazla bu kadar denenir (10 sn'den 1 saate artan aralıklarla), sonra "ölü"
     webhook_max_attempts: int = field(default_factory=lambda: int(os.environ.get(
         "WEBHOOK_MAX_ATTEMPTS", "8")))
+    # QUEUED'da bundan uzun kalan iş, kuyruğu boşsa yeniden kuyruğa konur (tam mod, sn)
+    queued_stale_sec: int = field(default_factory=lambda: int(os.environ.get("QUEUED_STALE_SEC", "300")))
     max_job_attempts: int = field(default_factory=lambda: int(os.environ.get("MAX_JOB_ATTEMPTS", "3")))
     # modeller yüklenirken MANIFEST.json'daki sha256 ile karşılaştır
     verify_models: bool = field(default_factory=lambda: os.environ.get("VERIFY_MODELS", "1") == "1")
