@@ -23,6 +23,7 @@ class MemoryJobStore:
         self._originals: dict = {}
         self._edits: dict = {}
         self._deleted: set = set()
+        self.consents: dict[str, tuple[str, str, datetime]] = {}
 
     def create(self, job: AudioJob) -> str:
         with self._lock:
@@ -108,9 +109,18 @@ class MemoryJobStore:
             self._edits[(job_id, idx)] = (orig, _now())
             return new
 
-    def corrections(self, limit=10_000):
+    def set_consent(self, job_id, by, use):
+        r = self.jobs.get(job_id)
+        if r is None or r.status != JobStatus.DONE:
+            return False
+        self.consents[job_id] = (by, use, _now())
+        return True
+
+    def corrections(self, limit=10_000, consented_only=False):
         out = []
         for (jid, idx), ((osp, otx), at) in self._edits.items():
+            if consented_only and jid not in self.consents:
+                continue
             u, r = self.results[jid].utterances[idx], self.jobs[jid]
             out.append(Correction(jid, r.job.audio_path, r.decision.code if r.decision else None, idx,
                                   u.start, u.end, u.speaker, u.text, osp, otx, at))

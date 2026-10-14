@@ -46,6 +46,12 @@ input[type=password], select { background: var(--input); color: var(--text); bor
 .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
 h2 { font-size: 1.15rem; font-weight: 600; }
+dialog { margin: auto; background: var(--card, var(--input)); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 18px; max-width: 420px; width: calc(100% - 32px); }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+dialog label { display: block; font-size: .85rem; margin: 10px 0 4px; }
+dialog input[type=text], dialog select, dialog textarea { width: 100%; font: inherit; background: var(--input); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+dialog .sub { margin-top: 6px; }
+dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 14px 0; }
 .meta div { background: var(--input); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
 .meta b { display: block; font-size: .72rem; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .03em; }
@@ -132,6 +138,7 @@ audio { width: 100%; margin-bottom: 12px; }
         <button class="btn ghost" data-export="json">JSON</button>
         <button class="btn ghost" data-export="rttm" title="konuşmacı zamanları (DER ölçümü için)">RTTM</button>
         <button class="btn ghost" id="reanalyze" title="konuşmacı sayısını düzeltip aynı sesi yeniden analiz et">Yeniden analiz</button>
+        <button class="btn ghost hidden" id="toDataset" title="kontrol edilmiş sonucu test/eğitim verisinin onay kuyruğuna koy">Veri setine ekle</button>
         <button class="btn danger" id="del">Sil</button>
       </div>
     </div>
@@ -149,6 +156,20 @@ audio { width: 100%; margin-bottom: 12px; }
   </section>
 </div>
 
+<dialog id="dsDialog">
+  <form method="dialog" id="dsForm">
+    <b>Veri setine ekle</b>
+    <p class="sub">Satırları kontrol ettikten sonra kullanın. Kayıt onay kuyruğuna düşer; asıl ekleme scripts/veri_seti.py onayla ile yapılır.</p>
+    <label for="dsReviewer">Kontrol eden</label>
+    <input type="text" id="dsReviewer" required maxlength="100">
+    <label for="dsUse">Kullanım</label>
+    <select id="dsUse"><option value="test">Test (doğruluk ölçümü)</option><option value="egitim">Eğitim (ince ayar)</option></select>
+    <label for="dsNotes">Not (isteğe bağlı)</label>
+    <textarea id="dsNotes" rows="2" maxlength="500"></textarea>
+    <label><input type="checkbox" id="dsConsent"> Bu kaydın veri setinde kullanılmasına izin var</label>
+    <div class="row"><button class="btn ghost" value="cancel" formnovalidate>Vazgeç</button><button class="btn" value="ok" id="dsOk" disabled>Gönder</button></div>
+  </form>
+</dialog>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -395,6 +416,25 @@ $("reanalyze").addEventListener("click", async () => {
   } catch (e) { setStatus("Başlatılamadı: " + e.message, true); }
 });
 
+$("toDataset").addEventListener("click", () => {
+  if (!current) return;
+  $("dsReviewer").value = store.get("asr_reviewer") || ""; $("dsConsent").checked = false; $("dsOk").disabled = true;
+  $("dsDialog").showModal();
+});
+$("dsConsent").addEventListener("change", () => { $("dsOk").disabled = !$("dsConsent").checked; });
+$("dsDialog").addEventListener("close", async () => {
+  if ($("dsDialog").returnValue !== "ok" || !current) return;
+  const reviewer = $("dsReviewer").value.trim();
+  if (!reviewer) { setStatus("Kontrol eden kişinin adı gerekli", true); return; }
+  store.set("asr_reviewer", reviewer);
+  try {
+    await api(`/jobs/${encodeURIComponent(current.job_id)}/dataset`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reviewer, consent: $("dsConsent").checked, use: $("dsUse").value, notes: $("dsNotes").value }) });
+    setStatus("Onay kuyruğuna eklendi.");
+  } catch (e) { setStatus("Eklenemedi: " + e.message, true); }
+});
+
 $("del").addEventListener("click", async () => {
   if (!current || !confirm("Bu analiz ve ses dosyası silinsin mi? Geri alınamaz.")) return;
   try {
@@ -434,6 +474,7 @@ async function health() {
   try {
     const r = await fetch("/health"); const h = await r.json();
     $("health").className = "dot " + (r.ok ? "ok" : "bad");
+    $("toDataset").classList.toggle("hidden", !(h.features && h.features.dataset_export));
     $("health").title = r.ok ? `çalışıyor · diller: ${h.languages.join(", ")}` : "sorun: " + JSON.stringify(h.checks);
   } catch { $("health").className = "dot bad"; $("health").title = "sunucuya ulaşılamıyor"; }
 }

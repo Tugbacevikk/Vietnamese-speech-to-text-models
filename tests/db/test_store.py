@@ -304,3 +304,16 @@ def test_yeniden_analiz_icin_acma(store):
     store.save(transcript("ra"))
     store.clear_audio("ra")
     assert store.reopen("ra", 2) is None                       # sesi silinmiş
+
+
+def test_veri_seti_onayi(store):
+    store.create(AudioJob("v", "/v.wav", "vi"))
+    assert store.set_consent("v", "Dr. A", "test") is False      # bitmedi
+    store.save(transcript("v"))
+    store.update_utterance("v", 0, text="x")
+    store.create(AudioJob("w", "/w.wav", "vi"))
+    store.save(transcript("w"))
+    store.update_utterance("w", 0, text="y")
+    assert len(store.corrections()) == 2 and store.corrections(consented_only=True) == []
+    assert store.set_consent("v", "Dr. A", "test") is True
+    assert [c.job_id for c in store.corrections(consented_only=True)] == ["v"]

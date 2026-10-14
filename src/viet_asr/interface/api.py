@@ -13,6 +13,7 @@
     GET  /jobs/{id}     durum; bittiyse sonuç (konuşmacılı satırlar)
     GET  /jobs/{id}/audio   yüklenen ses (saklama süresi dolmadıysa; arayüzde dinlemek için)
     DELETE /jobs/{id}   bitmiş işi, sonucunu ve sesini siler (kuyruktaki/işlenen iş silinmez)
+    POST /jobs/{id}/dataset {"reviewer","consent","use","notes"}  veri setinin onay kuyruğuna
     POST /jobs/{id}/reanalyze {"num_speakers"}  aynı sesi yeni konuşmacı sayısıyla yeniden analiz et
     DELETE /jobs/{id}/utterances/{n}  n. satırı sonuçtan kaldır (uydurma satır; kayıtta kalır)
     PATCH /jobs/{id}/utterances/{n}   n. satırın metnini/konuşmacısını düzelt ({"text", "speaker"});
@@ -55,6 +56,13 @@ from viet_asr.interface.settings import Settings
 log = logging.getLogger(__name__)
 _ALLOWED = {".wav", ".flac", ".ogg", ".mp3", ".opus"} | FFMPEG_ONLY
 _UI = Path(__file__).parent / "static" / "index.html"
+
+
+class DatasetExport(BaseModel):
+    reviewer: str = Field(..., min_length=2, max_length=100)   # kontrol eden kişi
+    consent: bool                                              # kaydın kullanımına onay
+    use: str = Field("test", pattern="^(test|egitim)$")        # test: ölçüm, egitim: ince ayar
+    notes: str | None = Field(None, max_length=1000)
 
 
 class Reanalyze(BaseModel):
@@ -214,6 +222,36 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             queue.enqueue_detection(job_id)
         return {"job_id": job_id, "status": JobStatus.QUEUED.value, "num_speakers": rec.job.num_speakers}
 
+    @api.post("/jobs/{job_id}/dataset", dependencies=[auth])
+    def to_dataset(job_id: str, body: DatasetExport):
+        """Kontrol edilmiş sonucu veri setinin onay kuyruğuna koyar (scripts/veri_seti.py onaylar).
+        ENABLE_DATASET_EXPORT açık olmalı; kontrol eden kişinin adı ve açık onay zorunlu."""
+        if not settings.enable_dataset_export:
+            raise HTTPException(403, "veri setine aktarma kapalı (ENABLE_DATASET_EXPORT)")
+        if not body.consent:
+            raise HTTPException(422, "kaydın veri setinde kullanılmasına onay verilmeli")
+        rec = store.get(job_id)
+        if rec is None:
+            raise HTTPException(404, "iş bulunamadı")
+        t = store.get_transcript(job_id) if rec.status == JobStatus.DONE else None
+        if t is None:
+            raise HTTPException(409, "yalnızca bitmiş iş aktarılabilir")
+        p = Path(rec.job.audio_path) if rec.job.audio_path else None
+        if p is None or not p.is_file():
+            raise HTTPException(410, "ses dosyası silinmiş (saklama süresi)")
+        from viet_asr.application.serialization import transcript_to_dict
+        from viet_asr.infrastructure.audio import SoundfileLoader
+        from viet_asr.infrastructure.dataset import write_pending
+
+        res = transcript_to_dict(t)
+        meta = {"kontrol_eden": body.reviewer.strip(), "kullanim": body.use, "not": body.notes or "",
+                "dil": t.language.code if t.language else None, "model": t.model,
+                "duzeltilen_satir": sum(1 for u in t.utterances if u.edited)}
+        d = write_pending(Path(settings.dataset_dir), job_id, SoundfileLoader().load(str(p)),
+                          res["utterances"], meta)
+        store.set_consent(job_id, body.reviewer.strip(), body.use)
+        return {"job_id": job_id, "durum": "onay bekliyor", "klasor": str(d)}
+
     @api.delete("/jobs/{job_id}/utterances/{idx}", dependencies=[auth])
     def delete_utterance(job_id: str, idx: int):
         """Uydurma/yanlış satırı sonuçtan kaldırır; kayıtta kalır (model hatası olarak incelenir)."""
@@ -271,7 +309,8 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             except Exception as e:
                 checks[name], ok = f"hata: {type(e).__name__}", False
         body = {"status": "ok" if ok else "bozuk", "checks": checks,
-                "languages": settings.languages}
+                "languages": settings.languages,
+                "features": {"dataset_export": settings.enable_dataset_export}}
         try:
             body["jobs"] = store.counts()
         except Exception:

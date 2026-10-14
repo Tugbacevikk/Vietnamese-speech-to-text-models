@@ -349,3 +349,75 @@ def test_yeniden_analiz(ctx):
     rec = c.get(f"/jobs/{jid}").json()
     assert rec["status"] == "queued" and rec["num_speakers"] == 2
     assert c.post(f"/jobs/{jid}/reanalyze", json={"num_speakers": 50}).status_code == 422
+
+
+def test_veri_setine_aktarma(tmp_path):
+    import json
+
+    from viet_asr.domain import LanguageDecision, LanguageSource, Transcript, Utterance
+    from viet_asr.infrastructure import dataset
+
+    body = {"reviewer": "Dr. A", "consent": True, "use": "test"}
+    store, queue = MemoryJobStore(), Queue()
+    off = TestClient(create_app(store, queue, Settings(data_dir=str(tmp_path / "up"), languages=["vi"])))
+    jid = post(off, {"language": "vi"}).json()["job_id"]
+    assert off.post(f"/jobs/{jid}/dataset", json=body).status_code == 403       # varsayılan kapalı
+    assert off.get("/health").json()["features"]["dataset_export"] is False
+
+    root = tmp_path / "vs"
+    s = Settings(data_dir=str(tmp_path / "up"), languages=["vi"], enable_dataset_export=True, dataset_dir=str(root))
+    c = TestClient(create_app(store, queue, s))
+    assert c.get("/health").json()["features"]["dataset_export"] is True
+    assert c.post(f"/jobs/{jid}/dataset", json=body).status_code == 409         # bitmedi
+    assert c.post("/jobs/yok/dataset", json=body).status_code == 404
+    store.save(Transcript(jid, 1.0, [Utterance("speaker_00", 0.0, 1.0, "xin chào")], "m",
+                          LanguageDecision("vi", 1.0, LanguageSource.REQUEST)))
+    assert c.post(f"/jobs/{jid}/dataset", json={**body, "consent": False}).status_code == 422
+    assert c.post(f"/jobs/{jid}/dataset", json={**body, "use": "baska"}).status_code == 422
+    assert store.corrections(consented_only=True) == []
+    store.update_utterance(jid, 0, text="xin chào bác sĩ")
+    assert store.corrections(consented_only=True) == []                          # onay yok
+    r = c.post(f"/jobs/{jid}/dataset", json=body)
+    assert r.status_code == 200, r.text
+    assert len(store.corrections(consented_only=True)) == 1
+    d = root / "bekleyen" / jid
+    assert {p.name for p in d.iterdir()} == {"ses.wav", "konusmaci.rttm", "ref.json", "satirlar.tsv", "meta.json"}
+    meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+    assert meta["kontrol_eden"] == "Dr. A" and meta["dil"] == "vi" and meta["duzeltilen_satir"] == 1
+    assert json.loads((d / "ref.json").read_text(encoding="utf-8"))["konusmaci_metin"] == {"speaker_00": "xin chào bác sĩ"}
+    assert [m["job_id"] for m in dataset.pending(root)] == [jid]
+
+    target = dataset.approve(root, jid, approver="Dr. B")
+    assert target == root / "test" / "vi" and not d.exists()
+    assert (target / "audio" / f"{jid}.wav").exists() and (target / "diyalog.tsv").exists()
+
+    # aynı ses yeniden aktarılıp eğitime onaylanamaz (test setine sızıntı)
+    assert c.post(f"/jobs/{jid}/dataset", json={**body, "use": "egitim"}).status_code == 200
+    with pytest.raises(ValueError, match="sızıntı"):
+        dataset.approve(root, jid)
+    dataset.reject(root, jid)
+    assert dataset.pending(root) == []
+
+
+def test_veri_seti_egitim_bolumu(tmp_path):
+    import csv
+
+    import numpy as np
+
+    from viet_asr.infrastructure import dataset
+
+    audio = np.random.default_rng(0).standard_normal(16000 * 30).astype(np.float32) * 0.1
+    utts = [{"speaker": "speaker_00", "start": 0.0, "end": 5.0, "text": "một"},
+            {"speaker": "speaker_01", "start": 5.0, "end": 5.5, "text": "kısa"},          # 1 sn altı
+            {"speaker": "speaker_00", "start": 6.0, "end": 29.0, "text": "uzun"},         # 20 sn üstü
+            {"speaker": "BELIRSIZ", "start": 29.0, "end": 30.0, "text": "?"}]
+    dataset.write_pending(tmp_path, "j1", audio, utts, {"dil": "vi", "kullanim": "egitim"})
+    assert "BELIRSIZ" not in (tmp_path / "bekleyen" / "j1" / "konusmaci.rttm").read_text()
+    target = dataset.approve(tmp_path, "j1")
+    assert target == tmp_path / "egitim" / "vi"
+    rows = list(csv.DictReader((target / "liste.tsv").open(encoding="utf-8"), delimiter="\t"))
+    assert [(r["metin"], r["kayit"]) for r in rows] == [("một", "j1")]
+    assert (target / rows[0]["dosya"]).exists()
+    with pytest.raises(ValueError):
+        dataset.write_pending(tmp_path, "j2", audio, utts, {"dil": "vi"})
+        dataset.approve(tmp_path, "j2", use="hepsi")

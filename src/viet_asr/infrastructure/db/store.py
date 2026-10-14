@@ -225,6 +225,15 @@ class SqlAlchemyJobStore:
                                                     _ints(r.low_conf) if r.edited_at is None else ())
                                           for r in rows])
 
+    def set_consent(self, job_id: str, by: str, use: str) -> bool:
+        """Veri setine aktarma onayı (kim, hangi amaçla). Bitmiş iş değilse False."""
+        with self._tx() as s:
+            j = s.get(JobRow, job_id)
+            if j is None or j.status != JobStatus.DONE.value:
+                return False
+            j.consent_by, j.consent_at, j.consent_use = by, utcnow(), use
+            return True
+
     def reopen(self, job_id: str, num_speakers: int | None) -> JobRecord | None:
         """Bitmiş işi yeniden analiz için kuyruğa hazırlar (QUEUED, yeni konuşmacı sayısı).
         Sesi silinmiş ya da bitmemiş işte None. Eski satırlar yeni sonuç kaydedilince değişir."""
@@ -264,12 +273,15 @@ class SqlAlchemyJobStore:
             u.edited_at = utcnow()
             return Utterance(u.speaker, u.start_s, u.end_s, u.text, True, u.idx)
 
-    def corrections(self, limit: int = 10_000) -> list[Correction]:
+    def corrections(self, limit: int = 10_000, consented_only: bool = False) -> list[Correction]:
+        """consented_only: yalnızca veri setine aktarma onayı verilmiş işlerden (ince ayar verisi)."""
         with self._session() as s:
-            rows = s.execute(select(UtteranceRow, JobRow.audio_path, JobRow.lang_code)
-                             .join(JobRow, JobRow.id == UtteranceRow.job_id)
-                             .where(UtteranceRow.edited_at.is_not(None), UtteranceRow.deleted_at.is_(None))
-                             .order_by(UtteranceRow.edited_at.desc()).limit(limit)).all()
+            q = (select(UtteranceRow, JobRow.audio_path, JobRow.lang_code)
+                 .join(JobRow, JobRow.id == UtteranceRow.job_id)
+                 .where(UtteranceRow.edited_at.is_not(None), UtteranceRow.deleted_at.is_(None)))
+            if consented_only:
+                q = q.where(JobRow.consent_at.is_not(None))
+            rows = s.execute(q.order_by(UtteranceRow.edited_at.desc()).limit(limit)).all()
             return [Correction(u.job_id, path, lang, u.idx, u.start_s, u.end_s, u.speaker, u.text,
                                u.original_speaker or u.speaker, u.original_text or u.text, u.edited_at)
                     for u, path, lang in rows]

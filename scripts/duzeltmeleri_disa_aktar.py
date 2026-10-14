@@ -7,6 +7,7 @@
 Bu TSV doğrudan finetune/veri_hazirla.py --train/--dev'e verilir. Aynı kayıttaki satırlar
 aynı "kayit" değerini taşır; veri_hazirla.py bir kaydı iki bölüme koymaz.
 
+Yalnızca veri setine aktarma onayı verilmiş işler (arayüzde "Veri setine ekle") dışa aktarılır.
 Atlananlar: sesi silinmiş işler (saklama süresi), 1 sn'den kısa ya da 20 sn'den uzun satırlar
 (icefall sınırı). Veritabanı varsayılan olarak yerel modunki (DATA_DIR/jobs.db).
 """
@@ -45,7 +46,8 @@ def main() -> int:
     with (out / "liste.tsv").open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f, delimiter="\t")
         w.writerow(["dosya", "metin", "kayit", "ilk_metin", "konusmaci"])
-        for c in store.corrections():
+        # yalnızca veri setine aktarma onayı verilmiş işler (kontrol eden + açık onay)
+        for c in store.corrections(consented_only=True):
             if a.dil and c.language != a.dil:
                 skipped["dil"] += 1
                 continue

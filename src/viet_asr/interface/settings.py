@@ -89,6 +89,11 @@ class Settings:
         "WEBHOOK_MAX_ATTEMPTS", "8")))
     # QUEUED'da bundan uzun kalan iş, kuyruğu boşsa yeniden kuyruğa konur (tam mod, sn)
     queued_stale_sec: int = field(default_factory=lambda: int(os.environ.get("QUEUED_STALE_SEC", "300")))
+    # Kontrol edilmiş sonuçları veri setine (test/eğitim) aktarma; varsayılan kapalı. Açıkken bile
+    # her aktarım kontrol eden kişinin adı ve açık onay ister; önce bekleyen kuyruğa düşer.
+    enable_dataset_export: bool = field(default_factory=lambda: os.environ.get(
+        "ENABLE_DATASET_EXPORT", "0").lower() in ("1", "true", "evet"))
+    dataset_dir: str = field(default_factory=lambda: os.environ.get("DATASET_DIR", "data/veri_seti"))
     max_job_attempts: int = field(default_factory=lambda: int(os.environ.get("MAX_JOB_ATTEMPTS", "3")))
     # modeller yüklenirken MANIFEST.json'daki sha256 ile karşılaştır
     verify_models: bool = field(default_factory=lambda: os.environ.get("VERIFY_MODELS", "1") == "1")
