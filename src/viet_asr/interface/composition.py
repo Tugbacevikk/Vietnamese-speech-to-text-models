@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from viet_asr.application.config import (
-    DiarizerConfig, LidConfig, PipelineConfig, ProfileConfig, VadConfig, WhisperParams,
+    DiarizerConfig, FusionConfig, LidConfig, PipelineConfig, ProfileConfig, VadConfig, WhisperParams,
 )
 from viet_asr.application.language import LanguageResolver
 from viet_asr.application.ports import ResultRepository
@@ -26,7 +26,7 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                    models: dict[str, str] | None = None, threads: int = 2,
                    speakers: int = 0, hotwords: str | None = None,
                    diarizer: str = "cluster", workers: int = 1, profile: str = "full",
-                   min_diarize_sec: float = 10.0) -> PipelineConfig:
+                   min_diarize_sec: float = 10.0, sandwich_max: float = 0.0) -> PipelineConfig:
     """workers: aynı süreçte aynı anda işlenecek ses sayısı (yerel mod); motorlar buna göre
     paralel çağrıya hazırlanır."""
     d, models = Path(models_dir), models or {}
@@ -39,6 +39,7 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
     return PipelineConfig(
         languages=profiles,
         profile=ProfileConfig(default=profile, min_diarize_sec=min_diarize_sec),
+        fusion=FusionConfig(sandwich_max=sandwich_max),
         lid=LidConfig(stages=lid_stages(d), num_threads=threads),
         vad=VadConfig(model=str(d / "silero_vad.onnx")),
         diarizer=DiarizerConfig(
@@ -147,7 +148,7 @@ def config_from_settings(s, workers: int = 1) -> PipelineConfig:
     """Ayarlardan hat yapılandırması (yerel sunucu, kuyruk işçisi ve doğrulama aynı yerden)."""
     return default_config(s.models_dir, tuple(s.languages), s.models, s.threads, s.speakers,
                           s.hotwords, s.diarizer, workers=workers, profile=s.pipeline_profile,
-                          min_diarize_sec=s.pipeline_min_diarize_sec)
+                          min_diarize_sec=s.pipeline_min_diarize_sec, sandwich_max=s.fusion_sandwich_max)
 
 
 def verify_models_or_exit(settings) -> None:

@@ -10,3 +10,4 @@ Her dosya bir kararı kaydeder: bağlam, karar, sonuçları. Karar değişirse d
 | [0003](0003-konusmaci-ayirma.md) | Konuşmacı ayırma: CAM++ imzası + spektral kümeleme | Kabul |
 | [0004](0004-dil-ve-modeller.md) | Dil seçimi ve dil başına model | Kabul |
 | [0005](0005-rust-gecisi.md) | Rust'a kademeli geçiş | Öneri |
+| [0006](0006-fine-tuning-projesinden-alinanlar.md) | Fine-tuning projesinden alınanlar ve alınmayanlar | Kabul |

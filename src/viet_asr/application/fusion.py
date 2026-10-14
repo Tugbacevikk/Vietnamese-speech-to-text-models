@@ -111,7 +111,33 @@ class FusionEngine:
 
     def fuse(self, words: list[Word], speakers: list[SpeakerSegment]) -> list[Utterance]:
         words = sorted(words, key=lambda s: s.start)
-        return self.merge(words, self.assign(words, speakers))
+        labels = self.assign(words, speakers)
+        if self.cfg.sandwich_max > 0:
+            labels = self.smooth(words, labels)
+        return self.merge(words, labels)
+
+    def smooth(self, words: list[Word], labels: list[str]) -> list[str]:
+        """A, kısa B, A -> A, A, A: iki yanında aynı kişi olan kısa konuşma parçası (sandwich_max
+        sn'den kısa, aralarda new_utterance_gap'ten uzun sessizlik yok) o kişiye verilir.
+        Kısa sıralar genelde konuşmacı ayırmanın pencere sınırı hatasıdır."""
+        runs: list[list[int]] = []  # [başlangıç indeksi, bitiş indeksi (dahil)]
+        for i, lab in enumerate(labels):
+            if runs and labels[runs[-1][0]] == lab:
+                runs[-1][1] = i
+            else:
+                runs.append([i, i])
+        out = list(labels)
+        gap = self.cfg.new_utterance_gap
+        for k in range(1, len(runs) - 1):
+            (p0, p1), (b0, b1), (n0, _) = runs[k - 1], runs[k], runs[k + 1]
+            if out[p0] != out[n0]:
+                continue
+            short = words[b1].end - words[b0].start <= self.cfg.sandwich_max
+            close = (words[b0].start - words[p1].end <= gap) and (words[n0].start - words[b1].end <= gap)
+            if short and close:
+                for i in range(b0, b1 + 1):
+                    out[i] = out[p0]
+        return out
 
 
 def _utt(speaker: str, ws: list[Word]) -> Utterance:

@@ -122,6 +122,21 @@ değerlendirildi. 2 çekirdekli bulut makinesi; dil verilmedi (sesten bulundu).
   tek kişi çıktı; `num_speakers=2` verilince cümleler doğru ayrıldı. Eşiği 0,34'e indirmek bu
   dosyayı düzeltiyor ama 17 sn'lik telefon kaydını 6 kişiye bölüyor; değiştirilmedi.
 
+## Araya sıkışmış kısa konuşmacı düzeltmesi — 9 Vietnamca diyalog (14 Ekim 2026)
+
+A, kısa B, A dizisinde B'yi A'ya vermek (fine-tuning projesindeki "sandwich" düzeltmesi):
+
+| eşik | DER | cpWER |
+|---|---|---|
+| kapalı | %10,64 | %32,01 |
+| 1,0 sn | %10,44 | %31,82 |
+| 1,5 sn | %10,14 | %31,54 |
+| 2,0 sn | %10,07 | %31,35 |
+
+Hiçbir dosya kötüleşmedi, ama **kapalı bırakıldı**: diyaloglar kesitlerden kurulduğu için
+gerçek kısa araya girmeler ("ừ", "evet") yok; düzeltme onları siler ve bu sette zararı
+görünmez. Kesintisiz gerçek görüşme kaydıyla ölçülünce `FUSION_SANDWICH_MAX` ile açılabilir.
+
 ## Henüz yapılmadı
 
 - VIVOS test (tarafsız) — `benchmarks/dogruluk_testi.py`; bu ortamdan Hugging Face'e erişim yok.

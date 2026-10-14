@@ -189,6 +189,13 @@ class FusionConfig:
     # 13 Ekim arayüz denemesi: bir doktorun 92 sn'si tek satırdı (okuması ve altyazısı zor).
     # 0 = bölme yok.
     max_utterance: float = 25.0
+    # Araya sıkışmış kısa konuşmacı (A, kısa B, A): B bu süreden (sn) kısaysa A'ya verilir
+    # (projedeki SemanticRefiner "sandwich" düzeltmesi). 0 = kapalı (varsayılan).
+    # 14 Ekim, 9 Vietnamca diyalog: DER %10,64 -> 1,0 sn %10,44 | 1,5 sn %10,14 | 2,0 sn %10,07.
+    # Kapalı bırakıldı: bu diyaloglar kesitlerden kurulduğu için içinde gerçek kısa araya
+    # girme ("ừ", "evet", "hı hı") yok; düzeltme tam da onları siler ve bu sette ölçülemez.
+    # Gerçek, kesintisiz görüşme kaydıyla ölçülünce açılabilir (FUSION_SANDWICH_MAX).
+    sandwich_max: float = 0.0
 
 
 @dataclass(frozen=True)

@@ -75,3 +75,13 @@ def test_duraklamasiz_uzun_satir_sinirdan_bolunur():
     ws = [Y("x", i * 0.5, i * 0.5 + 0.5) for i in range(120)]       # 60 sn, hiç boşluk yok
     utts = eng(max_utterance=25).fuse(ws, [S(A, 0, 61)])
     assert all(u.end - u.start <= 25 for u in utts) and len(utts) == 3
+
+
+def test_araya_sikismis_kisa_konusmaci_duzeltmesi():
+    ws = [Y("a", 0, .5), Y("b", .6, 1), Y("x", 1.1, 1.4), Y("c", 1.5, 2), Y("d", 2.1, 2.5),
+          Y("u", 2.6, 4.5), Y("e", 4.6, 5)]
+    segs = [S(A, 0, 1.05), S(B, 1.05, 1.45), S(A, 1.45, 2.55), S(B, 2.55, 4.55), S(A, 4.55, 6)]
+    off = eng().fuse(ws, segs)
+    assert [u.speaker for u in off] == [A, B, A, B, A]                       # kapalıyken olduğu gibi
+    on = eng(sandwich_max=1.0).fuse(ws, segs)
+    assert [(u.speaker, u.text) for u in on] == [(A, "a b x c d"), (B, "u"), (A, "e")]  # 1,9 sn'lik B kalır

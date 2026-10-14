@@ -78,6 +78,9 @@ class Settings:
     # feedback profilinde bundan kısa seste konuşmacı ayırma atlanır (sn)
     pipeline_min_diarize_sec: float = field(default_factory=lambda: float(os.environ.get(
         "PIPELINE_MIN_DIARIZE_SEC", "10")))
+    # araya sıkışmış kısa konuşmacıyı komşusuna ver (sn; 0 = kapalı). Bkz. FusionConfig.
+    fusion_sandwich_max: float = field(default_factory=lambda: float(os.environ.get(
+        "FUSION_SANDWICH_MAX", "0")))
     # callback'e hangi olaylarda bildirim gitsin (istekte notify= ile iş başına)
     notify_default: list[str] = field(default_factory=lambda: _list(os.environ.get(
         "NOTIFY_EVENTS", "done,failed,rejected")))
