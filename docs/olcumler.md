@@ -181,3 +181,19 @@ Silhouette tek kişiyi hiç bulamaz (en az 2 küme ister); projedeki eşikle de 
 Ayrıca köşegeni sıfırlanmamış uzaklık matrisinde sklearn hata veriyor. Alınmadı.
 
 "Küçük konuşmacıyı koru" (SpeakerMerger): hasta setinde 7 → 6. Alınmadı, ayar olarak kaldı.
+
+## Türkçe hız ve 4000 mesaj — fine-tuning projesindeki ölçümler (Tuğba'nın bilgisayarı)
+
+Kaynak: Tugbacevikk/fine-tuning README ve docs/benchmarks (gerçek Türkçe görüşmeler, 4 iş
+parçacığı, GPU yok). Bu sistemde yeniden ölçülmedi; proje sahibinin onayıyla kabul edildi.
+
+| Model | Medyan oran | En kötü oran | 1 dk ses |
+|---|---|---|---|
+| faster-whisper medium | 0,94 | 0,98 | ~56–58 sn |
+| faster-whisper small | 0,23 | 0,28 | ~14–16 sn |
+
+- Medium hedefin (≤ 1) içinde ama sınıra yakın. O ölçümde sıcaklık yedeği her bölümde
+  çalışıyordu; burada yalnızca boşluk kurtarmada çalıştığı için oran aynı ya da daha düşük olmalı.
+- 4000 mesaj: sahte modellerle 4 eşzamanlı işçi, çift işleme yok (test_worker_accuracy.py).
+  Süre tablosu small modelin oranından hesaplanmış (10 sn'lik 4000 mesaj, 4 işçi ≈ 22 dk);
+  medium ile aynı yük yaklaşık 4 kat sürer. `/metrics` kuyrukta bekleme süresini gösterir.

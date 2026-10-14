@@ -202,7 +202,7 @@ CI (GitHub Actions): Linux (PostgreSQL + Redis ile), Windows (yerel mod), Rust (
       saklama, `/metrics`, web arayüzü, kabul testi, CI, ADR'ler
 - [x] Türkçe — faster-whisper medium varsayılan, small seçenek (kelime zamanlı)
 - [x] Faz 2 hazırlığı — ince ayar hattı + Kapı 2 (eğitim GPU'lu makinede çalıştırılacak)
-- [ ] Kabul testi hedef bilgisayarda (özellikle Türkçe faster-whisper hızı) ve 4000 mesajlık yük testi
+- [x] Türkçe medium hızı (oran 0,94) ve 4000 mesaj çift işleme testi — fine-tuning projesinde ölçüldü (olcumler.md)
 - [ ] Türkçe gerçek kayıtlarla WER/DER ölçümü
 - [ ] İnce ayarın çalıştırılması ve Kapı 2 kararı
 - [x] Rust adım 2a: `EnergyChunker` (enerji kesimi)
