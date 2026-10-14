@@ -22,18 +22,49 @@ def _strip(text: str) -> str:
     return _PUNCT.sub(lambda m: " " if m.group(1) else m.group(0).replace("’", "'"), text)
 
 
-def _clean(text: str, strip_punct: bool) -> str:
+# Kiril harfleri arasından Latin harflerine benzeyenler: model bir Türkçe kelimenin içine bunları
+# karıştırabiliyor (14 Ekim: "nasыsыn" = nasılsın). Kelimede Latin harf varsa bunlar düzeltilir.
+_HOMOGLYPH = str.maketrans({"ы": "ı", "і": "i", "о": "o", "а": "a", "е": "e", "с": "c", "р": "p",
+                            "х": "x", "у": "y", "к": "k", "м": "m", "т": "t", "н": "n", "в": "v"})
+
+
+def _is_latin(ch: str) -> bool:
+    return unicodedata.name(ch, "").startswith("LATIN")
+
+
+def _latin_word(w: str) -> bool:
+    """Harflerin hepsi Latin alfabesinden mi (Türkçe ve Vietnamca harfler dahil; rakam serbest)."""
+    return all(not ch.isalpha() or _is_latin(ch) for ch in w)
+
+
+def _latin_fix(w: str) -> str | None:
+    """Latin kelime -> aynen; karışık -> benzer harfler düzeltilir, yine karışıksa olduğu gibi
+    bırakılır (gerçek kelime kaybolmasın); hiç Latin harf yoksa None (başka alfabeden uydurma)."""
+    if _latin_word(w):
+        return w
+    if not any(ch.isalpha() and _is_latin(ch) for ch in w):
+        return None
+    return w.translate(_HOMOGLYPH)
+
+
+def _clean(text: str, strip_punct: bool, latin_only: bool = False) -> str:
     if strip_punct:
         text = _strip(text)
-    return " ".join(text.split())
+    words = text.split()
+    if latin_only:
+        # Çok dilli modeller (Omnilingual 1600 dil, Whisper) müzik/gürültüde başka alfabeden
+        # "kelime" uydurabiliyor (14 Ekim: Türkçe podcast sonunda Devanagari "कजतच").
+        # Türkçe ve Vietnamca Latin alfabesiyle yazılır: başka alfabedeki kelime atılır.
+        words = [f for f in map(_latin_fix, words) if f]
+    return " ".join(words)
 
 
 class ViNormalizer:
-    def __init__(self, strip_punct: bool = False):
-        self.strip_punct = strip_punct
+    def __init__(self, strip_punct: bool = False, latin_only: bool = False):
+        self.strip_punct, self.latin_only = strip_punct, latin_only
 
     def normalize(self, text: str) -> str:
-        return _clean(unicodedata.normalize("NFC", text).lower(), self.strip_punct)
+        return _clean(unicodedata.normalize("NFC", text).lower(), self.strip_punct, self.latin_only)
 
 
 def turkish_lower(text: str) -> str:
@@ -41,18 +72,18 @@ def turkish_lower(text: str) -> str:
 
 
 class TrNormalizer:
-    def __init__(self, lowercase: bool = False, strip_punct: bool = False):
-        self.lowercase, self.strip_punct = lowercase, strip_punct
+    def __init__(self, lowercase: bool = False, strip_punct: bool = False, latin_only: bool = False):
+        self.lowercase, self.strip_punct, self.latin_only = lowercase, strip_punct, latin_only
 
     def normalize(self, text: str) -> str:
         text = unicodedata.normalize("NFC", text)
         if self.lowercase:
             text = turkish_lower(text)
-        return _clean(text, self.strip_punct)
+        return _clean(text, self.strip_punct, self.latin_only)
 
 
 def normalizer_for(lang: str):
     """Sistem çıktısının biçimi: iki dilde de küçük harf, noktalamasız."""
     if lang == "vi":
-        return ViNormalizer(strip_punct=True)
-    return TrNormalizer(lowercase=True, strip_punct=True)
+        return ViNormalizer(strip_punct=True, latin_only=True)
+    return TrNormalizer(lowercase=True, strip_punct=True, latin_only=True)

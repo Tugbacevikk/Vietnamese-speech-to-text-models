@@ -70,7 +70,7 @@ curl -H "X-API-Key: $K" http://localhost:8000/jobs/<job_id>        # durum + son
 
 | Uç | Ne yapar |
 |---|---|
-| `POST /jobs` | ses yükle; `language` (tr, vi, auto), `num_speakers` (1–20), `callback_url`, `external_id` |
+| `POST /jobs` | ses yükle; `language` (tr, vi, auto), `num_speakers` (1–20), `callback_url`, `external_id`, `profile` (full, feedback), `notify` |
 | `GET /jobs/{id}` | durum; bittiyse konuşmacılı satırlar |
 | `GET /jobs?limit=20` | son işler |
 | `GET /jobs/{id}/audio` | yüklenen ses (saklama süresi dolmadıysa) |
@@ -78,12 +78,21 @@ curl -H "X-API-Key: $K" http://localhost:8000/jobs/<job_id>        # durum + son
 | `PATCH /jobs/{id}/utterances/{n}` | n. satırın metnini ve/veya konuşmacısını düzelt (`{"text", "speaker"}`) |
 | `GET /corrections` | düzeltilen satırlar (modelin ilk hali ile birlikte) |
 | `GET /health` | veritabanı ve kuyruk (anahtar istemez) |
+| `GET /health/ready` | hazır mı: modeller yüklü (yerel) / her kuyrukta çalışan işçi (tam) |
+| `GET /metrics/prometheus` | Prometheus: iş sayıları, kuyruk derinliği ve en eski mesaj yaşı, aşama süreleri, gerçek zaman oranı, webhook, DLQ |
+| `POST /webhooks/test` | `{"url"}` adresine imzalı deneme bildirimi (entegrasyon kurarken) |
+| `GET /webhooks/dead`, `POST /webhooks/{id}/retry` | teslim edilemeyen bildirimler ve yeniden deneme |
+| `DELETE /jobs/{id}/utterances/{n}` | uydurma satırı sonuçtan kaldır (kayıtta kalır) |
 | `GET /metrics` | gecikme oranı (hedef p95 ≤ 1), kuyruk doluluğu |
 | `GET /` | web arayüzü |
 
 - **`external_id`:** entegre olan sistemin kendi kimliği. Aynısı tekrar gelirse yeni iş açılmaz,
   var olan iş `200` ile döner; ağ hatasında güvenle tekrar gönderilebilir.
 - **Durumlar:** `queued` → `running` → `done` | `failed` | `rejected`.
+- **Profil:** `profile=feedback` kısa ve çok sayıda gelen geri bildirim mesajları için: 10 sn'den
+  kısa seste konuşmacı ayırma atlanır, Whisper beam 1. Varsayılan `PIPELINE_PROFILE=full`.
+- **Bildirim olayları:** `notify=running,done,failed,rejected` (virgülle, iş başına; varsayılan
+  `NOTIFY_EVENTS=done,failed,rejected`). Teslim `WEBHOOK_MAX_ATTEMPTS` (8) kez denenir, sonra "ölü".
 - **Aşırı yük:** `MAX_PENDING_JOBS` (varsayılan 10000) iş beklerken yeni istek `503` + `Retry-After`
   alır. İstemci başına dakikalık sınır `RATE_LIMIT_PER_MINUTE` (varsayılan kapalı) → `429`.
 - **Düzeltmeler:** arayüzde her satırda "Düzelt" var. Modelin ilk yazdığı saklanır; düzeltilen

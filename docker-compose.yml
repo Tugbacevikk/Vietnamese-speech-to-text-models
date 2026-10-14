@@ -59,6 +59,10 @@ services:
     environment:
       <<: *env
       MAX_UPLOAD_MB: "100"
+    healthcheck:       # canlılık; hazır olma (modeller + işçiler) için /health/ready
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      retries: 5
 
   worker-lid:          # dil tespiti: hafif, 1 süreç çoğu zaman yeter (~0,25 sn/ses)
     <<: *app
@@ -74,18 +78,18 @@ services:
       <<: *env
       CONCURRENCY: auto
 
-  worker-tr:           # Türkçe: Omnilingual ~0,5 GB/süreç (Whisper turbo seçilirse ~1,6 GB)
+  worker-tr:           # Türkçe: faster-whisper medium ~1,8 GB/süreç; sayı bellek ve çekirdekten
     <<: *app
     command: ["python", "-m", "viet_asr.interface.stream_worker", "--kuyruk", "tr"]
     environment:
       <<: *env
-      CONCURRENCY: "1"
+      CONCURRENCY: auto
 
   dispatcher:          # outbox -> webhook (WEBHOOK_SECRET varsa imzalı)
     <<: *app
     command: ["python", "-m", "viet_asr.interface.dispatcher"]
 
-  bakim:               # eski ses/sonuç silme, askıda kalan işler
+  bakim:               # saklama süreleri, askıda/kuyruğa girememiş işler (Redis kilidiyle tek kopya)
     <<: *app
     command: ["python", "-m", "viet_asr.interface.bakim"]
 

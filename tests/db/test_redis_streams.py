@@ -125,3 +125,24 @@ def test_kilit_tek_sahip_ve_bosta_kontrolu(r):
     assert r.get("test:kilit") is None
     q = RedisStreamJobQueue(r)
     assert q.is_idle("tr") and q.live_consumers("tr") == 0
+
+
+def test_isci_varligi(r):
+    import threading
+    import time
+
+    from viet_asr.infrastructure.redis_streams import RedisStreamJobQueue, StreamConsumer
+
+    q = RedisStreamJobQueue(r)
+    assert q.live_consumers("vi") == 0
+    c = StreamConsumer(r, "vi", lambda j: None, lambda j, e: None, block_ms=100, consumer="t1")
+    t = threading.Thread(target=c.run_forever, daemon=True)
+    t.start()
+    for _ in range(50):
+        if q.live_consumers("vi") == 1:
+            break
+        time.sleep(0.05)
+    assert q.live_consumers("vi") == 1                 # mesaj almadan da görünür
+    c.stop()
+    t.join(timeout=5)
+    assert q.live_consumers("vi") == 0                 # kapanınca kaybolur

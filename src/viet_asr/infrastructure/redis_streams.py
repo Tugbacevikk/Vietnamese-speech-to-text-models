@@ -27,6 +27,10 @@ GROUP = "asr-workers"
 DLQ = "asr:dlq"
 
 
+def presence_key(queue: str, consumer: str) -> str:
+    return f"asr:isci:{queue}:{consumer}"
+
+
 def stream_name(queue: str) -> str:
     """queue: 'lid' ya da dil kodu ('vi', 'tr')."""
     return f"asr:{queue}"
@@ -74,13 +78,9 @@ class RedisStreamJobQueue:
         st = self.stats([queue])[queue]
         return st["bekleyen"] == 0 and st["islenmekte"] == 0
 
-    def live_consumers(self, queue: str, max_idle_ms: int = 60_000) -> int:
-        """Son max_idle_ms içinde kuyruğu okuyan işçi sayısı (hazır olma kontrolü)."""
-        try:
-            return sum(1 for c in self.r.xinfo_consumers(stream_name(queue), GROUP)
-                       if int(c.get("idle", 10**12)) <= max_idle_ms)
-        except redis.ResponseError:
-            return 0
+    def live_consumers(self, queue: str) -> int:
+        """Çalışan işçi sayısı: son 30 sn'de varlık anahtarını yenileyenler."""
+        return sum(1 for _ in self.r.scan_iter(match=presence_key(queue, "*"), count=100))
 
     def _oldest_age(self, stream: str, group) -> float:
         """Henüz hiçbir işçiye verilmemiş en eski mesajın yaşı (sn): kuyruk tıkanmasını gösterir.
@@ -184,8 +184,26 @@ class StreamConsumer:
             self.process(msg_id, fields)
         return len(msgs)
 
+    def _presence(self, every: float = 10.0, ttl: int = 30) -> None:
+        """'Bu işçi çalışıyor' anahtarı (hazır olma kontrolü). Ayrı iş parçacığında: uzun bir
+        iş işlenirken de yenilenir. Redis 7.0'da XINFO CONSUMERS bunun yerine geçemiyor
+        (tüketici ancak ilk mesajı alınca görünüyor, idle da son teslimden sayılıyor)."""
+        key = presence_key(self.queue, self.consumer)
+        while not self._stop.is_set():
+            try:
+                self.r.set(key, str(int(time.time())), ex=ttl)
+            except redis.ConnectionError:
+                pass
+            self._stop.wait(every)
+        try:
+            self.r.delete(key)
+        except redis.ConnectionError:
+            pass
+
     def run_forever(self) -> None:
         self.ensure_group()
+        presence = threading.Thread(target=self._presence, daemon=True, name="varlik")
+        presence.start()
         log.info("kuyruk dinleniyor: %s (tüketici %s)", self.stream, self.consumer)
         while not self._stop.is_set():
             try:
@@ -193,6 +211,7 @@ class StreamConsumer:
             except redis.ConnectionError:
                 log.warning("Redis'e ulaşılamıyor, 5 sn sonra tekrar")
                 self._stop.wait(5)
+        presence.join(timeout=2)  # varlık anahtarı silinsin
 
 
 def _s(v) -> str:

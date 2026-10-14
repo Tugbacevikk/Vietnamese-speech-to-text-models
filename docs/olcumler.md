@@ -122,6 +122,13 @@ değerlendirildi. 2 çekirdekli bulut makinesi; dil verilmedi (sesten bulundu).
   tek kişi çıktı; `num_speakers=2` verilince cümleler doğru ayrıldı. Eşiği 0,34'e indirmek bu
   dosyayı düzeltiyor ama 17 sn'lik telefon kaydını 6 kişiye bölüyor; değiştirilmedi.
 
+## Başka alfabeden uydurma — Türkçe 22 dosya (14 Ekim 2026)
+
+Omnilingual (1600 dil) 3174 kelimenin 5'inde başka alfabe kullandı: podcast sonundaki müzikte
+Devanagari "कजतच", Arapça tek harfler ve Kiril harf karışmış "nasыsыn" (nasılsın). Artık
+(normalizer_for): hiç Latin harf içermeyen kelime atılır; karışık kelimede Latin'e benzeyen
+Kiril harfler düzeltilir ("nasısın"), kelime kaybolmaz.
+
 ## Araya sıkışmış kısa konuşmacı düzeltmesi — 9 Vietnamca diyalog (14 Ekim 2026)
 
 A, kısa B, A dizisinde B'yi A'ya vermek (fine-tuning projesindeki "sandwich" düzeltmesi):

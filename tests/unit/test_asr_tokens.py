@@ -73,3 +73,12 @@ def test_parcalar_sureye_gore_gruplanir():
     g = batches(segs, 60)
     assert [[round(s.end - s.start) for s in b] for b in g] == [[20, 25], [20], [70], [5]]
     assert [s for b in g for s in b] == segs and batches([], 60) == []
+
+
+def test_baska_alfabedeki_uydurma_kelime_atilir():
+    from viet_asr.infrastructure.normalizer import normalizer_for
+
+    assert normalizer_for("tr").normalize("hoşçakalın कजतच 38,5") == "hoşçakalın 38,5"
+    assert normalizer_for("vi").normalize("Xin chào bác sĩ ạ Привет") == "xin chào bác sĩ ạ"
+    assert normalizer_for("tr").normalize("कजतच") == ""
+    assert normalizer_for("tr").normalize("nasыsыn") == "nasısın"            # karışık: düzeltilir
