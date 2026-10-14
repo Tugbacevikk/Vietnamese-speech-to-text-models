@@ -312,6 +312,39 @@ class SqlAlchemyJobStore:
                              .order_by(JobRow.updated_at.desc()).limit(limit)).all()
         return [(float(d or 0), (u - c).total_seconds()) for d, c, u in rows]
 
+    def recent_timings(self, limit: int = 500) -> list[tuple[str, float, dict]]:
+        """(dil, ses süresi, aşama süreleri) — son biten işler (metrikler)."""
+        with self._session() as s:
+            rows = s.execute(select(JobRow.lang_code, JobRow.duration, JobRow.timings)
+                             .where(JobRow.status == JobStatus.DONE.value, JobRow.timings.is_not(None))
+                             .order_by(JobRow.updated_at.desc()).limit(limit)).all()
+        return [(lang or "?", float(d or 0), dict(t or {})) for lang, d, t in rows]
+
+    def outbox_stats(self, max_attempts: int) -> dict[str, int]:
+        """Webhook teslimleri: gönderilen, bekleyen (tekrar denenecek), ölü (deneme hakkı bitti)."""
+        with self._session() as s:
+            sent = s.scalar(select(func.count()).select_from(OutboxRow).where(OutboxRow.sent_at.is_not(None)))
+            dead = s.scalar(select(func.count()).select_from(OutboxRow).where(
+                OutboxRow.sent_at.is_(None), OutboxRow.attempts >= max_attempts))
+            pending = s.scalar(select(func.count()).select_from(OutboxRow).where(
+                OutboxRow.sent_at.is_(None), OutboxRow.attempts < max_attempts))
+        return {"gonderildi": sent or 0, "bekliyor": pending or 0, "olu": dead or 0}
+
+    def dead_deliveries(self, max_attempts: int, limit: int = 100) -> list[dict]:
+        """Deneme hakkı biten (ölü) teslimler, en yenisi önce."""
+        with self._session() as s:
+            rows = s.scalars(select(OutboxRow).where(OutboxRow.sent_at.is_(None),
+                                                     OutboxRow.attempts >= max_attempts)
+                             .order_by(OutboxRow.id.desc()).limit(limit)).all()
+            return [_outbox_dict(r) for r in rows]
+
+    def retry_delivery(self, outbox_id: int) -> bool:
+        """Ölü (ya da bekleyen) teslimi sıfırlayıp hemen yeniden denenecek hale getirir."""
+        with self._tx() as s:
+            n = s.execute(update(OutboxRow).where(OutboxRow.id == outbox_id, OutboxRow.sent_at.is_(None))
+                          .values(attempts=0, next_attempt_at=utcnow(), last_error=None)).rowcount
+        return bool(n)
+
     # --- outbox gönderici için ---
     def claim_outbox(self, limit: int, max_attempts: int, lease: timedelta) -> list[dict]:
         """Gönderilecek satırları alır ve 'lease' süresince başka göndericilere görünmez yapar.

@@ -12,7 +12,8 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     store = store_from_settings(Settings(), pool_size=1)
     store.migrate()
-    OutboxDispatcher(store, secret=Settings().webhook_secret).run_forever()
+    s = Settings()
+    OutboxDispatcher(store, secret=s.webhook_secret, max_attempts=s.webhook_max_attempts).run_forever()
 
 
 if __name__ == "__main__":

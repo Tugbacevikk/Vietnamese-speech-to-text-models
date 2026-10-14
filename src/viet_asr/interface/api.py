@@ -16,10 +16,13 @@
     DELETE /jobs/{id}/utterances/{n}  n. satırı sonuçtan kaldır (uydurma satır; kayıtta kalır)
     PATCH /jobs/{id}/utterances/{n}   n. satırın metnini/konuşmacısını düzelt ({"text", "speaker"});
                         modelin ilk hali saklanır, düzeltilen işin sesi silinmez (ince ayar verisi)
+    POST /webhooks/test {"url"}   imzalı deneme bildirimi (entegrasyon kurulurken)
+    GET  /webhooks/dead  teslim edilemeyen bildirimler; POST /webhooks/{id}/retry yeniden dener
     GET  /corrections   düzeltilen satırlar (scripts/duzeltmeleri_disa_aktar.py ince ayar verisine çevirir)
     GET  /              web arayüzü (dosya yükle, dil seç, sonucu dinle/indir)
     GET  /health        veritabanı ve kuyruk erişimi, durum sayıları (anahtar istemez)
-    GET  /metrics       gecikme ve "1 dk ses <= 1 dk" hedefi, kuyruk doluluğu
+    GET  /metrics       gecikme ve "1 dk ses <= 1 dk" hedefi, kuyruk doluluğu (JSON)
+    GET  /metrics/prometheus   aynı ve daha fazlası Prometheus biçiminde (aşama süreleri, webhook)
 
 API_KEY tanımlıysa /jobs istekleri "X-API-Key" başlığı ister (production'da zorunlu).
 
@@ -34,7 +37,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from viet_asr.application.jobs import SubmitJob
@@ -50,6 +53,10 @@ from viet_asr.interface.settings import Settings
 log = logging.getLogger(__name__)
 _ALLOWED = {".wav", ".flac", ".ogg", ".mp3", ".opus"} | FFMPEG_ONLY
 _UI = Path(__file__).parent / "static" / "index.html"
+
+
+class WebhookTest(BaseModel):
+    url: str = Field(..., max_length=2000)
 
 
 class UtteranceEdit(BaseModel):
@@ -191,6 +198,29 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             raise HTTPException(404, "bitmiş iş ya da satır bulunamadı")
         return {"index": idx, "silindi": True}
 
+    @api.post("/webhooks/test", dependencies=[auth])
+    def webhook_test(body: WebhookTest):
+        """Entegrasyon denemesi: verilen adrese imzalı 'ping' gönderir, sonucu döndürür."""
+        problem = callback_problem(body.url, settings)
+        if problem:
+            raise HTTPException(422, problem)
+        from viet_asr.infrastructure.webhook import send_test
+
+        return send_test(body.url, settings.webhook_secret)
+
+    @api.get("/webhooks/dead", dependencies=[auth])
+    def webhooks_dead(limit: int = 100):
+        """Deneme hakkı biten (ölü) teslimler."""
+        return [{k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in d.items()
+                 if k != "payload"} for d in store.dead_deliveries(settings.webhook_max_attempts,
+                                                                    max(1, min(limit, 1000)))]
+
+    @api.post("/webhooks/{delivery_id}/retry", dependencies=[auth])
+    def webhook_retry(delivery_id: int):
+        if not store.retry_delivery(delivery_id):
+            raise HTTPException(404, "gönderilmemiş teslim bulunamadı")
+        return {"id": delivery_id, "yeniden_denenecek": True}
+
     @api.get("/corrections", dependencies=[auth])
     def list_corrections(limit: int = 1000):
         return [{"job_id": c.job_id, "index": c.idx, "language": c.language,
@@ -224,6 +254,15 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         except Exception:
             pass
         return JSONResponse(body, status_code=200 if ok else 503)
+
+    @api.get("/metrics/prometheus", dependencies=[auth], response_class=PlainTextResponse)
+    def metrics_prometheus():
+        """Prometheus biçiminde: iş sayıları, kuyruk derinliği ve en eski mesaj yaşı, aşama süre
+        histogramları, gerçek zaman oranı, webhook teslimleri, DLQ."""
+        from viet_asr.interface.metrics import prometheus_text
+
+        return PlainTextResponse(prometheus_text(store, settings, queue_stats),
+                                 media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @api.get("/metrics", dependencies=[auth])
     def metrics():

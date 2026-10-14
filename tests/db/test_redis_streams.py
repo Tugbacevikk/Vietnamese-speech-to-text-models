@@ -42,9 +42,9 @@ def test_yonlendirme_ve_onay(r):
         c = consumer(r, name, done.append, gave)
         c.run_once()
     assert done == ["a", "b"] and gave == []
-    assert q.stats(["lid", "vi", "tr"]) == {
-        "lid": {"islenmekte": 0, "bekleyen": 0}, "vi": {"islenmekte": 0, "bekleyen": 0},
-        "tr": {"islenmekte": 0, "bekleyen": 0}}
+    st = q.stats(["lid", "vi", "tr"])
+    assert {k: (v["islenmekte"], v["bekleyen"], v["en_eski_sn"]) for k, v in st.items() if k != "dlq"} == {
+        "lid": (0, 0, 0.0), "vi": (0, 0, 0.0), "tr": (0, 0, 0.0)}
 
 
 def test_hata_tekrar_sonra_birakma(r):
@@ -95,3 +95,16 @@ def test_redis_istek_siniri():
     assert lim.check("b") is None
     now[0] += 60
     assert lim.check("a") is None
+
+
+def test_kuyruk_istatistikleri_en_eski_ve_dlq():
+    import redis
+
+    from viet_asr.infrastructure.redis_streams import RedisStreamJobQueue
+
+    r = redis.Redis.from_url(URL)
+    r.flushdb()
+    q = RedisStreamJobQueue(r)
+    q.enqueue_transcription("a", "vi")
+    s = q.stats(["vi"])
+    assert s["vi"]["bekleyen"] == 1 and s["vi"]["en_eski_sn"] >= 0 and s["dlq"]["toplam"] == 0

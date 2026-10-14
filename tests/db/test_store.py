@@ -278,3 +278,18 @@ def test_bildirim_olaylari_profil_sureler_ve_silme(store):
     assert store.delete_utterance("n", 0) and not store.delete_utterance("n", 0)
     assert [u.index for u in store.get_transcript("n").utterances] == [1]
     assert store.update_utterance("n", 0, text="x") is None                   # silinen düzeltilmez
+
+
+def test_metrik_sorgulari_ve_olu_teslim(store):
+    from dataclasses import replace
+
+    store.create(AudioJob("m", "/a.wav", "vi", "http://h/x"))
+    store.save(replace(transcript("m"), timings={"asr": 1.0, "toplam": 2.0}))
+    assert store.recent_timings() == [("vi", 12.5, {"asr": 1.0, "toplam": 2.0})]
+    (row,) = store.outbox_rows()
+    for _ in range(3):
+        store.mark_failed(row["id"], "HTTP 500", timedelta(0))
+    assert store.outbox_stats(3) == {"gonderildi": 0, "bekliyor": 0, "olu": 1}
+    assert [d["id"] for d in store.dead_deliveries(3)] == [row["id"]]
+    assert store.retry_delivery(row["id"]) and store.outbox_stats(3)["bekliyor"] == 1
+    assert store.claim_outbox(10, 3, timedelta(seconds=30))[0]["id"] == row["id"]

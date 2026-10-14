@@ -145,6 +145,19 @@ class MemoryJobStore:
     def stale_running(self, before):
         return [j for j, r in self.jobs.items() if r.status == JobStatus.RUNNING and r.updated_at < before]
 
+    def recent_timings(self, limit=500):
+        done = [self.results[j] for j, r in self.jobs.items() if r.status == JobStatus.DONE and j in self.results]
+        return [(t.language.code, t.duration, dict(t.timings)) for t in done if t.timings][:limit]
+
+    def outbox_stats(self, max_attempts):
+        return {"gonderildi": 0, "bekliyor": len(self.events), "olu": 0}
+
+    def dead_deliveries(self, max_attempts, limit=100):
+        return []
+
+    def retry_delivery(self, outbox_id):
+        return False
+
     def recent_done(self, limit=500):
         done = sorted((r for r in self.jobs.values() if r.status == JobStatus.DONE),
                       key=lambda r: r.updated_at, reverse=True)[:limit]

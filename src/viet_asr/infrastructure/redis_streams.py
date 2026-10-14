@@ -61,10 +61,25 @@ class RedisStreamJobQueue:
                 groups = {_s(g["name"]): g for g in self.r.xinfo_groups(s)}
                 g = groups.get(GROUP)
                 out[q] = {"islenmekte": int(g["pending"]) if g else 0,
-                          "bekleyen": int(g.get("lag") or 0) if g else int(self.r.xlen(s))}
+                          "bekleyen": int(g.get("lag") or 0) if g else int(self.r.xlen(s)),
+                          "en_eski_sn": self._oldest_age(s, g)}
             except redis.ResponseError:  # akış henüz yok
-                out[q] = {"islenmekte": 0, "bekleyen": 0}
+                out[q] = {"islenmekte": 0, "bekleyen": 0, "en_eski_sn": 0.0}
+        out["dlq"] = {"toplam": int(self.r.xlen(DLQ)) if self.r.exists(DLQ) else 0}
         return out
+
+    def _oldest_age(self, stream: str, group) -> float:
+        """Henüz hiçbir işçiye verilmemiş en eski mesajın yaşı (sn): kuyruk tıkanmasını gösterir.
+        Mesaj kimliğinin ilk kısmı eklenme zamanıdır (ms)."""
+        start = "-"
+        if group is not None:
+            last = _s(group.get("last-delivered-id") or "0-0")
+            start = "(" + last
+        first = self.r.xrange(stream, min=start, max="+", count=1)
+        if not first:
+            return 0.0
+        ms = int(_s(first[0][0]).split("-")[0])
+        return round(max(0.0, time.time() - ms / 1000), 1)
 
 
 class StreamConsumer:

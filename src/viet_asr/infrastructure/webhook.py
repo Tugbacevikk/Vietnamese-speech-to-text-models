@@ -43,6 +43,40 @@ def backoff(attempts: int, base: float = 10.0, cap: float = 3600.0) -> timedelta
     return timedelta(seconds=min(cap, base * (2 ** attempts)))
 
 
+USER_AGENT = "viet-asr-webhook/1"
+
+
+def build_request(payload: dict, event: str, job_id: str, delivery_id: str,
+                  secret: str = "") -> tuple[bytes, dict[str, str]]:
+    """Gövde ve başlıklar (gerçek teslim ve test bildirimi aynı biçimde)."""
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    headers = {"Content-Type": "application/json; charset=utf-8", "User-Agent": USER_AGENT,
+               "X-Event": event, "X-Job-Id": job_id, "X-Delivery-Id": delivery_id}
+    if secret:
+        ts = str(int(time.time()))
+        headers["X-Timestamp"] = ts
+        headers["X-Signature"] = sign(secret, ts, body)
+    return body, headers
+
+
+def send_test(url: str, secret: str = "", client: httpx.Client | None = None,
+              timeout: float = 5.0) -> dict:
+    """Entegrasyonu denemek için imzalı 'ping' gönderir; sonucu döndürür (kuyruğa yazılmaz)."""
+    body, headers = build_request({"event": "ping", "message": "viet-asr webhook testi"},
+                                  "ping", "-", "test", secret)
+    t0 = time.perf_counter()
+    c = client or httpx.Client(timeout=timeout)
+    try:
+        r = c.post(url, content=body, headers=headers)
+        return {"ok": 200 <= r.status_code < 300, "status": r.status_code,
+                "sure_ms": round((time.perf_counter() - t0) * 1000), "imzali": bool(secret)}
+    except httpx.HTTPError as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "imzali": bool(secret)}
+    finally:
+        if client is None:
+            c.close()
+
+
 class OutboxDispatcher:
     """store: claim_outbox / mark_sent / mark_failed sunan depo (PostgreSQL ya da SQLite)."""
 
@@ -59,14 +93,8 @@ class OutboxDispatcher:
         sent = 0
         for row in self.store.claim_outbox(self.batch, self.max_attempts, self.lease):
             try:
-                body = json.dumps(row["payload"], ensure_ascii=False,
-                                  separators=(",", ":")).encode("utf-8")
-                headers = {"Content-Type": "application/json", "X-Event": row["event"],
-                           "X-Job-Id": row["job_id"], "X-Delivery-Id": str(row["id"])}
-                if self.secret:
-                    ts = str(int(time.time()))
-                    headers["X-Timestamp"] = ts
-                    headers["X-Signature"] = sign(self.secret, ts, body)
+                body, headers = build_request(row["payload"], row["event"], row["job_id"],
+                                              str(row["id"]), self.secret)
                 r = self.client.post(row["url"], content=body, headers=headers)
                 if 200 <= r.status_code < 300:
                     self.store.mark_sent(row["id"])
@@ -77,8 +105,13 @@ class OutboxDispatcher:
                 err = f"{type(e).__name__}: {e}"
             wait = backoff(row["attempts"])
             self.store.mark_failed(row["id"], err, wait)
-            log.warning("webhook başarısız job=%s deneme=%d %s; %ss sonra tekrar",
-                        row["job_id"], row["attempts"] + 1, err, int(wait.total_seconds()))
+            if row["attempts"] + 1 >= self.max_attempts:
+                log.error("webhook teslim edilemedi (ölü) job=%s teslim=%s %s; "
+                          "POST /webhooks/%s/retry ile yeniden denenebilir",
+                          row["job_id"], row["id"], err, row["id"])
+            else:
+                log.warning("webhook başarısız job=%s deneme=%d %s; %ss sonra tekrar",
+                            row["job_id"], row["attempts"] + 1, err, int(wait.total_seconds()))
         return sent
 
     def stop(self) -> None:

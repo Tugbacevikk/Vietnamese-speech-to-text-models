@@ -57,8 +57,9 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
             queue.enqueue_detection(rec.job.job_id)
         log.info("yarım kalan iş yeniden kuyrukta: %s", rec.job.job_id)
 
-    dispatcher = OutboxDispatcher(store, secret=settings.webhook_secret)
-    app = create_app(store, queue, settings, {"veritabani": store.ping})
+    dispatcher = OutboxDispatcher(store, secret=settings.webhook_secret,
+                                  max_attempts=settings.webhook_max_attempts)
+    app = create_app(store, queue, settings, {"veritabani": store.ping}, queue_stats=queue.stats)
     app.state.maintenance = build_maintenance(store, settings)
     return app, store, queue, dispatcher
 

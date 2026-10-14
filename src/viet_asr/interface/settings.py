@@ -81,6 +81,9 @@ class Settings:
     # callback'e hangi olaylarda bildirim gitsin (istekte notify= ile iş başına)
     notify_default: list[str] = field(default_factory=lambda: _list(os.environ.get(
         "NOTIFY_EVENTS", "done,failed,rejected")))
+    # webhook teslimi en fazla bu kadar denenir (10 sn'den 1 saate artan aralıklarla), sonra "ölü"
+    webhook_max_attempts: int = field(default_factory=lambda: int(os.environ.get(
+        "WEBHOOK_MAX_ATTEMPTS", "8")))
     max_job_attempts: int = field(default_factory=lambda: int(os.environ.get("MAX_JOB_ATTEMPTS", "3")))
     # modeller yüklenirken MANIFEST.json'daki sha256 ile karşılaştır
     verify_models: bool = field(default_factory=lambda: os.environ.get("VERIFY_MODELS", "1") == "1")

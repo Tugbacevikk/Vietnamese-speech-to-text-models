@@ -283,3 +283,42 @@ def test_profil_bildirim_ve_satir_silme(ctx):
     assert [(u["index"], u["text"]) for u in utts] == [(0, "a"), (2, "c")]    # sıra numarası korunur
     assert c.patch(f"/jobs/{jid}/utterances/2", json={"text": "c2"}).json()["text"] == "c2"
     assert c.patch(f"/jobs/{jid}/utterances/1", json={"text": "x"}).status_code == 404
+
+
+def test_prometheus_metrikleri(ctx):
+    from viet_asr.domain import LanguageDecision, LanguageSource, Transcript, Utterance
+
+    store, _, c = ctx
+    jid = post(c, {"language": "vi"}).json()["job_id"]
+    store.save(Transcript(jid, 60.0, [Utterance("speaker_00", 0, 1, "a")], "m",
+                          LanguageDecision("vi", 1.0, LanguageSource.REQUEST),
+                          timings={"asr": 3.0, "konusmaci": 1.2, "toplam": 6.0}))
+    r = c.get("/metrics/prometheus")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/plain")
+    body = r.text
+    assert 'asr_jobs{status="done"} 1' in body
+    assert 'asr_stage_seconds_bucket{le="5",stage="asr"} 1' in body
+    assert 'asr_stage_seconds_count{stage="toplam"} 1' in body
+    assert 'asr_realtime_ratio_bucket{le="0.1",language="vi"} 1' in body      # 6 / 60 = 0,1
+    assert 'asr_webhook_deliveries{state="olu"} 0' in body
+
+
+def test_webhook_deneme_bildirimi(ctx, monkeypatch):
+    import httpx
+
+    import viet_asr.infrastructure.webhook as wh
+
+    seen = []
+
+    def handler(req):
+        seen.append((req.headers["X-Event"], req.headers["User-Agent"], "X-Signature" in req.headers))
+        return httpx.Response(204)
+
+    res = wh.send_test("http://alici/hook", "gizli", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert res["ok"] and res["status"] == 204 and res["imzali"]
+    assert seen == [("ping", wh.USER_AGENT, True)]
+    _, _, c = ctx
+    monkeypatch.setattr(wh, "send_test", lambda url, secret: {"ok": True, "url": url})
+    assert c.post("/webhooks/test", json={"url": "https://x/h"}).json() == {"ok": True, "url": "https://x/h"}
+    assert c.get("/webhooks/dead").json() == []
+    assert c.post("/webhooks/5/retry").status_code == 404
