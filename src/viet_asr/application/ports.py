@@ -87,6 +87,10 @@ class JobStore(ResultRepository, Protocol):
         """Biten işin bir satırını düzeltir; modelin ilk hali saklanır. Yoksa None."""
         ...
 
+    def reopen(self, job_id: str, num_speakers: int | None) -> JobRecord | None:
+        """Bitmiş işi yeniden analiz için QUEUED yapar; olmazsa None."""
+        ...
+
     def delete_utterance(self, job_id: str, idx: int) -> bool:
         """Satırı sonuçtan kaldırır (kayıtta kalır). Olmazsa False."""
         ...

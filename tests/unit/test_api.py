@@ -333,3 +333,19 @@ def test_hazir_olma(tmp_path):
     durum["ok"] = True
     r = c.get("/health/ready")
     assert r.status_code == 200 and r.json()["ready"] is True
+
+
+def test_yeniden_analiz(ctx):
+    from viet_asr.domain import LanguageDecision, LanguageSource, Transcript, Utterance
+
+    store, queue, c = ctx
+    jid = post(c, {"language": "vi"}).json()["job_id"]
+    assert c.post(f"/jobs/{jid}/reanalyze", json={"num_speakers": 2}).status_code == 409   # bitmedi
+    store.save(Transcript(jid, 3.0, [Utterance("speaker_00", 0, 1, "a")], "m",
+                          LanguageDecision("vi", 1.0, LanguageSource.REQUEST)))
+    queue.sent.clear()
+    r = c.post(f"/jobs/{jid}/reanalyze", json={"num_speakers": 2})
+    assert r.status_code == 202 and queue.sent == [("asr.vi", jid)]
+    rec = c.get(f"/jobs/{jid}").json()
+    assert rec["status"] == "queued" and rec["num_speakers"] == 2
+    assert c.post(f"/jobs/{jid}/reanalyze", json={"num_speakers": 50}).status_code == 422

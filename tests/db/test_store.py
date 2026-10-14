@@ -293,3 +293,14 @@ def test_metrik_sorgulari_ve_olu_teslim(store):
     assert [d["id"] for d in store.dead_deliveries(3)] == [row["id"]]
     assert store.retry_delivery(row["id"]) and store.outbox_stats(3)["bekliyor"] == 1
     assert store.claim_outbox(10, 3, timedelta(seconds=30))[0]["id"] == row["id"]
+
+
+def test_yeniden_analiz_icin_acma(store):
+    store.create(AudioJob("ra", "/a.wav", "vi"))
+    assert store.reopen("ra", 2) is None                       # bitmedi
+    store.save(transcript("ra"))
+    r = store.reopen("ra", 3)
+    assert r.status == JobStatus.QUEUED and r.job.num_speakers == 3 and r.decision.code == "vi"
+    store.save(transcript("ra"))
+    store.clear_audio("ra")
+    assert store.reopen("ra", 2) is None                       # sesi silinmiş

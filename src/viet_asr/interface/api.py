@@ -13,6 +13,7 @@
     GET  /jobs/{id}     durum; bittiyse sonuç (konuşmacılı satırlar)
     GET  /jobs/{id}/audio   yüklenen ses (saklama süresi dolmadıysa; arayüzde dinlemek için)
     DELETE /jobs/{id}   bitmiş işi, sonucunu ve sesini siler (kuyruktaki/işlenen iş silinmez)
+    POST /jobs/{id}/reanalyze {"num_speakers"}  aynı sesi yeni konuşmacı sayısıyla yeniden analiz et
     DELETE /jobs/{id}/utterances/{n}  n. satırı sonuçtan kaldır (uydurma satır; kayıtta kalır)
     PATCH /jobs/{id}/utterances/{n}   n. satırın metnini/konuşmacısını düzelt ({"text", "speaker"});
                         modelin ilk hali saklanır, düzeltilen işin sesi silinmez (ince ayar verisi)
@@ -54,6 +55,10 @@ from viet_asr.interface.settings import Settings
 log = logging.getLogger(__name__)
 _ALLOWED = {".wav", ".flac", ".ogg", ".mp3", ".opus"} | FFMPEG_ONLY
 _UI = Path(__file__).parent / "static" / "index.html"
+
+
+class Reanalyze(BaseModel):
+    num_speakers: int = Field(..., ge=0, le=20)
 
 
 class WebhookTest(BaseModel):
@@ -193,6 +198,21 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             raise HTTPException(404, "bitmiş iş ya da satır bulunamadı")
         return {"index": idx, "speaker": u.speaker, "start": round(u.start, 3), "end": round(u.end, 3),
                 "text": u.text, "edited": True}
+
+    @api.post("/jobs/{job_id}/reanalyze", status_code=202, dependencies=[auth])
+    def reanalyze(job_id: str, body: Reanalyze):
+        """Aynı ses, yeni konuşmacı sayısıyla yeniden analiz (dosya tekrar yüklenmez; sunucudaki
+        ses kullanılır). Aynı iş kimliği kalır; elle yapılan düzeltmeler yeni sonuçla değişir.
+        num_speakers=0: sesten bul."""
+        rec = store.reopen(job_id, body.num_speakers or None)
+        if rec is None:
+            raise HTTPException(409, "yalnızca bitmiş ve sesi silinmemiş iş yeniden analiz edilebilir")
+        code = rec.decision.code if rec.decision else rec.job.language
+        if code:
+            queue.enqueue_transcription(job_id, code)
+        else:
+            queue.enqueue_detection(job_id)
+        return {"job_id": job_id, "status": JobStatus.QUEUED.value, "num_speakers": rec.job.num_speakers}
 
     @api.delete("/jobs/{job_id}/utterances/{idx}", dependencies=[auth])
     def delete_utterance(job_id: str, idx: int):

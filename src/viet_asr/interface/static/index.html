@@ -131,6 +131,7 @@ audio { width: 100%; margin-bottom: 12px; }
         <button class="btn ghost" data-export="srt">SRT</button>
         <button class="btn ghost" data-export="json">JSON</button>
         <button class="btn ghost" data-export="rttm" title="konuşmacı zamanları (DER ölçümü için)">RTTM</button>
+        <button class="btn ghost" id="reanalyze" title="konuşmacı sayısını düzeltip aynı sesi yeniden analiz et">Yeniden analiz</button>
         <button class="btn danger" id="del">Sil</button>
       </div>
     </div>
@@ -378,6 +379,21 @@ document.querySelectorAll("[data-export]").forEach((b) => b.addEventListener("cl
   const a = el("a", { href: URL.createObjectURL(new Blob([body], { type: type + ";charset=utf-8" })), download: `${current.job_id}.${kind}` });
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }));
+
+$("reanalyze").addEventListener("click", async () => {
+  if (!current) return;
+  const v = prompt("Kaç kişi konuşuyor? (0 = sesten bulunsun)\nElle yapılan düzeltmeler yeni sonuçla değişir.",
+                   String(current.result.speakers || 0));
+  if (v === null) return;
+  const n = parseInt(v, 10);
+  if (!(n >= 0 && n <= 20)) { setStatus("0 ile 20 arasında bir sayı girin", true); return; }
+  try {
+    await api(`/jobs/${encodeURIComponent(current.job_id)}/reanalyze`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ num_speakers: n }) });
+    setStatus("Yeniden analiz kuyrukta…");
+    poll(current.job_id, performance.now());
+  } catch (e) { setStatus("Başlatılamadı: " + e.message, true); }
+});
 
 $("del").addEventListener("click", async () => {
   if (!current || !confirm("Bu analiz ve ses dosyası silinsin mi? Geri alınamaz.")) return;

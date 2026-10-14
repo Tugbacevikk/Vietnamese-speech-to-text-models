@@ -75,6 +75,13 @@ class MemoryJobStore:
             return None
         return replace(t, utterances=[u for u in t.utterances if (job_id, u.index) not in self._deleted])
 
+    def reopen(self, job_id, num_speakers):
+        r = self.jobs.get(job_id)
+        if r is None or r.status not in (JobStatus.DONE, JobStatus.FAILED) or not r.job.audio_path:
+            return None
+        return self._update(job_id, status=JobStatus.QUEUED, error=None,
+                            job=replace(r.job, num_speakers=num_speakers))
+
     def delete_utterance(self, job_id, idx):
         with self._lock:
             t, r = self.results.get(job_id), self.jobs.get(job_id)

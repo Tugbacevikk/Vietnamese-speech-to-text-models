@@ -225,6 +225,18 @@ class SqlAlchemyJobStore:
                                                     _ints(r.low_conf) if r.edited_at is None else ())
                                           for r in rows])
 
+    def reopen(self, job_id: str, num_speakers: int | None) -> JobRecord | None:
+        """Bitmiş işi yeniden analiz için kuyruğa hazırlar (QUEUED, yeni konuşmacı sayısı).
+        Sesi silinmiş ya da bitmemiş işte None. Eski satırlar yeni sonuç kaydedilince değişir."""
+        with self._tx() as s:
+            j = s.get(JobRow, job_id)
+            if j is None or j.status not in _FINISHED or j.status == JobStatus.REJECTED.value \
+                    or not j.audio_path:
+                return None
+            j.status, j.num_speakers, j.error, j.updated_at = JobStatus.QUEUED.value, num_speakers, None, utcnow()
+            s.flush()
+            return _record(j)
+
     def delete_utterance(self, job_id: str, idx: int) -> bool:
         """Satırı sonuçtan kaldırır (uydurma satır). Kayıtta kalır: modelin hatası olarak
         ince ayar ve ölçüm için incelenebilir. Bitmiş iş değilse ya da satır yoksa False."""
