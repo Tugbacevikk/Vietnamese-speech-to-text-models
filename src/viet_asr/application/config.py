@@ -192,6 +192,22 @@ class FusionConfig:
 
 
 @dataclass(frozen=True)
+class ProfileConfig:
+    """İşlem profilleri (fine-tuning projesindeki PIPELINE_PROFILE).
+
+    full: her adım çalışır (varsayılan).
+    feedback: kısa ve çok sayıda gelen geri bildirim mesajları için. Ses min_diarize_sec'ten
+      kısaysa konuşmacı ayırma atlanır (tek kişi kabul edilir); Whisper beam 1 (açgözlü çözme).
+      Zipformer/Omnilingual zaten hızlı olduğu için onlarda değişen bir şey yok.
+    Projede ayrıca SNR düşükse gürültü giderme (DeepFilterNet) vardı: PyTorch ister ve
+    internetsiz CPU kurulumuna uymaz; alınmadı (ADR 0006).
+    """
+
+    default: str = "full"
+    min_diarize_sec: float = 10.0
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     languages: dict[str, LanguageProfile]
     lid: LidConfig | None = field(default_factory=LidConfig)  # None: dil istekte zorunlu
@@ -199,3 +215,4 @@ class PipelineConfig:
     chunk: ChunkConfig = field(default_factory=ChunkConfig)
     diarizer: DiarizerConfig = field(default_factory=DiarizerConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)
+    profile: ProfileConfig = field(default_factory=ProfileConfig)

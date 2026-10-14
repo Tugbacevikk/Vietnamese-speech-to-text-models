@@ -87,6 +87,10 @@ class JobStore(ResultRepository, Protocol):
         """Biten işin bir satırını düzeltir; modelin ilk hali saklanır. Yoksa None."""
         ...
 
+    def delete_utterance(self, job_id: str, idx: int) -> bool:
+        """Satırı sonuçtan kaldırır (kayıtta kalır). Olmazsa False."""
+        ...
+
     def corrections(self, limit: int = 10_000) -> list[Correction]:
         """Düzeltilmiş satırlar (en yenisi önce): ince ayar verisi."""
         ...

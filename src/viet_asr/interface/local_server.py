@@ -21,13 +21,13 @@ import uvicorn
 
 from viet_asr.application.jobs import DetectLanguage, RunTranscription
 from viet_asr.infrastructure.audio import SoundfileLoader
-from viet_asr.infrastructure.db import SqlAlchemyJobStore
 from viet_asr.infrastructure.sherpa_vad import SileroVad
 from viet_asr.infrastructure.thread_queue import ThreadJobQueue
 from viet_asr.infrastructure.webhook import OutboxDispatcher
 from viet_asr.interface.api import create_app
 from viet_asr.interface.composition import (
-    build_maintenance, build_pipeline, build_resolver, default_config, verify_models_or_exit,
+    build_maintenance, build_pipeline, build_resolver, config_from_settings, store_from_settings,
+    verify_models_or_exit,
 )
 from viet_asr.interface.settings import Settings
 
@@ -36,12 +36,10 @@ log = logging.getLogger(__name__)
 
 def build_local(settings: Settings, workers: int | None = None, warm_up: bool = True):
     """Yerel sistemi kurar; (app, store, queue, dispatcher) döndürür (testler de kullanır)."""
-    store = SqlAlchemyJobStore(settings.local_db)
+    store = store_from_settings(settings, url=settings.local_db)
     store.migrate()
     n = workers or settings.concurrency
-    cfg = default_config(settings.models_dir, tuple(settings.languages), settings.models,
-                         settings.threads, settings.speakers, settings.hotwords, settings.diarizer,
-                         workers=n)
+    cfg = config_from_settings(settings, workers=n)
     queue = ThreadJobQueue(asr_workers=n,
                            max_attempts=settings.max_job_attempts)
     pipeline = build_pipeline(cfg, store, with_detection=False)

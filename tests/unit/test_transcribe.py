@@ -131,3 +131,34 @@ def test_konusma_yoksa_asr_calismaz():
                               engines, Diar(), FusionEngine(), Repo(), chunker=Chunker())
     t = uc.run(AudioJob("bos", "x.wav", language="tr"))
     assert t.utterances == [] and calls == []
+
+
+def test_feedback_profili_kisa_seste_konusmaci_ayirmayi_atlar():
+    from viet_asr.application.config import ProfileConfig
+
+    class SayanDiar:
+        calls = 0
+
+        def diarize(self, audio, segments=None, num_speakers=None):
+            SayanDiar.calls += 1
+            return [SpeakerSegment("speaker_00", 0.4, 1.0), SpeakerSegment("speaker_01", 1.0, 1.5)]
+
+    class HizliAsr(Asr):
+        supports_fast = True
+        fast_calls = []
+
+        def transcribe(self, segs, fast=False):
+            HizliAsr.fast_calls.append(fast)
+            return super().transcribe(segs)
+
+    engines = LazyAsrEngines({"tr": lambda: HizliAsr("asr-tr", ["iyi", "günler"])})
+    uc = TranscribeAndDiarize(Loader(), Vad(), LanguageResolver(["tr"], None), engines, SayanDiar(),
+                              FusionEngine(), Repo(), profiles=ProfileConfig(min_diarize_sec=10))
+    t = uc.run(AudioJob("f", "x.wav", "tr", profile="feedback"))           # 3 sn < 10 sn
+    assert SayanDiar.calls == 0 and {u.speaker for u in t.utterances} == {"speaker_00"}
+    assert HizliAsr.fast_calls == [True] and t.profile == "feedback"
+    assert set(t.timings) >= {"yukleme", "vad", "dil", "asr", "konusmaci", "birlestirme", "toplam"}
+    t2 = uc.run(AudioJob("g", "x.wav", "tr"))                               # varsayılan full
+    assert SayanDiar.calls == 1 and HizliAsr.fast_calls == [True, False] and t2.profile == "full"
+    uc.run(AudioJob("h", "x.wav", "tr", num_speakers=1))                    # tek kişi: ayırma yok
+    assert SayanDiar.calls == 1

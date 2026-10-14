@@ -7,10 +7,13 @@
                         external_id (isteğe bağlı: çağıran sistemin kendi kimliği; aynısı tekrar
                         gelirse yeni iş açılmaz, var olan iş 200 ile döner -> ağ hatasında
                         güvenle tekrar gönderilebilir)
+                        profile (full | feedback; feedback: kısa mesajlar için hızlı)
+                        notify (callback olayları, virgülle: running,done,failed,rejected)
     GET  /jobs          son işler (?limit=20; arayüzdeki geçmiş)
     GET  /jobs/{id}     durum; bittiyse sonuç (konuşmacılı satırlar)
     GET  /jobs/{id}/audio   yüklenen ses (saklama süresi dolmadıysa; arayüzde dinlemek için)
     DELETE /jobs/{id}   bitmiş işi, sonucunu ve sesini siler (kuyruktaki/işlenen iş silinmez)
+    DELETE /jobs/{id}/utterances/{n}  n. satırı sonuçtan kaldır (uydurma satır; kayıtta kalır)
     PATCH /jobs/{id}/utterances/{n}   n. satırın metnini/konuşmacısını düzelt ({"text", "speaker"});
                         modelin ilk hali saklanır, düzeltilen işin sesi silinmez (ince ayar verisi)
     GET  /corrections   düzeltilen satırlar (scripts/duzeltmeleri_disa_aktar.py ince ayar verisine çevirir)
@@ -88,7 +91,8 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
     @api.post("/jobs", status_code=202, dependencies=[auth, Depends(admit)])
     def create_job(file: UploadFile | None = File(None), language: str = Form("auto"),
                    callback_url: str | None = Form(None), audio_path: str | None = Form(None),
-                   num_speakers: int | None = Form(None), external_id: str | None = Form(None)):
+                   num_speakers: int | None = Form(None), external_id: str | None = Form(None),
+                   profile: str | None = Form(None), notify: str | None = Form(None)):
         problem = callback_problem(callback_url, settings)
         if problem:
             raise HTTPException(422, problem)
@@ -124,7 +128,8 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             reject(413, f"ses {settings.max_audio_minutes:g} dakikadan uzun")
         try:
             got = submit(AudioJob(job_id, str(path.resolve()), language, callback_url, num_speakers,
-                                  external_id))
+                                  external_id, profile,
+                                  tuple(notify.split(",")) if notify is not None else None))
         except (UnsupportedLanguageError, ValueError) as e:
             reject(422, str(e))
         if got != job_id:  # aynı external_id daha önce gönderilmiş: yeni dosya gereksiz
@@ -179,6 +184,13 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         return {"index": idx, "speaker": u.speaker, "start": round(u.start, 3), "end": round(u.end, 3),
                 "text": u.text, "edited": True}
 
+    @api.delete("/jobs/{job_id}/utterances/{idx}", dependencies=[auth])
+    def delete_utterance(job_id: str, idx: int):
+        """Uydurma/yanlış satırı sonuçtan kaldırır; kayıtta kalır (model hatası olarak incelenir)."""
+        if not store.delete_utterance(job_id, idx):
+            raise HTTPException(404, "bitmiş iş ya da satır bulunamadı")
+        return {"index": idx, "silindi": True}
+
     @api.get("/corrections", dependencies=[auth])
     def list_corrections(limit: int = 1000):
         return [{"job_id": c.job_id, "index": c.idx, "language": c.language,
@@ -231,11 +243,11 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
 def _production_app() -> FastAPI:
     import redis
 
-    from viet_asr.infrastructure.db import SqlAlchemyJobStore
+    from viet_asr.interface.composition import store_from_settings
     from viet_asr.infrastructure.redis_streams import RedisStreamJobQueue
 
     s = Settings()
-    store = SqlAlchemyJobStore(s.database_url)
+    store = store_from_settings(s)
     store.migrate()
     r = redis.Redis.from_url(s.redis_url)
     queue = RedisStreamJobQueue(r)

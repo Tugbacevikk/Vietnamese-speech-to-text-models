@@ -260,3 +260,26 @@ def test_satir_duzeltme(ctx):
     assert c.patch(f"/jobs/{jid}/utterances/0", json={"speaker": "<script>"}).status_code == 422
     (k,) = c.get("/corrections").json()
     assert k["original_text"] == "merhba doktor" and k["text"] == "merhaba doktor" and k["language"] == "tr"
+
+
+def test_profil_bildirim_ve_satir_silme(ctx):
+    from viet_asr.domain import LanguageDecision, LanguageSource, Transcript, Utterance
+
+    store, _, c = ctx
+    assert post(c, {"profile": "hizli"}).status_code == 422
+    assert post(c, {"notify": "done,patladi"}).status_code == 422
+    jid = post(c, {"language": "tr", "profile": "feedback", "notify": "running, done",
+                   "callback_url": "https://x/h"}).json()["job_id"]
+    rec = c.get(f"/jobs/{jid}").json()
+    assert rec["profile"] == "feedback" and rec["notify"] == ["running", "done"]
+    store.set_status(jid, JobStatus.RUNNING)
+    store.save(Transcript(jid, 3.0, [Utterance("speaker_00", 0, 1, "a"), Utterance("speaker_00", 1, 2, "b"),
+                                     Utterance("speaker_00", 2, 3, "c")], "m",
+                          LanguageDecision("tr", 1.0, LanguageSource.REQUEST)))
+    assert store.events == [(jid, "job.running"), (jid, "job.done")]
+    assert c.delete(f"/jobs/{jid}/utterances/1").status_code == 200
+    assert c.delete(f"/jobs/{jid}/utterances/1").status_code == 404           # zaten silindi
+    utts = c.get(f"/jobs/{jid}").json()["result"]["utterances"]
+    assert [(u["index"], u["text"]) for u in utts] == [(0, "a"), (2, "c")]    # sıra numarası korunur
+    assert c.patch(f"/jobs/{jid}/utterances/2", json={"text": "c2"}).json()["text"] == "c2"
+    assert c.patch(f"/jobs/{jid}/utterances/1", json={"text": "x"}).status_code == 404

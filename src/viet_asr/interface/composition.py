@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from viet_asr.application.config import (
-    DiarizerConfig, LidConfig, PipelineConfig, VadConfig, WhisperParams,
+    DiarizerConfig, LidConfig, PipelineConfig, ProfileConfig, VadConfig, WhisperParams,
 )
 from viet_asr.application.language import LanguageResolver
 from viet_asr.application.ports import ResultRepository
@@ -25,7 +25,8 @@ from viet_asr.infrastructure.whisper_lid import LazyDetector, WhisperLanguageDet
 def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                    models: dict[str, str] | None = None, threads: int = 2,
                    speakers: int = 0, hotwords: str | None = None,
-                   diarizer: str = "cluster", workers: int = 1) -> PipelineConfig:
+                   diarizer: str = "cluster", workers: int = 1, profile: str = "full",
+                   min_diarize_sec: float = 10.0) -> PipelineConfig:
     """workers: aynı süreçte aynı anda işlenecek ses sayısı (yerel mod); motorlar buna göre
     paralel çağrıya hazırlanır."""
     d, models = Path(models_dir), models or {}
@@ -37,6 +38,7 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
         profiles[code] = language_profile(code, d, models.get(code), **extra)
     return PipelineConfig(
         languages=profiles,
+        profile=ProfileConfig(default=profile, min_diarize_sec=min_diarize_sec),
         lid=LidConfig(stages=lid_stages(d), num_threads=threads),
         vad=VadConfig(model=str(d / "silero_vad.onnx")),
         diarizer=DiarizerConfig(
@@ -78,7 +80,7 @@ def build_pipeline(cfg: PipelineConfig, repo: ResultRepository,
         loader=SoundfileLoader(), vad=SileroVad(cfg.vad),
         language=build_resolver(cfg, with_detection), engines=build_engines(cfg),
         diarizer=build_diarizer(cfg.diarizer), fusion=build_fusion(cfg.fusion), repo=repo,
-        chunker=EnergyChunker(cfg.chunk.max_len, cfg.chunk.min_len))
+        chunker=EnergyChunker(cfg.chunk.max_len, cfg.chunk.min_len), profiles=cfg.profile)
 
 
 # geriye dönük ad (CLI ve testler)
@@ -133,13 +135,27 @@ def verify_models(models_dir: str | Path, files: list[Path]) -> list[str]:
     return problems
 
 
+def store_from_settings(s, url: str | None = None, pool_size: int = 5):
+    """İş deposu (yerel ya da tam mod); varsayılan bildirim olayları ayardan."""
+    from viet_asr.infrastructure.db import SqlAlchemyJobStore
+
+    return SqlAlchemyJobStore(url or s.database_url, pool_size=pool_size,
+                              notify_default=tuple(s.notify_default))
+
+
+def config_from_settings(s, workers: int = 1) -> PipelineConfig:
+    """Ayarlardan hat yapılandırması (yerel sunucu, kuyruk işçisi ve doğrulama aynı yerden)."""
+    return default_config(s.models_dir, tuple(s.languages), s.models, s.threads, s.speakers,
+                          s.hotwords, s.diarizer, workers=workers, profile=s.pipeline_profile,
+                          min_diarize_sec=s.pipeline_min_diarize_sec)
+
+
 def verify_models_or_exit(settings) -> None:
     import logging
 
     if not settings.verify_models:
         return
-    cfg = default_config(settings.models_dir, tuple(settings.languages), settings.models,
-                         settings.threads, settings.speakers, settings.hotwords, settings.diarizer)
+    cfg = config_from_settings(settings)
     problems = verify_models(settings.models_dir, model_files(cfg))
     if problems:
         raise SystemExit("Model doğrulaması başarısız (VERIFY_MODELS=0 ile atlanabilir):\n  "

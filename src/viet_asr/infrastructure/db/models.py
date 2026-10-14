@@ -72,6 +72,10 @@ class JobRow(Base):
     num_speakers: Mapped[int | None] = mapped_column(Integer)
     # Entegre olan sistemin kendi kimliği: aynı istek iki kez gelirse yeni iş açılmaz.
     external_id: Mapped[str | None] = mapped_column(Text)
+    profile: Mapped[str | None] = mapped_column(Text)       # full | feedback (None: varsayılan)
+    notify: Mapped[str | None] = mapped_column(Text)        # "done,failed" (None: varsayılan)
+    # aşama süreleri {"vad": 0.2, "asr": 4.1, ...}: metrikler bütün süreçlerden buradan toplanır
+    timings: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB(), "postgresql"))
     lang_code: Mapped[str | None] = mapped_column(Text)
     lang_confidence: Mapped[float | None] = mapped_column(Float)
     lang_source: Mapped[str | None] = mapped_column(Text)
@@ -102,6 +106,8 @@ class UtteranceRow(Base):
     original_text: Mapped[str | None] = mapped_column(Text)
     original_speaker: Mapped[str | None] = mapped_column(Text)
     edited_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    # arayüzden silindi (uydurma satır): sonuçta görünmez, ince ayar için kayıtta kalır
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
 
 class OutboxRow(Base):

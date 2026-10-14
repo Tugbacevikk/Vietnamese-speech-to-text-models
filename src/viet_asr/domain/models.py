@@ -48,6 +48,17 @@ class AudioJob:
     num_speakers: int | None = None  # biliniyorsa; None ise sesten bulunur
     # entegre olan sistemin kendi kimliği; aynısı tekrar gelirse yeni iş açılmaz
     external_id: str | None = None
+    # işlem profili: "full" (her adım) ya da "feedback" (kısa, çok sayıda mesaj için hızlı);
+    # None ise sistemin varsayılanı (PIPELINE_PROFILE)
+    profile: str | None = None
+    # hangi olaylarda callback'e bildirim gidecek; None = varsayılan (NOTIFY_DEFAULT)
+    notify: tuple[str, ...] | None = None
+
+
+PROFILES = ("full", "feedback")
+# bildirim olayları: running = işlenmeye başladı; diğerleri son durumlar
+NOTIFY_EVENTS = ("running", "done", "failed", "rejected")
+NOTIFY_DEFAULT = ("done", "failed", "rejected")
 
 
 @dataclass(frozen=True)
@@ -94,6 +105,7 @@ class Utterance:
     end: float
     text: str
     edited: bool = False  # bir kişi arayüzden düzeltti
+    index: int = -1       # kayıttaki sıra numarası (silinen satırlar atlansa da değişmez)
 
 
 @dataclass(frozen=True)
@@ -140,6 +152,9 @@ class Transcript:
     utterances: list[Utterance]
     model: str
     language: LanguageDecision
+    profile: str = "full"
+    # aşama süreleri (sn): yukleme, vad, dil, asr, konusmaci, birlestirme, toplam
+    timings: dict[str, float] = field(default_factory=dict)
 
     @property
     def text(self) -> str:

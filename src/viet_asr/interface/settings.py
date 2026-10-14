@@ -73,6 +73,14 @@ class Settings:
     # Kapalı, çünkü tek entegre sistem 4000 mesajı bir anda gönderebilir; açılırsa 429 alır.
     rate_limit_per_minute: int = field(default_factory=lambda: int(os.environ.get(
         "RATE_LIMIT_PER_MINUTE", "0")))
+    # İşlem profili (istekte profile= ile iş başına değiştirilebilir): full | feedback
+    pipeline_profile: str = field(default_factory=lambda: os.environ.get("PIPELINE_PROFILE", "full"))
+    # feedback profilinde bundan kısa seste konuşmacı ayırma atlanır (sn)
+    pipeline_min_diarize_sec: float = field(default_factory=lambda: float(os.environ.get(
+        "PIPELINE_MIN_DIARIZE_SEC", "10")))
+    # callback'e hangi olaylarda bildirim gitsin (istekte notify= ile iş başına)
+    notify_default: list[str] = field(default_factory=lambda: _list(os.environ.get(
+        "NOTIFY_EVENTS", "done,failed,rejected")))
     max_job_attempts: int = field(default_factory=lambda: int(os.environ.get("MAX_JOB_ATTEMPTS", "3")))
     # modeller yüklenirken MANIFEST.json'daki sha256 ile karşılaştır
     verify_models: bool = field(default_factory=lambda: os.environ.get("VERIFY_MODELS", "1") == "1")

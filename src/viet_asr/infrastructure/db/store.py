@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from viet_asr.application.serialization import transcript_to_dict
 from viet_asr.domain import (
-    AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, LanguageSource, Transcript, Utterance,
+    NOTIFY_DEFAULT, AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, LanguageSource, Transcript, Utterance,
 )
 from viet_asr.infrastructure.db.models import JobRow, OutboxRow, UtteranceRow, utcnow
 from viet_asr.infrastructure.db.url import normalize_url
@@ -37,13 +37,16 @@ MIGRATIONS = Path(__file__).parent / "migrations"
 _TABLES = ("jobs", "utterances", "outbox")  # FK sırası: önce ebeveyn
 _LEGACY_INDEXES = ("jobs_status_idx", "outbox_pending_idx")
 
-# ret kesindir: anında bildirim. FAILED'in bildirimi yalnızca fail() ile (son deneme).
-_TERMINAL_EVENTS = {JobStatus.REJECTED: "job.rejected"}
+# set_status ile bildirim üreten durumlar: ret kesindir (anında); RUNNING yalnızca istenirse.
+# FAILED'in bildirimi yalnızca fail() ile (son deneme; ara denemeler bildirim üretmez).
+_STATUS_EVENTS = {JobStatus.REJECTED: "rejected", JobStatus.RUNNING: "running"}
 _FINISHED = (JobStatus.DONE.value, JobStatus.FAILED.value, JobStatus.REJECTED.value)
 
 
 class SqlAlchemyJobStore:
-    def __init__(self, url: str, pool_size: int = 5, echo: bool = False):
+    def __init__(self, url: str, pool_size: int = 5, echo: bool = False,
+                 notify_default: tuple[str, ...] = NOTIFY_DEFAULT):
+        self.notify_default = tuple(notify_default)
         self.url = normalize_url(url)
         self.dialect = self.url.split(":", 1)[0].split("+", 1)[0]
         if self.dialect == "sqlite":
@@ -129,6 +132,8 @@ class SqlAlchemyJobStore:
                 s.add(JobRow(id=job.job_id, status=JobStatus.QUEUED.value, audio_path=job.audio_path,
                              requested_lang=job.language, callback_url=job.callback_url,
                              num_speakers=job.num_speakers, external_id=job.external_id,
+                             profile=job.profile,
+                             notify=",".join(job.notify) if job.notify is not None else None,
                              created_at=now, updated_at=now))
         except IntegrityError:
             # iki istek aynı anda geldi: ikincisi benzersizlik kısıtına çarpar
@@ -142,27 +147,31 @@ class SqlAlchemyJobStore:
         with self._session() as s:
             return s.scalar(select(JobRow.id).where(JobRow.external_id == external_id))
 
-    def _update_job(self, s: Session, job_id: str, must: bool = False, **values) -> str | None:
-        """Satırı günceller, callback_url döndürür. İş yoksa (ör. saklama süresi dolup
-        silindiyse) sessizce geçer; must=True ise KeyError (sonuç kaybolmasın)."""
+    def _update_job(self, s: Session, job_id: str, must: bool = False, **values):
+        """Satırı günceller; (callback_url, bildirim olayları) döndürür. İş yoksa (ör. saklama
+        süresi dolup silindiyse) sessizce geçer; must=True ise KeyError (sonuç kaybolmasın)."""
         values["updated_at"] = utcnow()
         row = s.execute(update(JobRow).where(JobRow.id == job_id).values(**values)
-                        .returning(JobRow.callback_url)).first()
+                        .returning(JobRow.callback_url, JobRow.notify)).first()
         if row is None and must:
             raise KeyError(f"iş yok: {job_id}")
-        return row[0] if row else None
+        if row is None or not row[0]:
+            return None, ()
+        events = tuple(row[1].split(",")) if row[1] is not None else self.notify_default
+        return row[0], events
 
     def set_status(self, job_id: str, status: JobStatus, error: str | None = None) -> None:
         with self._tx() as s:
-            cb = self._update_job(s, job_id, status=status.value, error=error)
-            if cb and status in _TERMINAL_EVENTS:
-                self._outbox(s, job_id, _TERMINAL_EVENTS[status], cb,
+            cb, events = self._update_job(s, job_id, status=status.value, error=error)
+            event = _STATUS_EVENTS.get(status)
+            if cb and event in events:
+                self._outbox(s, job_id, f"job.{event}", cb,
                              {"job_id": job_id, "status": status.value, "error": error})
 
     def fail(self, job_id: str, error: str) -> None:
         with self._tx() as s:
-            cb = self._update_job(s, job_id, status=JobStatus.FAILED.value, error=error)
-            if cb:
+            cb, events = self._update_job(s, job_id, status=JobStatus.FAILED.value, error=error)
+            if cb and "failed" in events:
                 self._outbox(s, job_id, "job.failed", cb,
                              {"job_id": job_id, "status": JobStatus.FAILED.value, "error": error})
 
@@ -174,13 +183,15 @@ class SqlAlchemyJobStore:
     def save(self, t: Transcript) -> None:
         d = t.language
         with self._tx() as s:
-            cb = self._update_job(s, t.job_id, must=True, status=JobStatus.DONE.value, model=t.model,
-                                  duration=t.duration, lang_code=d.code, lang_confidence=d.confidence,
-                                  lang_source=d.source.value, lang_uncertain=d.uncertain, error=None)
+            cb, events = self._update_job(
+                s, t.job_id, must=True, status=JobStatus.DONE.value, model=t.model,
+                duration=t.duration, lang_code=d.code, lang_confidence=d.confidence,
+                lang_source=d.source.value, lang_uncertain=d.uncertain, error=None,
+                profile=t.profile, timings=t.timings or None)
             s.execute(delete(UtteranceRow).where(UtteranceRow.job_id == t.job_id))  # tekrar işlenirse
             s.add_all(UtteranceRow(job_id=t.job_id, idx=i, speaker=u.speaker, start_s=u.start,
                                    end_s=u.end, text=u.text) for i, u in enumerate(t.utterances))
-            if cb:
+            if cb and "done" in events:
                 self._outbox(s, t.job_id, "job.done", cb,
                              {"status": JobStatus.DONE.value, **transcript_to_dict(t)})
 
@@ -201,19 +212,32 @@ class SqlAlchemyJobStore:
             j = s.get(JobRow, job_id)
             if j is None or j.status != JobStatus.DONE.value:
                 return None
-            rows = s.scalars(select(UtteranceRow).where(UtteranceRow.job_id == job_id)
+            rows = s.scalars(select(UtteranceRow).where(UtteranceRow.job_id == job_id,
+                                                        UtteranceRow.deleted_at.is_(None))
                              .order_by(UtteranceRow.idx)).all()
             return Transcript(job_id=job_id, duration=j.duration or 0.0, model=j.model or "",
-                              language=_decision(j),
+                              language=_decision(j), profile=j.profile or "full",
+                              timings=dict(j.timings or {}),
                               utterances=[Utterance(r.speaker, r.start_s, r.end_s, r.text,
-                                                    r.edited_at is not None) for r in rows])
+                                                    r.edited_at is not None, r.idx) for r in rows])
+
+    def delete_utterance(self, job_id: str, idx: int) -> bool:
+        """Satırı sonuçtan kaldırır (uydurma satır). Kayıtta kalır: modelin hatası olarak
+        ince ayar ve ölçüm için incelenebilir. Bitmiş iş değilse ya da satır yoksa False."""
+        with self._tx() as s:
+            j = s.get(JobRow, job_id)
+            u = s.get(UtteranceRow, (job_id, idx))
+            if j is None or u is None or j.status != JobStatus.DONE.value or u.deleted_at is not None:
+                return False
+            u.deleted_at = utcnow()
+            return True
 
     def update_utterance(self, job_id: str, idx: int, speaker: str | None = None,
                          text: str | None = None) -> Utterance | None:
         with self._tx() as s:
             j = s.get(JobRow, job_id)
             u = s.get(UtteranceRow, (job_id, idx))
-            if j is None or u is None or j.status != JobStatus.DONE.value:
+            if j is None or u is None or j.status != JobStatus.DONE.value or u.deleted_at is not None:
                 return None
             if u.edited_at is None:  # modelin ilk hali bir kez saklanır
                 u.original_text, u.original_speaker = u.text, u.speaker
@@ -222,13 +246,13 @@ class SqlAlchemyJobStore:
             if text is not None:
                 u.text = text
             u.edited_at = utcnow()
-            return Utterance(u.speaker, u.start_s, u.end_s, u.text, True)
+            return Utterance(u.speaker, u.start_s, u.end_s, u.text, True, u.idx)
 
     def corrections(self, limit: int = 10_000) -> list[Correction]:
         with self._session() as s:
             rows = s.execute(select(UtteranceRow, JobRow.audio_path, JobRow.lang_code)
                              .join(JobRow, JobRow.id == UtteranceRow.job_id)
-                             .where(UtteranceRow.edited_at.is_not(None))
+                             .where(UtteranceRow.edited_at.is_not(None), UtteranceRow.deleted_at.is_(None))
                              .order_by(UtteranceRow.edited_at.desc()).limit(limit)).all()
             return [Correction(u.job_id, path, lang, u.idx, u.start_s, u.end_s, u.speaker, u.text,
                                u.original_speaker or u.speaker, u.original_text or u.text, u.edited_at)
@@ -351,6 +375,7 @@ def _decision(r: JobRow) -> LanguageDecision | None:
 
 
 def _record(r: JobRow) -> JobRecord:
-    job = AudioJob(r.id, r.audio_path, r.requested_lang, r.callback_url, r.num_speakers, r.external_id)
+    job = AudioJob(r.id, r.audio_path, r.requested_lang, r.callback_url, r.num_speakers, r.external_id,
+                   r.profile, tuple(r.notify.split(",")) if r.notify is not None else None)
     return JobRecord(job=job, status=JobStatus(r.status), decision=_decision(r), error=r.error,
                      created_at=r.created_at, updated_at=r.updated_at)

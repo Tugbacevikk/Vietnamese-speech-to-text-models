@@ -48,6 +48,7 @@ def drop_repeats(words: list[Word], max_repeat: int) -> list[Word]:
 
 class FasterWhisperAsr:
     segmentation = "vad"  # Whisper sessizlik/müzikte metin uyduruyor: yalnızca konuşma parçaları
+    supports_fast = True  # feedback profili: beam 1 (açgözlü), projedeki gibi
 
     def __init__(self, model: ModelRef, params: AsrParams, normalizer: TextNormalizer,
                  language: str, whisper_model=None, batched=None):
@@ -78,9 +79,9 @@ class FasterWhisperAsr:
         self.model = whisper_model
         self.batched = batched
 
-    def _options(self) -> dict:
+    def _options(self, fast: bool = False) -> dict:
         wp = self.wp
-        return dict(language=self.language, task="transcribe", beam_size=wp.beam_size,
+        return dict(language=self.language, task="transcribe", beam_size=1 if fast else wp.beam_size,
                     word_timestamps=True, condition_on_previous_text=False, temperature=0.0,
                     repetition_penalty=wp.repetition_penalty,
                     no_repeat_ngram_size=wp.no_repeat_ngram_size,
@@ -89,17 +90,17 @@ class FasterWhisperAsr:
                     log_prob_threshold=wp.log_prob_threshold,
                     initial_prompt=wp.initial_prompt, hotwords=wp.hotwords)
 
-    def transcribe(self, segments: list[VadSegment]) -> list[Word]:
+    def transcribe(self, segments: list[VadSegment], fast: bool = False) -> list[Word]:
         if not segments:
             return []
         raw = None
         if self.batched is not None:
             try:
-                raw = self._batched(segments)
+                raw = self._batched(segments, fast)
             except Exception as e:  # ör. bellek: tek tek çözmeye düş
                 log.warning("toplu çözme başarısız (%s), parçalar tek tek çözülüyor", e)
         if raw is None:
-            raw = self._one_by_one(segments)
+            raw = self._one_by_one(segments, fast)
         words: list[Word] = []
         for seg_text, seg_words in raw:
             if _key(seg_text) in self._drop:
@@ -110,7 +111,7 @@ class FasterWhisperAsr:
                     words.append(Word(text=text, start=float(w.start), end=float(max(w.start, w.end))))
         return drop_repeats(words, self.wp.max_repeat)
 
-    def _batched(self, segments: list[VadSegment]):
+    def _batched(self, segments: list[VadSegment], fast: bool = False):
         """Parçalar asıl zamanlarıyla tek bir diziye yerleştirilir; clip_timestamps ile
         yalnızca onlar çözülür ve kelime zamanları doğrudan mutlak gelir."""
         end = max(s.end for s in segments)
@@ -122,13 +123,13 @@ class FasterWhisperAsr:
             audio[i:i + n] = s.samples[:n]
             clips.append({"start": i / SR, "end": (i + n) / SR})
         result, _ = self.batched.transcribe(audio, clip_timestamps=clips,
-                                            batch_size=self.wp.batch_size, **self._options())
+                                            batch_size=self.wp.batch_size, **self._options(fast))
         return [(r.text, list(r.words or [])) for r in result]  # list(): hatalar burada çıksın
 
-    def _one_by_one(self, segments: list[VadSegment]):
+    def _one_by_one(self, segments: list[VadSegment], fast: bool = False):
         out = []
         for s in segments:
-            result, _ = self.model.transcribe(s.samples, vad_filter=False, **self._options())
+            result, _ = self.model.transcribe(s.samples, vad_filter=False, **self._options(fast))
             for r in result:
                 out.append((r.text, [_Shifted(w, s.start) for w in (r.words or [])]))
         return out

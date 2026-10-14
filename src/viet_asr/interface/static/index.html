@@ -110,6 +110,13 @@ audio { width: 100%; margin-bottom: 12px; }
       <label>Konuşmacı sayısı
         <select id="speakers"><option value="">Otomatik</option></select>
       </label>
+      <label>İşlem
+        <select id="profile">
+          <option value="">Varsayılan</option>
+          <option value="full">Tam</option>
+          <option value="feedback">Hızlı (kısa geri bildirim)</option>
+        </select>
+      </label>
       <button class="btn" id="send" disabled>Analiz et</button>
     </div>
     <div class="status" id="status" aria-live="polite"></div>
@@ -208,6 +215,7 @@ $("send").addEventListener("click", async () => {
   fd.append("file", file);
   fd.append("language", $("lang").value);
   if ($("speakers").value) fd.append("num_speakers", $("speakers").value);
+  if ($("profile").value) fd.append("profile", $("profile").value);
   $("send").disabled = true;
   setStatus("Yükleniyor…");
   try {
@@ -264,11 +272,22 @@ function uttRow(u, i) {
   const who = el("div", { class: "who", style: `color:${colorOf(u.speaker)}` }, speakerName(u.speaker));
   if (u.edited) who.append(el("span", { class: "mark", title: "elle düzeltildi" }, "düzeltildi"));
   const btn = el("button", { class: "edit-btn", type: "button", title: "metni ya da konuşmacıyı düzelt" }, "Düzelt");
+  const del = el("button", { class: "edit-btn", type: "button", title: "uydurma ya da yanlış satırı kaldır" }, "Sil");
   const row = el("div", { class: "utt", title: "dinlemek için tıklayın" },
     el("div", {}, who, el("div", { class: "t" }, `${fmt(u.start)} – ${fmt(u.end)}`)),
-    el("div", { class: "body" }, el("p", {}, u.text), btn));
+    el("div", { class: "body" }, el("p", {}, u.text), btn, del));
   row.addEventListener("click", () => play(u.start, u.end));
   btn.addEventListener("click", (e) => { e.stopPropagation(); openEditor(row, u, i); });
+  del.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (!confirm("Bu satır sonuçtan kaldırılsın mı? (Kayıtta model hatası olarak kalır.)")) return;
+    try {
+      await api(`/jobs/${encodeURIComponent(current.job_id)}/utterances/${u.index ?? i}`, { method: "DELETE" });
+      current.result.utterances = current.result.utterances.filter((x) => x !== u);
+      row.remove();
+      setStatus("Satır kaldırıldı.");
+    } catch (err) { setStatus("Silinemedi: " + err.message, true); }
+  });
   return row;
 }
 
@@ -295,10 +314,11 @@ function openEditor(row, u, i) {
     if (!Object.keys(patch).length) { row.replaceWith(uttRow(u, i)); return; }
     save.disabled = true;
     try {
-      const res = await (await api(`/jobs/${encodeURIComponent(current.job_id)}/utterances/${i}`, {
+      const res = await (await api(`/jobs/${encodeURIComponent(current.job_id)}/utterances/${u.index ?? i}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })).json();
       const nu = Object.assign({}, u, { text: res.text, speaker: res.speaker, edited: true });
-      current.result.utterances[i] = nu;
+      const pos = current.result.utterances.indexOf(u);
+      if (pos >= 0) current.result.utterances[pos] = nu;
       row.replaceWith(uttRow(nu, i));
       setStatus("Düzeltme kaydedildi (ince ayar verisine eklenir).");
     } catch (e) { setStatus("Kaydedilemedi: " + e.message, true); save.disabled = false; }

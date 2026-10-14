@@ -259,3 +259,22 @@ def test_duzeltme_ilk_hali_saklar_ve_sesi_korur(store):
     store.save(transcript("e"))
     later = utcnow() + td(days=2)
     assert [j for j, _ in store.finished_with_audio_before(later)] == ["e"]   # düzeltilenin sesi kalır
+
+
+def test_bildirim_olaylari_profil_sureler_ve_silme(store):
+    store.create(AudioJob("n", "/a.wav", "vi", "http://h/x", None, None, "feedback", ("running", "done")))
+    store.set_status("n", JobStatus.RUNNING)
+    t = transcript("n")
+    from dataclasses import replace
+    store.save(replace(t, profile="feedback", timings={"asr": 1.5, "toplam": 2.0}))
+    assert [o["event"] for o in store.outbox_rows()] == ["job.running", "job.done"]
+    r = store.get("n")
+    assert r.job.profile == "feedback" and r.job.notify == ("running", "done")
+    tt = store.get_transcript("n")
+    assert tt.timings == {"asr": 1.5, "toplam": 2.0} and tt.profile == "feedback"
+    store.create(AudioJob("q", "/b.wav", None, "http://h/x", notify=()))      # hiçbir bildirim
+    store.fail("q", "x")
+    assert [o["job_id"] for o in store.outbox_rows()] == ["n", "n"]
+    assert store.delete_utterance("n", 0) and not store.delete_utterance("n", 0)
+    assert [u.index for u in store.get_transcript("n").utterances] == [1]
+    assert store.update_utterance("n", 0, text="x") is None                   # silinen düzeltilmez

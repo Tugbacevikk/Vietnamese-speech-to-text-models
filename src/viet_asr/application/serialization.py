@@ -19,9 +19,11 @@ def transcript_to_dict(t: Transcript) -> dict:
         "language": decision_to_dict(t.language),
         "speakers": len({u.speaker for u in t.utterances} - {"BELIRSIZ"}),
         "text": t.text,
-        "utterances": [{"speaker": u.speaker, "start": round(u.start, 3), "end": round(u.end, 3),
-                        "text": u.text, **({"edited": True} if u.edited else {})}
-                       for u in t.utterances],
+        "utterances": [{"index": u.index if u.index >= 0 else i, "speaker": u.speaker,
+                        "start": round(u.start, 3), "end": round(u.end, 3), "text": u.text,
+                        **({"edited": True} if u.edited else {})}
+                       for i, u in enumerate(t.utterances)],
+        **({"profile": t.profile} if t.profile != "full" else {}),
     }
 
 
@@ -32,6 +34,8 @@ def record_to_dict(r: JobRecord, transcript: Transcript | None = None) -> dict:
         "requested_language": r.job.language,
         "num_speakers": r.job.num_speakers,
         "external_id": r.job.external_id,
+        "profile": r.job.profile,
+        "notify": list(r.job.notify) if r.job.notify is not None else None,
         "language": decision_to_dict(r.decision),
         "error": r.error,
         "created_at": r.created_at.isoformat() if r.created_at else None,

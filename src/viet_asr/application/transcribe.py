@@ -4,7 +4,12 @@ from __future__ import annotations
 import logging
 import time
 
-from viet_asr.domain import AudioJob, JobStatus, LanguageDecision, Transcript, UnsupportedLanguageError
+from viet_asr.domain import (
+    PROFILES, AudioJob, JobStatus, LanguageDecision, SpeakerSegment, Transcript,
+    UnsupportedLanguageError,
+)
+
+from .config import ProfileConfig
 
 from .fusion import FusionEngine
 from .language import LanguageResolver
@@ -17,10 +22,11 @@ class TranscribeAndDiarize:
     def __init__(self, loader: AudioLoader, vad: Vad, language: LanguageResolver,
                  engines: AsrEngines, diarizer: Diarizer, fusion: FusionEngine,
                  repo: ResultRepository, notifier: Notifier | None = None,
-                 chunker: Vad | None = None):
+                 chunker: Vad | None = None, profiles: ProfileConfig | None = None):
         """chunker: 'full' bölmeli motorlar için sesin tamamını parçalayan bölücü."""
         self.loader, self.vad, self.language, self.engines = loader, vad, language, engines
         self.chunker = chunker
+        self.profiles = profiles or ProfileConfig()
         self.diarizer, self.fusion, self.repo, self.notifier = diarizer, fusion, repo, notifier
 
     def run(self, job: AudioJob, decision: LanguageDecision | None = None) -> Transcript:
@@ -41,25 +47,53 @@ class TranscribeAndDiarize:
 
     def _process(self, job: AudioJob, decision: LanguageDecision | None) -> Transcript:
         t0 = time.perf_counter()
+        timings: dict[str, float] = {}
+        mark = [t0]
+
+        def lap(name: str) -> None:
+            now = time.perf_counter()
+            timings[name] = round(now - mark[0], 4)
+            mark[0] = now
+
+        profile = job.profile if job.profile in PROFILES else self.profiles.default
         audio = self.loader.load(job.audio_path)
         duration = len(audio) / 16000
+        lap("yukleme")
 
         segments = self.vad.split(audio)
+        lap("vad")
         lang = decision or self.language.resolve(job.language, segments)
         asr = self.engines[lang.code]
+        lap("dil")
         # VAD müzik altındaki/gürültülü konuşmayı atıyor; uydurma yapmayan motorlara sesin tamamı
         full = self.chunker is not None and getattr(asr, "segmentation", "vad") == "full"
         # ...ama VAD hiç konuşma bulmadıysa (sessizlik, test sinyali, bip) ASR hiç çalışmaz:
         # 13 Ekim, 1 sn'lik test sesleri: Zipformer "ừ", Whisper "Altyazı M.K." uyduruyordu.
         asr_segments = (self.chunker.split(audio) if full else segments) if segments else []
-        words = asr.transcribe(asr_segments) if asr_segments else []
-        speakers = self.diarizer.diarize(audio, segments, job.num_speakers) if segments else []
+        fast = profile == "feedback"
+        if not asr_segments:
+            words = []
+        elif fast and getattr(asr, "supports_fast", False):
+            words = asr.transcribe(asr_segments, fast=True)  # Whisper: beam 1
+        else:
+            words = asr.transcribe(asr_segments)
+        lap("asr")
+        if not segments:
+            speakers = []
+        elif job.num_speakers == 1 or (fast and duration < self.profiles.min_diarize_sec):
+            # tek kişi biliniyor ya da kısa geri bildirim mesajı: konuşmacı ayırma atlanır
+            speakers = [SpeakerSegment("speaker_00", 0.0, duration)]
+        else:
+            speakers = self.diarizer.diarize(audio, segments, job.num_speakers)
+        lap("konusmaci")
         utterances = self.fusion.fuse(words, speakers)
+        lap("birlestirme")
 
         dt = time.perf_counter() - t0
-        log.info("job=%s dil=%s(%s %.2f%s) sure=%.1fs rtf=%.3f parca=%d kelime=%d satir=%d",
+        timings["toplam"] = round(dt, 4)
+        log.info("job=%s dil=%s(%s %.2f%s) profil=%s sure=%.1fs rtf=%.3f parca=%d kelime=%d satir=%d",
                  job.job_id, lang.code, lang.source.value, lang.confidence,
-                 " BELIRSIZ" if lang.uncertain else "", duration, dt / max(duration, 1e-9),
+                 " BELIRSIZ" if lang.uncertain else "", profile, duration, dt / max(duration, 1e-9),
                  len(asr_segments), len(words), len(utterances))
         return Transcript(job_id=job.job_id, duration=duration, utterances=utterances,
-                          model=asr.name, language=lang)
+                          model=asr.name, language=lang, profile=profile, timings=timings)

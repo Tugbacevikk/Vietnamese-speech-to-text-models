@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import logging
 
-from viet_asr.domain import AudioJob, JobStatus, Transcript, UnsupportedLanguageError
+from viet_asr.domain import (
+    NOTIFY_EVENTS, PROFILES, AudioJob, JobStatus, Transcript, UnsupportedLanguageError,
+)
 
 from .language import LanguageResolver
 from .ports import AudioLoader, JobQueue, JobStore, Vad
@@ -44,7 +46,17 @@ class SubmitJob:
         ext = (job.external_id or "").strip() or None
         if ext is not None and len(ext) > 255:
             raise ValueError("external_id en fazla 255 karakter olmalı")
-        job = AudioJob(job.job_id, job.audio_path, lang, job.callback_url, job.num_speakers, ext)
+        profile = (job.profile or "").strip().lower() or None
+        if profile is not None and profile not in PROFILES:
+            raise ValueError(f"profile '{profile}' yok; seçenekler: {', '.join(PROFILES)}")
+        notify = None
+        if job.notify is not None:
+            notify = tuple(dict.fromkeys(e.strip().lower() for e in job.notify if e.strip()))
+            bad = [e for e in notify if e not in NOTIFY_EVENTS]
+            if bad:
+                raise ValueError(f"bilinmeyen bildirim olayı {bad}; seçenekler: {', '.join(NOTIFY_EVENTS)}")
+        job = AudioJob(job.job_id, job.audio_path, lang, job.callback_url, job.num_speakers, ext,
+                       profile, notify)
         job_id = self.store.create(job)
         if job_id != job.job_id:
             return job_id  # tekrar gönderim: var olan iş

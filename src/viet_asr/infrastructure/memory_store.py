@@ -5,7 +5,9 @@ import threading
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from viet_asr.domain import AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, Transcript
+from viet_asr.domain import (
+    NOTIFY_DEFAULT, AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, Transcript,
+)
 
 
 def _now():
@@ -20,6 +22,7 @@ class MemoryJobStore:
         self._lock = threading.Lock()
         self._originals: dict = {}
         self._edits: dict = {}
+        self._deleted: set = set()
 
     def create(self, job: AudioJob) -> str:
         with self._lock:
@@ -45,32 +48,48 @@ class MemoryJobStore:
     def get(self, job_id: str) -> JobRecord | None:
         return self.jobs.get(job_id)
 
+    def _event(self, r: JobRecord, event: str) -> None:
+        notify = r.job.notify if r.job.notify is not None else NOTIFY_DEFAULT
+        if r.job.callback_url and event in notify:
+            self.events.append((r.job.job_id, f"job.{event}"))
+
     def set_status(self, job_id: str, status: JobStatus, error: str | None = None) -> None:
         r = self._update(job_id, status=status, error=error)
-        if r.job.callback_url and status == JobStatus.REJECTED:
-            self.events.append((job_id, "job.rejected"))
+        if status in (JobStatus.REJECTED, JobStatus.RUNNING):
+            self._event(r, status.value)
 
     def fail(self, job_id: str, error: str) -> None:
-        r = self._update(job_id, status=JobStatus.FAILED, error=error)
-        if r.job.callback_url:
-            self.events.append((job_id, "job.failed"))
+        self._event(self._update(job_id, status=JobStatus.FAILED, error=error), "failed")
 
     def set_language(self, job_id: str, decision: LanguageDecision) -> None:
         self._update(job_id, decision=decision)
 
     def save(self, t: Transcript) -> None:
+        t = replace(t, utterances=[replace(u, index=i) for i, u in enumerate(t.utterances)])
         self.results[t.job_id] = t
-        r = self._update(t.job_id, status=JobStatus.DONE, decision=t.language, error=None)
-        if r.job.callback_url:
-            self.events.append((t.job_id, "job.done"))
+        self._event(self._update(t.job_id, status=JobStatus.DONE, decision=t.language, error=None), "done")
 
     def get_transcript(self, job_id: str) -> Transcript | None:
-        return self.results.get(job_id)
+        t = self.results.get(job_id)
+        if t is None:
+            return None
+        return replace(t, utterances=[u for u in t.utterances if (job_id, u.index) not in self._deleted])
+
+    def delete_utterance(self, job_id, idx):
+        with self._lock:
+            t, r = self.results.get(job_id), self.jobs.get(job_id)
+            if (t is None or r is None or r.status != JobStatus.DONE or not 0 <= idx < len(t.utterances)
+                    or (job_id, idx) in self._deleted):
+                return False
+            self._deleted.add((job_id, idx))
+            self._edits.pop((job_id, idx), None)
+            return True
 
     def update_utterance(self, job_id, idx, speaker=None, text=None):
         with self._lock:
             t, r = self.results.get(job_id), self.jobs.get(job_id)
-            if t is None or r is None or r.status != JobStatus.DONE or not 0 <= idx < len(t.utterances):
+            if (t is None or r is None or r.status != JobStatus.DONE or not 0 <= idx < len(t.utterances)
+                    or (job_id, idx) in self._deleted):
                 return None
             old = t.utterances[idx]
             new = replace(old, speaker=speaker if speaker is not None else old.speaker,
