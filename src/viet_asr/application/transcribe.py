@@ -100,7 +100,8 @@ class TranscribeAndDiarize:
             # tek kişi biliniyor ya da kısa geri bildirim mesajı: konuşmacı ayırma atlanır
             speakers = [SpeakerSegment("speaker_00", 0.0, duration)]
         else:
-            speakers = self.diarizer.diarize(audio, segments, job.num_speakers)
+            diarize_segs = self.chunker.split(audio) if (full and self.chunker) else segments
+            speakers = self.diarizer.diarize(audio, diarize_segs, job.num_speakers)
         lap("konusmaci")
         utterances = self.fusion.fuse(words, speakers)
         lap("birlestirme")
@@ -109,10 +110,14 @@ class TranscribeAndDiarize:
 
         dt = time.perf_counter() - t0
         timings["toplam"] = round(dt, 4)
+        rtf = dt / max(duration, 1e-9)
+        wh_status = f"webhook gönderilecek: {job.callback_url}" if job.callback_url else "webhook yok (istekte callback_url belirtilmedi)"
         log.info("job=%s dil=%s(%s %.2f%s) profil=%s sure=%.1fs rtf=%.3f parca=%d kelime=%d satir=%d",
                  job.job_id, lang.code, lang.source.value, lang.confidence,
-                 " BELIRSIZ" if lang.uncertain else "", profile, duration, dt / max(duration, 1e-9),
+                 " BELIRSIZ" if lang.uncertain else "", profile, duration, rtf,
                  len(asr_segments), len(words), len(utterances))
+        log.info("✅ [ANALİZ TAMAMLANDI] job=%s | dil=%s | ses=%.1fs | işlem=%.1fs (RTF=%.3f) | satır=%d | %s",
+                 job.job_id, lang.code, duration, dt, rtf, len(utterances), wh_status)
         return Transcript(job_id=job.job_id, duration=duration, utterances=utterances,
                           model=asr.name, language=lang, profile=profile, timings=timings,
                           quality=quality)

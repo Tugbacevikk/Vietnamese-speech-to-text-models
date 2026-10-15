@@ -46,7 +46,7 @@ class Hook(BaseHTTPRequestHandler):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("files", nargs="+")
-    p.add_argument("--api", default="http://localhost:8000")
+    p.add_argument("--api", default=f"http://localhost:{os.environ.get('PORT', '8001')}")
     p.add_argument("--lang", default="auto")
     p.add_argument("--hook-host", default="localhost")
     p.add_argument("--hook-port", type=int, default=9009)

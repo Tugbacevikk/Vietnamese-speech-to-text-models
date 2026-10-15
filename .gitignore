@@ -13,3 +13,7 @@ sonuc_*.json
 dump.rdb
 data/
 models/tts-test/
+.env
+.vscode/
+kabul_sonucu.json
+output_transcript.txt

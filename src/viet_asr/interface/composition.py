@@ -26,24 +26,36 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                    models: dict[str, str] | None = None, threads: int = 2,
                    speakers: int = 0, hotwords: str | None = None,
                    diarizer: str = "cluster", workers: int = 1, profile: str = "full",
-                   min_diarize_sec: float = 10.0, sandwich_max: float = 0.0,
-                   whisper_threads: int | None = None, whisper_workers: int | None = None) -> PipelineConfig:
+                   min_diarize_sec: float = 10.0, sandwich_max: float = 1.0,
+                   punctuate: bool = True, detect_roles: bool = True,
+                   whisper_threads: int | None = None, whisper_workers: int | None = None,
+                   whisper_device: str = "auto", whisper_compute_type: str = "auto",
+                   whisper_hotwords: str | None = None,
+                   whisper_prompt: str | None = None,
+                   whisper_beam_size: int = 1,
+                   whisper_batch_size: int = 8) -> PipelineConfig:
     """workers: aynı süreçte aynı anda işlenecek ses sayısı (yerel mod); motorlar buna göre
     paralel çağrıya hazırlanır. whisper_threads/whisper_workers: faster-whisper'a ayrı bütçe
     (bir çözüm kaç iş parçacığı, aynı anda kaç çözüm); verilmezse threads ve workers."""
     d, models = Path(models_dir), models or {}
     profiles = {}
     for code in languages:
-        extra = {"num_threads": threads,
-                 "whisper": WhisperParams(num_workers=max(1, whisper_workers or workers),
-                                          cpu_threads=whisper_threads)}
+        wp = WhisperParams(num_workers=max(1, whisper_workers or workers),
+                           cpu_threads=whisper_threads,
+                           device=whisper_device,
+                           compute_type=whisper_compute_type,
+                           hotwords=whisper_hotwords or None,
+                           initial_prompt=whisper_prompt or None,
+                           beam_size=whisper_beam_size,
+                           batch_size=whisper_batch_size)
+        extra = {"num_threads": threads, "whisper": wp}
         if code == "vi" and hotwords:
             extra["hotwords_file"] = hotwords
         profiles[code] = language_profile(code, d, models.get(code), **extra)
     return PipelineConfig(
         languages=profiles,
         profile=ProfileConfig(default=profile, min_diarize_sec=min_diarize_sec),
-        fusion=FusionConfig(sandwich_max=sandwich_max),
+        fusion=FusionConfig(sandwich_max=sandwich_max, clean_repeats=True, punctuate=punctuate, detect_roles=detect_roles),
         lid=LidConfig(stages=lid_stages(d), num_threads=threads),
         vad=VadConfig(model=str(d / "silero_vad.onnx")),
         diarizer=DiarizerConfig(
@@ -154,8 +166,16 @@ def config_from_settings(s, workers: int = 1) -> PipelineConfig:
     return default_config(s.models_dir, tuple(s.languages), s.models, s.threads, s.speakers,
                           s.hotwords, s.diarizer, workers=workers, profile=s.pipeline_profile,
                           min_diarize_sec=s.pipeline_min_diarize_sec, sandwich_max=s.fusion_sandwich_max,
+                          punctuate=getattr(s, "punctuate", True),
+                          detect_roles=getattr(s, "detect_roles", True),
                           whisper_threads=s.whisper_threads,
-                          whisper_workers=s.whisper_workers(workers))
+                          whisper_workers=s.whisper_workers(workers),
+                          whisper_device=getattr(s, "whisper_device", "auto"),
+                          whisper_compute_type=getattr(s, "whisper_compute_type", "auto"),
+                          whisper_hotwords=getattr(s, "whisper_hotwords", None),
+                          whisper_prompt=getattr(s, "whisper_initial_prompt", None),
+                          whisper_beam_size=getattr(s, "whisper_beam_size", 1),
+                          whisper_batch_size=getattr(s, "whisper_batch_size", 8))
 
 
 def verify_models_or_exit(settings) -> None:

@@ -21,11 +21,19 @@ if not exist ".env" (
 echo [1/2] Modeller kontrol ediliyor ^(eksik varsa iner; ilk sefer ~2 GB^)...
 %PY% scripts\download_models.py || goto :hata
 
+set PORT=8001
+set HOST=127.0.0.1
+for /f "tokens=1,2" %%A in ('%PY% -c "from viet_asr.interface.settings import Settings; s = Settings(); print(s.host, s.port)"') do (
+    set HOST=%%A
+    set PORT=%%B
+)
+
 echo [2/2] Ses Analizi ^(yerel mod^) baslatiliyor...
-start "Ses Analizi - Yerel" cmd /k "%PY% -m viet_asr.interface.local_server --host 127.0.0.1 --port 8000"
+start "Ses Analizi - Yerel" cmd /k "%PY% -m viet_asr.interface.local_server --host %HOST% --port %PORT%"
 echo.
-echo   Hazir oldugunda: http://127.0.0.1:8000/docs
-echo   Durdurmak icin: durdur.bat
+echo   Hazir oldugunda: http://%HOST%:%PORT%
+echo   API Belgesi:     http://%HOST%:%PORT%/docs
+echo   Durdurmak icin:  durdur.bat
 goto :eof
 
 :hata

@@ -72,12 +72,73 @@ class FasterWhisperAsr:
                 # anlaşılmaz bir hata yerine ne yapılacağı söylenir
                 raise FileNotFoundError(
                     f"{model.folder}/model.bin yok: python scripts/download_models.py --tr {model.name}")
-            whisper_model = WhisperModel(str(model.folder), device="cpu",
-                                         compute_type=self.wp.compute_type,
-                                         cpu_threads=self.wp.cpu_threads or params.num_threads,
-                                         local_files_only=True,
-                                         num_workers=self.wp.num_workers)
-            batched = BatchedInferencePipeline(model=whisper_model)
+            def _cuda_ok() -> bool:
+                try:
+                    import ctranslate2, ctypes, os, sys
+                    if ctranslate2.get_cuda_device_count() <= 0:
+                        return False
+                    candidates = [
+                        Path(sys.prefix) / "Lib" / "site-packages" / "torch" / "lib",
+                        Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin",
+                        Path(os.environ.get("CUDA_PATH", "")) / "bin",
+                        Path(r"C:\Users\ADIL CEVIK\Desktop\sesAnalizi\.venv\Lib\site-packages\torch\lib"),
+                    ]
+                    for cand in candidates:
+                        if cand.is_dir() and (cand / "cublas64_12.dll").exists():
+                            try:
+                                os.add_dll_directory(str(cand))
+                            except Exception:
+                                pass
+                            if str(cand) not in os.environ.get("PATH", ""):
+                                os.environ["PATH"] = str(cand) + os.pathsep + os.environ.get("PATH", "")
+                            try:
+                                ctypes.CDLL(str(cand / "cublasLt64_12.dll"))
+                                ctypes.CDLL(str(cand / "cublas64_12.dll"))
+                            except Exception:
+                                pass
+                    ctypes.CDLL("cublas64_12.dll")
+                    return True
+                except Exception:
+                    return False
+
+            dev = getattr(self.wp, "device", "auto")
+            if dev == "auto":
+                dev = "cuda" if _cuda_ok() else "cpu"
+
+            c_type = getattr(self.wp, "compute_type", "auto")
+            if c_type == "auto":
+                c_type = "float16" if dev == "cuda" else "int8"
+
+            dev_idx = getattr(self.wp, "device_index", 0)
+            threads = self.wp.cpu_threads or params.num_threads
+            log.info("FasterWhisper yükleniyor: model=%s, device=%s, compute_type=%s, threads=%d",
+                     model.folder, dev, c_type, threads)
+
+            try:
+                whisper_model = WhisperModel(str(model.folder), device=dev,
+                                             compute_type=c_type,
+                                             device_index=dev_idx,
+                                             cpu_threads=threads, local_files_only=True,
+                                             num_workers=self.wp.num_workers)
+                batched = BatchedInferencePipeline(model=whisper_model)
+            except Exception as load_err:
+                if "mkl_malloc" in str(load_err) or isinstance(load_err, MemoryError):
+                    log.warning("Bellek yetersiz (%s); num_workers=1 ile yükleniyor.", load_err)
+                    whisper_model = WhisperModel(str(model.folder), device="cpu",
+                                                 compute_type="int8",
+                                                 cpu_threads=min(4, threads), local_files_only=True,
+                                                 num_workers=1)
+                    batched = BatchedInferencePipeline(model=whisper_model)
+                elif dev == "cuda":
+                    log.warning("CUDA yükleme hatası (%s), CPU moduna düşülüyor.", load_err)
+                    dev, c_type = "cpu", "int8"
+                    whisper_model = WhisperModel(str(model.folder), device="cpu",
+                                                 compute_type="int8",
+                                                 cpu_threads=threads, local_files_only=True,
+                                                 num_workers=self.wp.num_workers)
+                    batched = BatchedInferencePipeline(model=whisper_model)
+                else:
+                    raise load_err
         self.model = whisper_model
         self.batched = batched
 

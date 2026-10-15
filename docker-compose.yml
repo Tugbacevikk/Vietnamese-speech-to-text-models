@@ -55,7 +55,7 @@ services:
 
   api:
     <<: *app
-    ports: ["8000:8000"]
+    ports: ["${PORT:-8001}:8000"]
     environment:
       <<: *env
       MAX_UPLOAD_MB: "100"

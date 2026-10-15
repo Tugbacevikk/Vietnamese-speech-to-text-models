@@ -11,9 +11,11 @@ def test_eszamanlilik_elle(monkeypatch):
 
 def plan(monkeypatch, cpus, mem, **kw):
     monkeypatch.delenv("CONCURRENCY", raising=False)
+    monkeypatch.delenv("VI_MODEL", raising=False)
+    monkeypatch.delenv("TR_MODEL", raising=False)
     monkeypatch.setattr(st, "available_cpus", lambda: cpus)
     monkeypatch.setattr(st, "total_memory_gb", lambda: mem)
-    s = Settings(threads=2, languages=["vi", "tr"], **kw)
+    s = Settings(threads=2, languages=["vi", "tr"], whisper_threads_raw="2", **kw)
     return s.concurrency_plan(), s.concurrency_plan("tr"), s.concurrency_plan("vi")
 
 

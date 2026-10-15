@@ -71,14 +71,14 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
 
 
 def main(argv=None):
+    s = Settings()
     p = argparse.ArgumentParser(description="Yerel mod: tek komutla tüm sistem")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--host", default=s.host)
+    p.add_argument("--port", type=int, default=s.port)
     p.add_argument("--workers", type=int, default=None, help="aynı anda işlenen ses sayısı")
     a = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    s = Settings()
     verify_models_or_exit(s)
     app, store, queue, dispatcher = build_local(s, a.workers)
     threading.Thread(target=dispatcher.run_forever, daemon=True, name="webhook").start()
@@ -96,8 +96,8 @@ def main(argv=None):
     log.info("hazır: http://%s:%d  (diller: %s, eşzamanlı iş: %d — %s)", a.host, a.port,
              ",".join(s.languages), n, why)
     if "tr" in s.languages and s.model_for("tr").startswith("faster-whisper"):
-        log.info("Türkçe: Whisper çözümü %d iş parçacığı, aynı anda %d (WHISPER_THREADS)",
-                 s.whisper_threads, s.whisper_workers(n))
+        log.info("Türkçe: Whisper %s, %d iş parçacığı, beam_size=%d, aynı anda %d çözüm (WHISPER_THREADS)",
+                 s.model_for("tr"), s.whisper_threads, s.whisper_beam_size, s.whisper_workers(n))
     try:
         uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
     finally:

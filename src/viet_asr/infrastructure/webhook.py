@@ -98,6 +98,8 @@ class OutboxDispatcher:
                 r = self.client.post(row["url"], content=body, headers=headers)
                 if 200 <= r.status_code < 300:
                     self.store.mark_sent(row["id"])
+                    log.info("webhook gönderildi job=%s olay=%s url=%s durum=%d",
+                             row["job_id"], row["event"], row["url"], r.status_code)
                     sent += 1
                     continue
                 err = f"HTTP {r.status_code}"

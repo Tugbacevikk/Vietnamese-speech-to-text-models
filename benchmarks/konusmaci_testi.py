@@ -62,7 +62,8 @@ def tts_clips(models_dir: Path) -> dict[str, dict[str, list[np.ndarray]]]:
                 tmp = d / f"{v}.tar.bz2"
                 urllib.request.urlretrieve(f"{TTS}/vits-piper-{v}.tar.bz2", tmp)
                 with tarfile.open(tmp, "r:bz2") as t:
-                    t.extractall(d, filter="data")
+                    extra = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+                    t.extractall(d, **extra)
                 tmp.unlink()
             tts = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(
                 model=sherpa_onnx.OfflineTtsModelConfig(vits=sherpa_onnx.OfflineTtsVitsModelConfig(

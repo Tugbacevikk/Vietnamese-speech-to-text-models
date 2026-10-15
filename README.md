@@ -14,8 +14,8 @@ imzalı webhook); oradaki hatalar düzeltildi, kararlar [docs/adr](docs/adr) alt
 baslat.bat        :: modelleri indirir (ilk sefer), sunucuyu açar
 ```
 
-Tarayıcıda **http://127.0.0.1:8000**: dosya yükle, dili seç (Otomatik / Türkçe / Vietnamca),
-sonucu dinle, TXT/SRT/JSON/RTTM indir. API belgesi: http://127.0.0.1:8000/docs.
+Tarayıcıda **http://127.0.0.1:8001**: dosya yükle, dili seç (Otomatik / Türkçe / Vietnamca),
+sonucu dinle, TXT/SRT/JSON/RTTM indir. API belgesi: http://127.0.0.1:8001/docs. (Port `.env` dosyasından değiştirilebilir).
 Durdurmak: `durdur.bat`. Yerel modda Redis, PostgreSQL ya da Docker gerekmez (SQLite + iş
 parçacıkları). Çok makineli tam mod: `baslat_tam.bat` ya da `docker compose up`.
 
@@ -63,11 +63,11 @@ Bağlanacak sistem için ayrıntılı rehber (alanlar, durumlar, bildirim başl�
 örnekleri Python/Node/C#, tekrar kuralları): [docs/entegrasyon.md](docs/entegrasyon.md).
 
 ```bash
-curl -H "X-API-Key: $K" -F file=@kayit.wav -F callback_url=https://ornek.com/hook http://localhost:8000/jobs
+curl -H "X-API-Key: $K" -F file=@kayit.wav -F callback_url=https://ornek.com/hook http://localhost:8001/jobs
 # -> 202 {"job_id": "...", "status": "queued", "duration": 61.2, "language": "auto"}
-curl -H "X-API-Key: $K" -F file=@kayit.wav -F language=tr -F num_speakers=2 http://localhost:8000/jobs
-curl -H "X-API-Key: $K" -F file=@kayit.wav -F external_id=mesaj-4711 http://localhost:8000/jobs
-curl -H "X-API-Key: $K" http://localhost:8000/jobs/<job_id>        # durum + sonuç
+curl -H "X-API-Key: $K" -F file=@kayit.wav -F language=tr -F num_speakers=2 http://localhost:8001/jobs
+curl -H "X-API-Key: $K" -F file=@kayit.wav -F external_id=mesaj-4711 http://localhost:8001/jobs
+curl -H "X-API-Key: $K" http://localhost:8001/jobs/<job_id>        # durum + sonuç
 ```
 
 | Uç | Ne yapar |

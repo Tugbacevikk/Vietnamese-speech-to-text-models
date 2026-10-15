@@ -19,6 +19,12 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from viet_asr.infrastructure.catalog import (  # noqa: E402
     ASR_PACKS, AUX_PACKS, BASE, DEFAULT_MODELS, MODEL_CHOICES, Pack, is_folder_model,
@@ -51,7 +57,8 @@ def fetch(pack: Pack, dest: Path) -> Path:
     urllib.request.urlretrieve(f"{BASE}/{pack.url_path}", tmp)
     if name.endswith(".tar.bz2"):
         with tarfile.open(tmp, "r:bz2") as t:
-            t.extractall(dest, filter="data")
+            extra = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+            t.extractall(dest, **extra)
         tmp.unlink()
     if pack.keep and out.is_dir():
         for f in out.iterdir():

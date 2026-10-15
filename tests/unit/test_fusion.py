@@ -85,3 +85,120 @@ def test_araya_sikismis_kisa_konusmaci_duzeltmesi():
     assert [u.speaker for u in off] == [A, B, A, B, A]                       # kapalıyken olduğu gibi
     on = eng(sandwich_max=1.0).fuse(ws, segs)
     assert [(u.speaker, u.text) for u in on] == [(A, "a b x c d"), (B, "u"), (A, "e")]  # 1,9 sn'lik B kalır
+
+
+def test_clean_words_stutters_and_repeats():
+    cases = [
+        ("thì thì cái mắc cúm a", "thì cái mắc cúm a"),
+        ("với với cái triệu chứng", "với cái triệu chứng"),
+        ("đặc đặc biệt", "đặc biệt"),
+        ("người người có bệnh lý", "người có bệnh lý"),
+        ("để phòng trừ các các các biến chứng", "để phòng trừ các biến chứng"),
+        ("tức ngực khó thở ngực", "tức ngực khó thở"),
+        ("những cái trẻ em", "những trẻ em"),
+        ("các cái người có bệnh", "các người có bệnh"),
+        ("bu sefer bu sefer bu sefer", "bu sefer"),
+        ("evet evet evet", "evet"),
+    ]
+    for inp, expected in cases:
+        words = [Y(w, i * 0.5, i * 0.5 + 0.4) for i, w in enumerate(inp.split())]
+        res = eng(clean_repeats=True).fuse(words, [S(A, 0, len(words) * 0.5 + 1)])
+        assert len(res) == 1
+        assert res[0].text == expected
+
+
+def test_punctuate_sentences():
+    cases = [
+        ("xin chào bác sĩ", "Xin chào bác sĩ."),
+        ("bác sĩ có khỏe không", "Bác sĩ có khỏe không?"),
+        ("hôm nay thế nào", "Hôm nay thế nào?"),
+        ("doktor bey iyi misiniz", "Doktor bey iyi misiniz?"),
+        ("yarın gelecek misin", "Yarın gelecek misin?"),
+        ("ilaçları düzenli kullanın", "İlaçları düzenli kullanın."),
+    ]
+    for inp, expected in cases:
+        words = [Y(w, i * 0.5, i * 0.5 + 0.4) for i, w in enumerate(inp.split())]
+        res = eng(punctuate=True).fuse(words, [S(A, 0, len(words) * 0.5 + 1)])
+        assert len(res) == 1
+        assert res[0].text == expected
+
+
+def test_clean_words_phonetic_fixes():
+    cases = [
+        ("thường thì bấm mất ba ngày", "thường thì tầm mất ba ngày"),
+        ("ví dụ nhận những cái triệu chứng", "ví dụ như những triệu chứng"),
+        ("những cái trường hợp nhiễm cúm", "những trường hợp nhiễm cúm"),
+        ("và hoở thì rất có", "và hoặc thì rất có"),
+    ]
+    for inp, expected in cases:
+        words = [Y(w, i * 0.5, i * 0.5 + 0.4) for i, w in enumerate(inp.split())]
+        res = eng(clean_repeats=True).fuse(words, [S(A, 0, len(words) * 0.5 + 1)])
+        assert len(res) == 1
+        assert res[0].text == expected
+
+
+def test_rich_punctuation_formatting():
+    # cúm a -> cúm A, virgül yerleşimi
+    inp = "nhiễm cúm a tuy nhiên chúng ta chẳng hạn"
+    words = [Y(w, i * 0.5, i * 0.5 + 0.4) for i, w in enumerate(inp.split())]
+    res = eng(punctuate=True).fuse(words, [S(A, 0, len(words) * 0.5 + 1)])
+    assert res[0].text == "Nhiễm cúm A, tuy nhiên chúng ta, chẳng hạn."
+
+
+def test_split_protects_compound_words():
+    # "có thể" bileşik kelimesi tam kesim sınırında ise bölünmemeli
+    words = [
+        Y("chúng", 0.0, 5.0),
+        Y("ta", 5.0, 10.0),
+        Y("có", 10.0, 14.9),
+        Y("thể", 15.0, 19.9),
+        Y("làm", 20.0, 24.0),
+        Y("được", 24.0, 27.0),
+    ]
+    res = eng(max_utterance=15.0).fuse(words, [S(A, 0, 30)])
+    # "có thể" bölünmemeli, aynı parçada kalmalı
+    co_the_parts = [u.text for u in res if "có thể" in u.text]
+    assert len(co_the_parts) >= 1
+
+
+def test_clean_words_oral_fillers_and_southern_dialect():
+    cases = [
+        ("tuy á là em đã tìm cách á trị rồi", "tuy là em đã tìm cách trị rồi"),
+        ("như vậy á", "như vậy"),
+        ("dầu gọi nào", "dầu gội nào"),
+        ("lệ mái tóc", "lại mái tóc"),
+        ("bị gãy gụng", "bị gãy rụng"),
+        ("rụng rụng tóc", "rụng tóc"),
+        ("cung cung cấp dinh dưỡng", "cung cấp dinh dưỡng"),
+        ("làm đẹp làm đẹp tóc", "làm đẹp tóc"),
+        ("để a phục hồi", "để phục hồi"),
+        ("và à phục hồi", "và phục hồi"),
+    ]
+    for inp, expected in cases:
+        words = [Y(w, i * 0.5, i * 0.5 + 0.4) for i, w in enumerate(inp.split())]
+        res = eng(clean_repeats=True).fuse(words, [S(A, 0, len(words) * 0.5 + 1)])
+        assert len(res) == 1
+        assert res[0].text == expected
+
+
+def test_dialogue_roles_identification():
+    # Katılımcı soru sorar -> Sunucu cevap verir/yönlendirir
+    p1 = "Hay rất là rụng tóc rất là nhiều thì em muốn hỏi bác sĩ là nguyên nhân do đâu?"
+    host = "Cảm ơn câu hỏi của em chúng tôi xin tiếp tục mời quý khán giả tại phim trường nêu câu hỏi ạ."
+    p2 = "Hiện nay thì chị em phụ nữ làm đẹp tóc nhiều nên bị hư tổn, bác sĩ cho biết cách phục hồi?"
+    
+    ws1 = [Y(w, i * 0.3, i * 0.3 + 0.25) for i, w in enumerate(p1.split())]
+    t_h = ws1[-1].end + 0.5
+    ws_h = [Y(w, t_h + i * 0.3, t_h + i * 0.3 + 0.25) for i, w in enumerate(host.split())]
+    t_p2 = ws_h[-1].end + 0.5
+    ws2 = [Y(w, t_p2 + i * 0.3, t_p2 + i * 0.3 + 0.25) for i, w in enumerate(p2.split())]
+    
+    all_words = ws1 + ws_h + ws2
+    segs = [S(A, ws1[0].start, ws1[-1].end), S(B, ws_h[0].start, ws_h[-1].end), S(A, ws2[0].start, ws2[-1].end)]
+    
+    res = eng(detect_roles=True, punctuate=True, clean_repeats=True).fuse(all_words, segs)
+    assert len(res) == 3
+    assert res[0].speaker == "[Katılımcı 1 - Kadın]"
+    assert res[1].speaker == "[Sunucu - Erkek]"
+    assert res[2].speaker == "[Katılımcı 2 - Kadın]"
+

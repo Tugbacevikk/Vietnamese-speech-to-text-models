@@ -109,7 +109,7 @@ AUX_PACKS: dict[str, Pack] = {
 #   python benchmarks/kabul_testi.py --dil tr kayit.wav   (1 dk ses <= 1 dk mı?)
 # Oran 1'i aşarsa sırasıyla: TR_MODEL=faster-whisper-small, sonra omnilingual-300m.
 DEFAULT_MODELS = {"vi": "zipformer-68m", "tr": "faster-whisper-medium"}
-MODEL_CHOICES = {"vi": ["zipformer-68m", "zipformer-30m"],
+MODEL_CHOICES = {"vi": ["zipformer-68m", "zipformer-30m", "faster-whisper-medium", "faster-whisper-small"],
                  "tr": ["faster-whisper-medium", "faster-whisper-small", "omnilingual-300m",
                         "whisper-turbo"]}
 

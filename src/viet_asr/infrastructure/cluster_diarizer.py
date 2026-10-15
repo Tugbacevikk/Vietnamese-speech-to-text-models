@@ -69,11 +69,12 @@ def nme_spectral(E: np.ndarray, max_k: int = 8, k: int | None = None,
         A = (A + A.T) / 2
         L = np.diag(A.sum(axis=1)) - A
         lam, vec = eigh(L)
-        gaps = np.diff(lam[: max_k + 1])
+        gaps = np.diff(lam[1: max_k + 1]) if max_k >= 2 else np.diff(lam[: max_k + 1])
         g = gaps.max() / (lam[-1] + 1e-10)
         ratio = (p / n) / (g + 1e-10)
         if best is None or ratio < best[0]:
-            best = (ratio, int(np.argmax(gaps)) + 1, vec)
+            k_cand = int(np.argmax(gaps)) + (2 if max_k >= 2 else 1)
+            best = (ratio, k_cand, vec)
     _, k_est, vec = best
     kk = k or k_est
     if kk <= 1:
