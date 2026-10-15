@@ -154,7 +154,7 @@ class DiarizerConfig:
     # Aynı kaydın iki kişisi arası uzaklık 0,38-0,58, telefondaki tek kişinin kendi içi ~0,3:
     # tek bir sabit eşik ikisine birden uymuyor; spektral yöntem buna daha dayanıklı.
     method: str = "spectral"
-    merge_distance: float = 0.22  # spectral: merkezleri bundan yakın kümeler aynı kişi
+    merge_distance: float = 0.35  # spectral: merkezleri bundan yakın kümeler aynı kişi
     embedding_model: str = "models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
     segmentation_model: str = "models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
     # konuşmacı sayısı: 0 = sesten bul (istekte verilirse o kullanılır)
@@ -167,11 +167,17 @@ class DiarizerConfig:
     window: float = 1.5          # sn: imza penceresi
     hop: float = 0.75            # sn: pencere kayması (konuşmacı değişimi çözünürlüğü)
     min_window: float = 0.5      # sn: bundan kısa parçadan imza çıkarılmaz
+    # Toplamı max(1,5 sn, konuşmanın %8'i)'nden az olan "konuşmacı" en yakın kişiye katılır
+    # (gülme, gürültü, müzik ayrı kişi sanılmasın). VietMed 50 tek kişilik dosya + 28
+    # sentetik diyalog (12 Ekim):  1 sn/%0 -> 34/50, 27/28 | 1-3 sn/%8-10 -> 48/50, 28/28.
+    # Oran asıl işi yapıyor; 3 sn mutlak alt sınır kısa mesajlarda gerçek kişileri
+    # (13 sn'lik seste 2 sn konuşan) siliyordu. Bedeli: konuşmanın %8'inden azını konuşan
+    # kişi ayrı çıkmaz; sayı biliniyorsa istekte num_speakers verilince kural uygulanmaz.
     min_speaker_duration: float = 1.5
-    min_speaker_share: float = 0.03
+    min_speaker_share: float = 0.08
     # Az konuşan küme en yakın kişiden bu kosinüs uzaklığından daha uzaksa birleştirilmez
     # (projedeki "benzerlik koruması", benzerlik 0,5 = uzaklık 0,5). 0 = kapalı. Ölçüme göre.
-    small_keep_distance: float = 0.35
+    small_keep_distance: float = 0.0
     min_duration_on: float = 0.3   # yalnızca pyannote
     min_duration_off: float = 0.5  # yalnızca pyannote
     num_threads: int = 2

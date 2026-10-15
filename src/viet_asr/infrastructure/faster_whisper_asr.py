@@ -19,6 +19,9 @@ tokenizer.json, vocabulary.txt}; scripts/download_models.py indirir.
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
+import sys
 
 import numpy as np
 
@@ -28,6 +31,36 @@ from viet_asr.domain import VadSegment, Word
 
 log = logging.getLogger(__name__)
 SR = 16000
+
+
+def _cuda_ok() -> bool:
+    try:
+        import ctranslate2
+        if ctranslate2.get_cuda_device_count() <= 0:
+            return False
+        if sys.platform == "win32":
+            import ctypes
+            candidates = [
+                Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin",
+                Path(sys.prefix) / "nvidia" / "cublas" / "bin",
+                Path(os.environ.get("CUDA_PATH", "")) / "bin",
+            ]
+            for cand in candidates:
+                if cand.is_dir() and hasattr(os, "add_dll_directory"):
+                    try:
+                        os.add_dll_directory(str(cand))
+                    except Exception:
+                        pass
+            try:
+                ctypes.CDLL("cublas64_12.dll")
+            except Exception:
+                try:
+                    ctypes.CDLL("cublas64_11.dll")
+                except Exception:
+                    return False
+        return True
+    except Exception:
+        return False
 
 
 def _key(text: str) -> str:
@@ -63,8 +96,6 @@ class FasterWhisperAsr:
         if self.wp.initial_prompt:  # istem sessiz yerde aynen yazılırsa süzülsün
             self._drop.add(_key(self.wp.initial_prompt))
         if whisper_model is None:
-            from pathlib import Path
-
             from faster_whisper import BatchedInferencePipeline, WhisperModel
 
             if not (Path(model.folder) / "model.bin").exists():
@@ -72,34 +103,6 @@ class FasterWhisperAsr:
                 # anlaşılmaz bir hata yerine ne yapılacağı söylenir
                 raise FileNotFoundError(
                     f"{model.folder}/model.bin yok: python scripts/download_models.py --tr {model.name}")
-            def _cuda_ok() -> bool:
-                try:
-                    import ctranslate2, ctypes, os, sys
-                    if ctranslate2.get_cuda_device_count() <= 0:
-                        return False
-                    candidates = [
-                        Path(sys.prefix) / "Lib" / "site-packages" / "torch" / "lib",
-                        Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin",
-                        Path(os.environ.get("CUDA_PATH", "")) / "bin",
-                        Path(r"C:\Users\ADIL CEVIK\Desktop\sesAnalizi\.venv\Lib\site-packages\torch\lib"),
-                    ]
-                    for cand in candidates:
-                        if cand.is_dir() and (cand / "cublas64_12.dll").exists():
-                            try:
-                                os.add_dll_directory(str(cand))
-                            except Exception:
-                                pass
-                            if str(cand) not in os.environ.get("PATH", ""):
-                                os.environ["PATH"] = str(cand) + os.pathsep + os.environ.get("PATH", "")
-                            try:
-                                ctypes.CDLL(str(cand / "cublasLt64_12.dll"))
-                                ctypes.CDLL(str(cand / "cublas64_12.dll"))
-                            except Exception:
-                                pass
-                    ctypes.CDLL("cublas64_12.dll")
-                    return True
-                except Exception:
-                    return False
 
             dev = getattr(self.wp, "device", "auto")
             if dev == "auto":

@@ -50,7 +50,7 @@ class Settings:
     threads: int = field(default_factory=lambda: int(os.environ.get("ONNX_THREADS", "2")))
     # faster-whisper (Türkçe) bir çözüm için iş parçacığı; "auto" = fiziksel çekirdek (2-8)
     whisper_threads_raw: str = field(default_factory=lambda: os.environ.get("WHISPER_THREADS", "auto"))
-    whisper_beam_size: int = field(default_factory=lambda: int(os.environ.get("WHISPER_BEAM_SIZE", "1")))
+    whisper_beam_size: int = field(default_factory=lambda: int(os.environ.get("WHISPER_BEAM_SIZE", "5")))
     whisper_batch_size: int = field(default_factory=lambda: int(os.environ.get("WHISPER_BATCH_SIZE", "8")))
     # 0: konuşmacı sayısı sesten bulunur (istekte num_speakers verilirse o kullanılır)
     speakers: int = field(default_factory=lambda: int(os.environ.get("NUM_SPEAKERS", "0")))
@@ -60,9 +60,11 @@ class Settings:
     max_audio_minutes: float = field(default_factory=lambda: float(os.environ.get("MAX_AUDIO_MINUTES", "60")))
     max_upload_mb: int = field(default_factory=lambda: int(os.environ.get("MAX_UPLOAD_MB", "100")))
     # transkript çıktısında cümle başı büyük harf ve cümle sonu noktalama (. / ?)
-    punctuate: bool = field(default_factory=lambda: os.environ.get("PUNCTUATE", "1") == "1")
-    # stüdyo diyaloglarında sunucu/katılımcı rollerini çözümleme ([Sunucu - Erkek], [Katılımcı 1 - Kadın])
-    detect_roles: bool = field(default_factory=lambda: os.environ.get("DETECT_ROLES", "1") == "1")
+    punctuate: bool = field(default_factory=lambda: os.environ.get("PUNCTUATE", "0") == "1")
+    # stüdyo diyaloglarında sunucu/katılımcı rollerini çözümleme
+    detect_roles: bool = field(default_factory=lambda: os.environ.get("DETECT_ROLES", "0") == "1")
+    # aynı kelimenin art arda tekrarı ve dolgu sesleri temizliği (varsayılan kapalı)
+    clean_repeats: bool = field(default_factory=lambda: os.environ.get("CLEAN_REPEATS", "0") == "1")
     # sunucudaki bir dosya yolunu doğrudan kabul et (toplu iş için; yalnızca güvenilir ağda aç)
     allow_local_paths: bool = field(default_factory=lambda: os.environ.get(
         "ALLOW_LOCAL_PATHS", "0") == "1")
