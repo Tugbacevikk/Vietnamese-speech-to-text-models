@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "import-linter", "httpx"]
+dev = ["pytest", "import-linter", "httpx", "jiwer"]
 server = [
     "fastapi",
     "uvicorn",
