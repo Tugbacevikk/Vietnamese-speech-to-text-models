@@ -185,8 +185,10 @@ class FasterWhisperAsr:
                                       conf=round(float(p), 3) if p is not None else None))
         return words
 
-    def _options(self, fast: bool = False, rescue: bool = False, retry: bool = False) -> dict:
+    def _options(self, fast: bool = False, rescue: bool = False, retry: bool = False,
+                 prompt: str | None = None) -> dict:
         wp = self.wp
+        eff_prompt = prompt if prompt is not None else wp.initial_prompt
         if rescue:
             return dict(language=self.language, task="transcribe",
                         beam_size=1 if retry else wp.beam_size, best_of=1,
@@ -195,7 +197,7 @@ class FasterWhisperAsr:
                         repetition_penalty=wp.repetition_penalty,
                         no_repeat_ngram_size=wp.no_repeat_ngram_size, no_speech_threshold=0.8,
                         compression_ratio_threshold=wp.compression_ratio_threshold,
-                        log_prob_threshold=-1.0, initial_prompt=wp.initial_prompt, hotwords=wp.hotwords)
+                        log_prob_threshold=-1.0, initial_prompt=eff_prompt, hotwords=wp.hotwords)
         return dict(language=self.language, task="transcribe", beam_size=1 if fast else wp.beam_size,
                     word_timestamps=True, condition_on_previous_text=False, temperature=0.0,
                     repetition_penalty=wp.repetition_penalty,
@@ -203,13 +205,15 @@ class FasterWhisperAsr:
                     no_speech_threshold=wp.no_speech_threshold,
                     compression_ratio_threshold=wp.compression_ratio_threshold,
                     log_prob_threshold=wp.log_prob_threshold,
-                    initial_prompt=wp.initial_prompt, hotwords=wp.hotwords)
+                    initial_prompt=eff_prompt, hotwords=wp.hotwords)
 
     def transcribe(self, segments: list[VadSegment], fast: bool = False) -> list[Word]:
         if not segments:
             return []
         raw = None
-        if self.batched is not None:
+        if getattr(self.wp, "rolling_prompt", False):
+            raw = self._one_by_one(segments, fast)
+        elif self.batched is not None:
             try:
                 raw = self._batched(segments, fast)
             except Exception as e:  # ör. bellek: tek tek çözmeye düş
@@ -236,11 +240,31 @@ class FasterWhisperAsr:
     def _one_by_one(self, segments: list[VadSegment], fast: bool = False, rescue: bool = False,
                     retry: bool = False):
         out = []
+        recent_words: list[str] = []
+        base_prompt = (self.wp.initial_prompt or "").strip()
+        max_words = getattr(self.wp, "rolling_prompt_words", 50)
+        use_rolling = getattr(self.wp, "rolling_prompt", False) and not rescue and not retry
+
         for s in segments:
-            result, _ = self.model.transcribe(s.samples, vad_filter=False,
-                                              **self._options(fast, rescue, retry))
+            current_prompt = base_prompt or None
+            if use_rolling and recent_words:
+                context = " ".join(recent_words[-max_words:])
+                current_prompt = f"{base_prompt} {context}".strip() if base_prompt else context
+
+            opts = self._options(fast, rescue, retry, prompt=current_prompt)
+            result, _ = self.model.transcribe(s.samples, vad_filter=False, **opts)
             for r in result:
-                out.append((r.text, [_Shifted(w, s.start) for w in (r.words or [])]))
+                if _key(r.text) in self._drop:
+                    continue
+                words = list(r.words or [])
+                out.append((r.text, [_Shifted(w, s.start) for w in words]))
+                if use_rolling:
+                    for w in words:
+                        cleaned = self.normalizer.normalize(w.word)
+                        if cleaned:
+                            if len(recent_words) >= 2 and recent_words[-1] == cleaned and recent_words[-2] == cleaned:
+                                continue
+                            recent_words.append(cleaned)
         return out
 
 
