@@ -135,7 +135,7 @@ istemci ─► api ─► PostgreSQL (iş) + Redis Streams: asr:lid ─► asr:v
 
 - Dil başına kuyruk: yalnızca yoğun dilin işçisi artırılır (`stream_worker --kuyruk vi --surec N`).
 - Çöken işçinin işi 2 dk sonra başkasına geçer; 3 denemeden sonra `asr:dlq` ve `job.failed`.
-- Süreç sayısı otomatik: çekirdek / `ONNX_THREADS` ile belleğin izin verdiğinin küçüğü
+- Süreç sayısı otomatik: çekirdek / `ONNX_THREADS` (Türkçe kuyrukta `WHISPER_THREADS`, varsayılan fiziksel çekirdek) ile belleğin izin verdiğinin küçüğü
   (Docker `cpus:`/bellek sınırı dahil); seçilen sayı ve gerekçesi açılışta yazılır.
 - `bakim` süreci: 24 saat sonra ses, 30 gün sonra kayıt silinir; askıda kalan iş `failed` olur.
 

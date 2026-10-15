@@ -197,3 +197,22 @@ parçacığı, GPU yok). Bu sistemde yeniden ölçülmedi; proje sahibinin onay�
 - 4000 mesaj: sahte modellerle 4 eşzamanlı işçi, çift işleme yok (test_worker_accuracy.py).
   Süre tablosu small modelin oranından hesaplanmış (10 sn'lik 4000 mesaj, 4 işçi ≈ 22 dk);
   medium ile aynı yük yaklaşık 4 kat sürer. `/metrics` kuyrukta bekleme süresini gösterir.
+
+## Türkçe yavaşlık — 15 Ekim 2026 (Tuğba'nın bilgisayarı, i5-11400H 6 çekirdek/12 iş parçacığı)
+
+2 dk Türkçe diyalog, medium, dil sesten: **296 sn (oran 2,46)**, kapsama %83. Projede aynı
+model 0,94. Kodda bulunan iki neden:
+
+1. **İş parçacığı:** Whisper ONNX modelleriyle aynı bütçeyi alıyordu (`ONNX_THREADS=2`). Bu
+   ayar ani yükte 6 işi paralel çalıştırmak için; tek iş gelince 10 iş parçacığı boş kalıyordu.
+   Projede 4'tü. Artık ayrı: `WHISPER_THREADS` (varsayılan fiziksel çekirdek = 6), aynı anda
+   12 / 6 = 2 Whisper çözümü. Ani yükte toplam iş hızı aynı kalır (işlemci yine dolu), tek
+   mesajın süresi kısalır.
+2. **Güvenlik ağı:** kelime çıkmayan her boşluk tek tek, 4 sıcaklıkla ve her sıcaklıkta 5
+   örnekle (best_of) çözülüyordu; Whisper her çağrıda 30 sn'lik pencere işlediği için 2 sn'lik
+   boşluk bile 30 sn'lik ses kadar sürüyordu. Kapsama %83 olduğu için (birçok boşluk) en
+   pahalı yol çalıştı. Artık: tüm boşluklar tek toplu çözüm (sıcaklık 0); hâlâ boşların en
+   uzun 4'ü sıcaklık 0,2/0,4, tek örnek, beam 1.
+
+Medium modeli bu ortamda indirilemediği için yeni süre burada ölçülemedi; sonuçta artık
+aşama süreleri (`timings`) var ve arayüzde "Aşamalar" olarak görünüyor.

@@ -42,6 +42,8 @@ class Settings:
     vi_model: str | None = field(default_factory=lambda: os.environ.get("VI_MODEL") or None)
     tr_model: str | None = field(default_factory=lambda: os.environ.get("TR_MODEL") or None)
     threads: int = field(default_factory=lambda: int(os.environ.get("ONNX_THREADS", "2")))
+    # faster-whisper (Türkçe) bir çözüm için iş parçacığı; "auto" = fiziksel çekirdek (2-8)
+    whisper_threads_raw: str = field(default_factory=lambda: os.environ.get("WHISPER_THREADS", "auto"))
     # 0: konuşmacı sayısı sesten bulunur (istekte num_speakers verilirse o kullanılır)
     speakers: int = field(default_factory=lambda: int(os.environ.get("NUM_SPEAKERS", "0")))
     diarizer: str = field(default_factory=lambda: os.environ.get("DIARIZER", "cluster"))
@@ -111,6 +113,19 @@ class Settings:
         """Yerel mod (tek süreç, iş parçacıkları) için aynı anda işlenen ses sayısı."""
         return self.concurrency_plan()[0]
 
+    @property
+    def whisper_threads(self) -> int:
+        """Whisper bir çözümde kaç iş parçacığı kullansın. Tek iş geldiğinde de işlemci boş
+        kalmasın diye ONNX modellerinden (2) ayrı: varsayılan fiziksel çekirdek sayısı."""
+        if self.whisper_threads_raw != "auto":
+            return max(1, int(self.whisper_threads_raw))
+        return max(2, min(8, physical_cpus()))
+
+    def whisper_workers(self, jobs: int) -> int:
+        """Aynı anda kaç Whisper çözümü: iş sayısını ve işlemcinin taşıyabileceğini aşmaz
+        (12 mantıksal / 6 iş parçacığı = 2). Fazla işler sırada bekler, işlemci aşırı bölünmez."""
+        return max(1, min(jobs, available_cpus() // self.whisper_threads))
+
     def model_for(self, lang: str) -> str:
         from viet_asr.infrastructure.catalog import DEFAULT_MODELS
 
@@ -129,7 +144,9 @@ class Settings:
         v = os.environ.get("CONCURRENCY", "auto")
         if v != "auto":
             return max(1, int(v)), "CONCURRENCY ayarı"
-        by_cpu = max(1, available_cpus() // max(1, self.threads))
+        per = self.whisper_threads if queue and self.model_for(queue).startswith("faster-whisper") \
+            else self.threads
+        by_cpu = max(1, available_cpus() // max(1, per))
         total = total_memory_gb()
         if total is None:
             return by_cpu, f"çekirdek: {available_cpus()} / {self.threads} (bellek okunamadı)"
@@ -185,6 +202,20 @@ def total_memory_gb() -> float | None:
         return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30
     except (ValueError, OSError, AttributeError):
         return None
+
+
+def physical_cpus() -> int:
+    """Fiziksel çekirdek (hiper iş parçacığı sayılmaz: int8 matris çarpımında ikinci iş
+    parçacığı az hız katar). psutil yoksa mantıksal çekirdeğin yarısı."""
+    try:
+        import psutil
+
+        n = psutil.cpu_count(logical=False)
+        if n:
+            return min(n, available_cpus())
+    except ImportError:
+        pass
+    return max(1, available_cpus() // 2)
 
 
 def available_cpus() -> int:

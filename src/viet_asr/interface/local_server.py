@@ -95,6 +95,9 @@ def main(argv=None):
     n, why = (a.workers, "--workers") if a.workers else s.concurrency_plan()
     log.info("hazır: http://%s:%d  (diller: %s, eşzamanlı iş: %d — %s)", a.host, a.port,
              ",".join(s.languages), n, why)
+    if "tr" in s.languages and s.model_for("tr").startswith("faster-whisper"):
+        log.info("Türkçe: Whisper çözümü %d iş parçacığı, aynı anda %d (WHISPER_THREADS)",
+                 s.whisper_threads, s.whisper_workers(n))
     try:
         uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
     finally:

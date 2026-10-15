@@ -26,13 +26,17 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                    models: dict[str, str] | None = None, threads: int = 2,
                    speakers: int = 0, hotwords: str | None = None,
                    diarizer: str = "cluster", workers: int = 1, profile: str = "full",
-                   min_diarize_sec: float = 10.0, sandwich_max: float = 0.0) -> PipelineConfig:
+                   min_diarize_sec: float = 10.0, sandwich_max: float = 0.0,
+                   whisper_threads: int | None = None, whisper_workers: int | None = None) -> PipelineConfig:
     """workers: aynı süreçte aynı anda işlenecek ses sayısı (yerel mod); motorlar buna göre
-    paralel çağrıya hazırlanır."""
+    paralel çağrıya hazırlanır. whisper_threads/whisper_workers: faster-whisper'a ayrı bütçe
+    (bir çözüm kaç iş parçacığı, aynı anda kaç çözüm); verilmezse threads ve workers."""
     d, models = Path(models_dir), models or {}
     profiles = {}
     for code in languages:
-        extra = {"num_threads": threads, "whisper": WhisperParams(num_workers=max(1, workers))}
+        extra = {"num_threads": threads,
+                 "whisper": WhisperParams(num_workers=max(1, whisper_workers or workers),
+                                          cpu_threads=whisper_threads)}
         if code == "vi" and hotwords:
             extra["hotwords_file"] = hotwords
         profiles[code] = language_profile(code, d, models.get(code), **extra)
@@ -149,7 +153,9 @@ def config_from_settings(s, workers: int = 1) -> PipelineConfig:
     """Ayarlardan hat yapılandırması (yerel sunucu, kuyruk işçisi ve doğrulama aynı yerden)."""
     return default_config(s.models_dir, tuple(s.languages), s.models, s.threads, s.speakers,
                           s.hotwords, s.diarizer, workers=workers, profile=s.pipeline_profile,
-                          min_diarize_sec=s.pipeline_min_diarize_sec, sandwich_max=s.fusion_sandwich_max)
+                          min_diarize_sec=s.pipeline_min_diarize_sec, sandwich_max=s.fusion_sandwich_max,
+                          whisper_threads=s.whisper_threads,
+                          whisper_workers=s.whisper_workers(workers))
 
 
 def verify_models_or_exit(settings) -> None:
