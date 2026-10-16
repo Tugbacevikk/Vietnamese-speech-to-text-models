@@ -21,6 +21,7 @@ from .config import FusionConfig
 _STUTTERS = {
     "thì", "với", "các", "cái", "đặc", "là", "và", "của", "được", "người",
     "những", "cho", "trong", "để", "có", "bị", "rụng", "cung", "cấp", "làm", "đẹp", "rồi", "còn",
+    "nhuộm", "phục", "hồi",
     "ve", "de", "da", "ile", "için", "ama", "fakat", "ki", "bu", "bir", "şu", "o", "ise"
 }
 

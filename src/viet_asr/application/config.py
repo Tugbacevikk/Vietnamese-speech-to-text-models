@@ -163,10 +163,10 @@ class DiarizerConfig:
     # telefonla bağlanan hastalar dahil): 0,65 -> sayı 38/56 | 0,70 -> 47/56 | 0,75 -> 29/56.
     # Temiz sentetik seste 0,65 daha iyi (25/28, 0,70'te 22/28); gerçek ses esas alındı.
     cluster_threshold: float = 0.70
-    # pencere 3 sn/kayma 1,5 sn: duraksamasız konuşmada %89; 1,5/0,75: %99-100 (12 Ekim)
-    window: float = 1.5          # sn: imza penceresi
-    hop: float = 0.75            # sn: pencere kayması (konuşmacı değişimi çözünürlüğü)
-    min_window: float = 0.5      # sn: bundan kısa parçadan imza çıkarılmaz
+    # pencere 1,0 sn / kayma 0,4 sn: sert montaj geçişlerini ve hızlı diyalogları yakalar
+    window: float = 1.0          # sn: imza penceresi
+    hop: float = 0.4             # sn: pencere kayması (konuşmacı değişimi çözünürlüğü)
+    min_window: float = 0.4      # sn: bundan kısa parçadan imza çıkarılmaz
     # Toplamı max(1,5 sn, konuşmanın %8'i)'nden az olan "konuşmacı" en yakın kişiye katılır
     # (gülme, gürültü, müzik ayrı kişi sanılmasın). VietMed 50 tek kişilik dosya + 28
     # sentetik diyalog (12 Ekim):  1 sn/%0 -> 34/50, 27/28 | 1-3 sn/%8-10 -> 48/50, 28/28.
