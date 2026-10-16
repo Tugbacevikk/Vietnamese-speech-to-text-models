@@ -2,7 +2,6 @@
 
 LlmSpeakerRefiner birim testleri (mock ve fail-open güvenceleri).
 """
-import io
 import json
 import urllib.error
 from unittest.mock import MagicMock, patch
