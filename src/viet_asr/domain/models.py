@@ -115,6 +115,21 @@ class Utterance:
 
 
 @dataclass(frozen=True)
+class StreamSegment:
+    """Canlı akışta çözülen bir konuşma parçası. start/end akışın başından itibaren sn.
+    final=False: konuşma sürerken verilen ara sonuç (aynı index'in final'i gelince değişir)."""
+
+    index: int
+    start: float
+    end: float
+    text: str
+    final: bool = True
+    conf: float | None = None
+    low_conf: tuple[int, ...] = ()
+    latency: float = 0.0  # parçanın sonu ile metnin hazır olması arasındaki süre (sn)
+
+
+@dataclass(frozen=True)
 class SpeakerInfo:
     """Konuşmacının sesinden ölçülenler: ortanca ses perdesi (Hz), kaba cinsiyet
     ("erkek" | "kadın" | None = belirsiz) ve ölçümde kullanılan ötümlü ses süresi (sn)."""

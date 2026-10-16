@@ -64,8 +64,18 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
         missing = [lang for lang in settings.languages if lang not in loaded]
         return not missing, (f"yüklenmemiş: {missing}" if missing else f"yüklü: {sorted(loaded)}")
 
+    streams = None
+    if settings.enable_streams:
+        from viet_asr.application.jobs import SubmitJob
+        from viet_asr.interface.streams import StreamManager
+
+        streams = StreamManager(pipeline.engines, cfg.vad, settings.data_dir,
+                                submit=SubmitJob(store, queue, settings.languages),
+                                languages=list(settings.languages), max_sessions=settings.stream_max_sessions,
+                                allow_files=settings.allow_local_paths, max_speech=settings.stream_max_speech)
     app = create_app(store, queue, settings, {"veritabani": store.ping}, queue_stats=queue.stats,
-                     readiness={"modeller": models_ready})
+                     readiness={"modeller": models_ready}, streams=streams)
+    app.state.streams = streams
     app.state.maintenance = build_maintenance(store, settings)
     return app, store, queue, dispatcher
 

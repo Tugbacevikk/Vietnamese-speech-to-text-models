@@ -261,3 +261,25 @@ Kayıtlı imzalarla: tek kişilik 73 -> 64/85, kesit 34 -> 29/56, sentetik 26 ->
 diyalog 7 -> 8/9, DER %17,1 -> %13,5. Gerçek diyaloglarda kazanç var ama diğer üç sette büyük
 kayıp. Yeni özdeğer kuralı 0,35 ile öncekiyle birebir aynı sonucu veriyor (zararsız, kaldı).
 Varsayılan 0,35; benzer sesli kayıtlar için `DIARIZER_MERGE_DISTANCE` ya da `num_speakers`.
+
+## Canlı akış (RTP) — Vietnamca, 16 Ekim 2026
+
+2 VietMed kaydı (~93 sn), `scripts/rtp_gonder.py` ile gerçek zaman hızında G.711 PCMU (8 kHz,
+20 ms paket), alıcı `interface/akis.py`; 3 akış aynı anda, 2 çekirdek. WER kayıt metnine göre.
+
+| | 0249 (doktor) | 0249, %2 kayıp + %5 sırası bozuk | 0467 (hasta) |
+|---|---|---|---|
+| Yalnızca VAD parçaları (ilk sürüm) | %13,8 | %10,3 | %21,0 |
+| Bitişik parçalar | %7,4 | %6,7 | %17,9 |
+| **Bitişik, en az 5 sn (son)** | **%7,2** | **%6,0** | **%16,7** |
+| Aynı kayıt dosyadan (8 kHz telefon sesi) | %4,5 | — | %14,0 |
+| Özgün 16 kHz dosya | %6,4 | — | %13,1 |
+| Kesin metin gecikmesi p95 / en çok | 1,34 / 1,80 sn | 1,33 / 2,02 sn | 0,99 / 1,17 sn |
+| Ara sonuç gecikmesi p95 | 1,04 sn | 1,25 sn | 1,07 sn |
+
+- İlk sürümün hataları çoğunlukla silinen kelimeydi (35/58): VAD müzik altındaki ve kısık
+  konuşmayı atıyor; dosya hattında da bu yüzden Zipformer'a sesin tamamı veriliyordu.
+- Kalan fark (2,7-3 puan) çoğunlukla eklenen dolgu sesleri ("ờ", "ừm", "à"): kayıt metninde
+  yoklar. Temiz transkript bunları zaten süzüyor; ham canlı metinde duruyorlar.
+- Paket kaybı ve sıra bozulması WER'i bozmadı (kayıp yeri sessizlikle doluyor, sıra tamponu
+  diziyor). Arayüz denemesi: 25 sn akış, ara sonuçlar ~1 sn'de, bitince tam analiz kuyruğa girdi.

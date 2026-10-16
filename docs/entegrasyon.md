@@ -237,7 +237,44 @@ kullanılabilir. Varsayılan **kapalı**; `ENABLE_DATASET_EXPORT=1` ile açılı
    - Aynı ses iki bölüme giremez (ses özeti `ozetler.tsv`'de tutulur): test sonucu şişmez.
 4. `scripts/duzeltmeleri_disa_aktar.py` yalnızca onay verilmiş işlerin düzeltmelerini dışa aktarır.
 
-## 9. İzleme
+## 9. Canlı akış (RTP, yayın)
+
+Ses dosyası yerine canlı akış: metin konuşma sırasında gelir, akış bitince kaydedilen ses normal
+işe dönüşür (konuşmacı ayırma, temiz transkript).
+
+```
+POST /streams {"kaynak": "rtp://0.0.0.0:5004", "dil": "vi"}  -> 201 {"id", "port", "durum": "dinleniyor"}
+WS   /streams/{id}/ws  (?key=API_KEY)                      -> {"tur": "parca", ...} ... {"tur": "bitti", "son_is"}
+GET  /streams/{id}                                         -> o ana kadarki parçalar
+DELETE /streams/{id}                                       -> durdurur (ses yine kaydedilir)
+```
+
+| Kaynak | Ne |
+|---|---|
+| `rtp://0.0.0.0:5004` | UDP portunda RTP dinle: G.711 PCMU/PCMA (telefon, 8 kHz) ve L16. Sıra bozulması ve paket kaybı düzeltilir; başka akış (SSRC) karışırsa atılır. Port 0 = boş port seçilir, yanıtta döner |
+| `/yol/cagri.sdp` | RTP + SDP dosyası (Opus, G.722 vb.; ffmpeg ile) |
+| `http(s)://…/akim.ogg` | OGG/MP3/WAV yayını; `rtsp://`, `srt://`, `udp://` de olur (ffmpeg) |
+| `/yol/kayit.wav` | dosyayı gerçek zaman hızında oynat (deneme; `ALLOW_LOCAL_PATHS=1`) |
+
+Parça olayı: `{"tur": "parca", "index", "start", "end", "text", "final", "confidence",
+"low_confidence_words", "latency"}`. `final: false` ara sonuçtur (konuşma sürerken ~1,5 sn'de
+bir); aynı `index`in `final: true` olayı gelince yerine geçer. `latency`: parçanın sonundan
+metnin hazır olmasına kadar geçen süre.
+
+- **Vietnamca (Zipformer):** parçalar bitişik, hiçbir ses atılmaz (VAD yalnızca kesim yerini
+  seçer; en az 5, en fazla 15 sn). Ara sonuç var.
+- **Türkçe (Whisper):** yalnızca konuşma parçaları, en fazla `STREAM_MAX_SPEECH` sn; ara sonuç
+  yok (Whisper ara çözümleri akışı geride bırakır).
+- **Konuşmacı:** canlı metinde yok. Santraller her tarafı genelde ayrı RTP akışı (ayrı port)
+  olarak verir: taraf = akış. Tek akışta birden çok kişi varsa konuşmacılar akış bitince gelen
+  tam analizde (`son_is`).
+- Tam modda (API ayrı süreç) canlı akış CLI ile: `python -m viet_asr.interface.akis --kaynak
+  rtp://0.0.0.0:5004 --dil vi --api http://127.0.0.1:8001`.
+- Deneme göndericisi: `python scripts/rtp_gonder.py kayit.wav --hedef 127.0.0.1:5004
+  [--kayip 0.02 --karistir 0.05]` ya da `ffmpeg -re -i kayit.wav -ar 8000 -ac 1 -c:a pcm_mulaw
+  -f rtp rtp://127.0.0.1:5004`.
+
+## 10. İzleme
 
 | Uç | Ne için |
 |---|---|

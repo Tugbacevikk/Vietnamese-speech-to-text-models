@@ -69,6 +69,13 @@ class Settings:
     detect_roles: bool = field(default_factory=lambda: os.environ.get("DETECT_ROLES", "0") == "1")
     # aynı kelimenin art arda tekrarı ve dolgu sesleri temizliği (varsayılan kapalı)
     clean_repeats: bool = field(default_factory=lambda: os.environ.get("CLEAN_REPEATS", "0") == "1")
+    # canlı akış (RTP / ffmpeg kaynağı; POST /streams). Varsayılan: geliştirmede açık, üretimde kapalı
+    # (istek bir UDP portu açar ya da dış adrese bağlanır).
+    enable_streams: bool = field(default_factory=lambda: os.environ.get(
+        "ENABLE_STREAMS", "0" if os.environ.get("APP_ENV", "development").lower() == "production" else "1") == "1")
+    stream_max_sessions: int = field(default_factory=lambda: int(os.environ.get("STREAM_MAX_SESSIONS", "4")))
+    # canlı akışta bir parça en fazla bu kadar sürer (sn): uzun konuşmada gecikmenin üst sınırı
+    stream_max_speech: float = field(default_factory=lambda: float(os.environ.get("STREAM_MAX_SPEECH", "10")))
     # sunucudaki bir dosya yolunu doğrudan kabul et (toplu iş için; yalnızca güvenilir ağda aç)
     allow_local_paths: bool = field(default_factory=lambda: os.environ.get(
         "ALLOW_LOCAL_PATHS", "0") == "1")

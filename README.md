@@ -125,6 +125,19 @@ curl -H "X-API-Key: $K" http://localhost:8001/jobs/<job_id>        # durum + son
  "quality": {"kapsama_yuzde": 98.1, "kurtarilan_kelime": 0}}
 ```
 
+## Canlı akış (RTP / yayın)
+
+Arayüzde "Canlı akış" kutusu ya da `POST /streams {"kaynak": "rtp://0.0.0.0:5004", "dil": "vi"}`:
+metin konuşma sırasında WebSocket ile gelir, akış bitince kayıt normal analize gider.
+Telefon sesi (G.711 PCMU/PCMA) doğrudan, Opus/G.722 SDP dosyasıyla, OGG/MP3 yayınları URL ile.
+Ayrıntı ve ölçümler: [docs/entegrasyon.md](docs/entegrasyon.md#9-canlı-akış-rtp-yayın),
+[docs/olcumler.md](docs/olcumler.md).
+
+```bash
+python -m viet_asr.interface.akis --kaynak rtp://0.0.0.0:5004 --dil vi     # komut satırı
+python scripts/rtp_gonder.py kayit.wav --hedef 127.0.0.1:5004               # deneme göndericisi
+```
+
 ## Tam mod (çok süreç / çok makine)
 
 ```

@@ -6,7 +6,7 @@ sadece altyapıdaki bir sınıf değişir.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Protocol
 
 import numpy as np
@@ -36,6 +36,28 @@ class LanguageDetector(Protocol):
     def probabilities(self, audio: np.ndarray) -> dict[str, float]:
         """Modelin bildiği TÜM diller için olasılık (toplamı 1). Kısıtlama uygulamada yapılır."""
         ...
+
+
+class AudioStream(Protocol):
+    """Canlı ses kaynağı (RTP, ffmpeg ile URL/SDP/dosya): 16 kHz mono float32 parçalar."""
+
+    def frames(self) -> Iterator[np.ndarray]: ...
+
+    def close(self) -> None: ...
+
+
+class StreamingVad(Protocol):
+    """Parça parça beslenen VAD. Zamanlar akışın başından itibaren sn."""
+
+    def feed(self, samples: np.ndarray) -> list[VadSegment]:
+        """Biten konuşma parçaları (varsa)."""
+        ...
+
+    def ongoing(self) -> VadSegment | None:
+        """Henüz bitmemiş konuşma (ara sonuç için); konuşma yoksa None."""
+        ...
+
+    def flush(self) -> list[VadSegment]: ...
 
 
 class SpeakerProfiler(Protocol):

@@ -77,6 +77,11 @@ audio { width: 100%; margin-bottom: 12px; }
 .editor input { font: inherit; background: var(--input); color: var(--text); border: 1px solid var(--line);
                 border-radius: 8px; padding: 6px 8px; max-width: 220px; }
 .editor .row { justify-content: flex-start; }
+.live { margin-top: 10px; max-height: 50vh; overflow: auto; }
+.live p { margin: 0; padding: 6px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 64px 1fr; gap: 10px; }
+.live p small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.live p.ara span { color: var(--muted); font-style: italic; }
+#liveSrc { width: 100%; box-sizing: border-box; background: var(--input); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font: inherit; }
 .hist { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .hist button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; text-align: left; background: var(--input);
        border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--text); cursor: pointer; }
@@ -129,6 +134,24 @@ audio { width: 100%; margin-bottom: 12px; }
       <button class="btn" id="send" disabled>Analiz et</button>
     </div>
     <div class="status" id="status" aria-live="polite"></div>
+  </section>
+
+  <section class="card hidden" id="live">
+    <div class="row">
+      <h2>Canlı akış</h2>
+      <span class="sub" id="liveInfo"></span>
+    </div>
+    <div class="opts">
+      <label style="flex:2">Kaynak
+        <input type="text" id="liveSrc" value="rtp://0.0.0.0:5004" aria-label="kaynak" title="rtp://ip:port (G.711/L16), http(s) yayın adresi ya da .sdp dosyası">
+      </label>
+      <label>Dil
+        <select id="liveLang"><option value="vi">Vietnamca</option><option value="tr">Türkçe</option></select>
+      </label>
+      <button class="btn" id="liveStart">Dinlemeye başla</button>
+      <button class="btn danger hidden" id="liveStop">Durdur</button>
+    </div>
+    <div id="liveLines" class="live"></div>
   </section>
 
   <section class="card hidden" id="result">
@@ -524,11 +547,48 @@ async function openJob(id) {
   } catch (e) { setStatus(e.message, true); }
 }
 
+// --- canlı akış ---
+let liveId = null, liveWs = null;
+function liveLine(ev) {
+  const box = $("liveLines");
+  let row = box.querySelector(`p[data-i="${ev.index}"]`);
+  if (!row) { row = el("p", { "data-i": String(ev.index) }, el("small", {}, fmt(ev.start)), el("span", {})); box.append(row); }
+  row.className = ev.final ? "" : "ara";
+  row.lastChild.textContent = ev.text + (ev.final ? "" : " …");
+  box.scrollTop = box.scrollHeight;
+}
+function liveDone(ev) {
+  liveId = null; $("liveStart").classList.remove("hidden"); $("liveStop").classList.add("hidden");
+  const o = ev.ozet || {};
+  $("liveInfo").textContent = ev.durum === "hata" ? "Hata: " + ev.hata
+    : `Bitti: ${o.sure_sn || 0} sn, ${o.parca || 0} parça, gecikme p95 ${o.gecikme_p95_sn ?? "-"} sn` + (ev.son_is ? " · tam analiz kuyrukta" : "");
+  if (ev.son_is) { const id = ev.son_is; setTimeout(() => { loadHistory(); openJob(id); }, 1500); }
+}
+$("liveStart").addEventListener("click", async () => {
+  try {
+    const r = await api("/streams", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kaynak: $("liveSrc").value.trim(), dil: $("liveLang").value }) });
+    const s = await r.json(); liveId = s.id;
+    $("liveLines").replaceChildren();
+    $("liveInfo").textContent = s.port ? `UDP ${s.port} dinleniyor…` : "Bağlanıyor…";
+    $("liveStart").classList.add("hidden"); $("liveStop").classList.remove("hidden");
+    const key = $("apiKey").value.trim();
+    liveWs = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/streams/${s.id}/ws` + (key ? `?key=${encodeURIComponent(key)}` : ""));
+    liveWs.onmessage = (m) => { const ev = JSON.parse(m.data); if (ev.tur === "parca") { liveLine(ev); $("liveInfo").textContent = `canlı · gecikme ${ev.latency.toFixed(2)} sn`; } else if (ev.tur === "bitti") liveDone(ev); };
+    liveWs.onerror = () => { $("liveInfo").textContent = "Canlı bağlantı koptu (sonuç geçmişe düşer)"; };
+  } catch (e) { $("liveInfo").textContent = "Başlatılamadı: " + e.message; }
+});
+$("liveStop").addEventListener("click", async () => {
+  if (!liveId) return;
+  try { await api(`/streams/${liveId}`, { method: "DELETE" }); } catch (e) { $("liveInfo").textContent = e.message; }
+});
+
 async function health() {
   try {
     const r = await fetch("/health"); const h = await r.json();
     $("health").className = "dot " + (r.ok ? "ok" : "bad");
     $("toDataset").classList.toggle("hidden", !(h.features && h.features.dataset_export));
+    $("live").classList.toggle("hidden", !(h.features && h.features.streams));
     $("health").title = r.ok ? `çalışıyor · diller: ${h.languages.join(", ")}` : "sorun: " + JSON.stringify(h.checks);
   } catch { $("health").className = "dot bad"; $("health").title = "sunucuya ulaşılamıyor"; }
 }

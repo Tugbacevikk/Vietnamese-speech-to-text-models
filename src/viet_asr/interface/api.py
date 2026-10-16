@@ -11,6 +11,8 @@
                         notify (callback olayları, virgülle: running,done,failed,rejected)
     GET  /jobs          son işler (?limit=20; arayüzdeki geçmiş)
     GET  /jobs/{id}     durum; bittiyse sonuç (konuşmacılı satırlar)
+    POST /streams {"kaynak": "rtp://0.0.0.0:5004", "dil": "vi"}  canlı akış (RTP, URL, SDP)
+    GET  /streams/{id}   canlı parçalar; WS /streams/{id}/ws anlık; DELETE /streams/{id} durdurur
     GET  /jobs/{id}/transcript  temiz transkript (?etiket=genel|studyo|yok&temizle=1&noktalama=1&bicim=txt|json)
     GET  /jobs/{id}/audio   yüklenen ses (saklama süresi dolmadıysa; arayüzde dinlemek için)
     DELETE /jobs/{id}   bitmiş işi, sonucunu ve sesini siler (kuyruktaki/işlenen iş silinmez)
@@ -40,7 +42,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -66,6 +68,17 @@ class DatasetExport(BaseModel):
     notes: str | None = Field(None, max_length=1000)
 
 
+class StreamStart(BaseModel):
+    kaynak: str = Field(..., min_length=3, max_length=500)    # rtp://0.0.0.0:5004, URL, .sdp
+    dil: str = Field("vi", max_length=8)
+    codec: str = Field("auto", pattern="^(auto|pcmu|pcma|l16)$")
+    clock_rate: int | None = Field(None, ge=8000, le=48000)
+    son_analiz: bool = True                                   # bitince tam analiz (konuşmacı ayırma)
+    num_speakers: int | None = Field(None, ge=1, le=20)
+    callback_url: str | None = None
+    idle_timeout: float = Field(5.0, ge=1.0, le=300.0)        # bu kadar paket gelmezse akış biter
+
+
 class Reanalyze(BaseModel):
     num_speakers: int = Field(..., ge=0, le=20)
 
@@ -82,7 +95,7 @@ class UtteranceEdit(BaseModel):
 
 def create_app(store: JobStore, queue: JobQueue, settings: Settings,
                health_checks: dict | None = None, queue_stats=None, rate_limiter=None,
-               readiness: dict | None = None) -> FastAPI:
+               readiness: dict | None = None, streams=None) -> FastAPI:
     """readiness: ad -> () -> (hazır mı, açıklama); /health/ready bunları da sorar."""
     api = FastAPI(title="Ses -> metin + konuşmacı (vi, tr)", version="0.3.0")
     auth = Depends(api_key_dependency(settings))
@@ -172,6 +185,84 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
     @api.get("/jobs", dependencies=[auth])
     def list_jobs(limit: int = 20):
         return [record_to_dict(r) for r in store.recent_jobs(max(1, min(limit, 200)))]
+
+    # --- canlı akış ---
+    def _streams():
+        if streams is None or not settings.enable_streams:
+            raise HTTPException(404, "canlı akış bu modda kapalı (ENABLE_STREAMS=1, yerel mod ya da akış CLI)")
+        return streams
+
+    @api.post("/streams", status_code=201, dependencies=[auth])
+    def start_stream(body: StreamStart):
+        """Canlı akışı dinlemeye başlar; metin GET /streams/{id} ve WS /streams/{id}/ws ile gelir."""
+        from viet_asr.interface.streams import StreamError, StreamSpec
+
+        problem = callback_problem(body.callback_url, settings)
+        if problem:
+            raise HTTPException(422, problem)
+        try:
+            s = _streams().start(StreamSpec(**body.model_dump()))
+        except StreamError as e:
+            raise HTTPException(422, str(e))
+        except OSError as e:  # port kullanımda vb.
+            raise HTTPException(409, f"kaynak açılamadı: {e}")
+        return s.to_dict()
+
+    @api.get("/streams", dependencies=[auth])
+    def list_streams():
+        return [s.to_dict(with_segments=False) for s in _streams().sessions.values()]
+
+    @api.get("/streams/{sid}", dependencies=[auth])
+    def get_stream(sid: str):
+        s = _streams().get(sid)
+        if s is None:
+            raise HTTPException(404, "akış bulunamadı")
+        return s.to_dict()
+
+    @api.delete("/streams/{sid}", dependencies=[auth])
+    def stop_stream(sid: str):
+        s = _streams().stop(sid)
+        if s is None:
+            raise HTTPException(404, "akış bulunamadı")
+        return {"id": sid, "durum": "durduruluyor" if s.durum == "dinleniyor" else s.durum}
+
+    @api.websocket("/streams/{sid}/ws")
+    async def stream_ws(ws: WebSocket, sid: str, key: str | None = None):
+        """Canlı olaylar: {"tur": "parca", final, text, start, end...} ve sonda {"tur": "bitti"}.
+        API anahtarı tarayıcıdan başlık gönderilemediği için ?key= ile."""
+        import asyncio
+        import hmac
+        import queue as queue_mod
+
+        if settings.api_key and not hmac.compare_digest(key or ws.headers.get("x-api-key", ""), settings.api_key):
+            await ws.close(code=4401)
+            return
+        mgr = streams if (streams is not None and settings.enable_streams) else None
+        q = mgr.subscribe(sid) if mgr else None
+        if q is None:
+            await ws.close(code=4404)
+            return
+        await ws.accept()
+        try:
+            while True:
+                try:
+                    ev = q.get_nowait()
+                except queue_mod.Empty:
+                    await asyncio.sleep(0.05)
+                    continue
+                await ws.send_json(ev)
+                if ev.get("tur") == "bitti":
+                    break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            s = mgr.get(sid)
+            if s is not None and q in s.subscribers:
+                s.subscribers.remove(q)
+        try:
+            await ws.close()
+        except RuntimeError:
+            pass
 
     @api.get("/jobs/{job_id}/transcript", dependencies=[auth])
     def get_transcript_view(job_id: str, etiket: str | None = None, temizle: bool = True,
@@ -333,7 +424,7 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
                 checks[name], ok = f"hata: {type(e).__name__}", False
         body = {"status": "ok" if ok else "bozuk", "checks": checks,
                 "languages": settings.languages,
-                "features": {"dataset_export": settings.enable_dataset_export}}
+                "features": {"dataset_export": settings.enable_dataset_export, "streams": streams is not None and settings.enable_streams}}
         try:
             body["jobs"] = store.counts()
         except Exception:
