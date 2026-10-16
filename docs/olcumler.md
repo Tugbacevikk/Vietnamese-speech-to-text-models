@@ -242,3 +242,15 @@ aşama süreleri (`timings`) var ve arayüzde "Aşamalar" olarak görünüyor.
 
 Ani konuşmacı değişiminde açık kazanç, gerçek diyaloglarda kayıp yok; bedeli biraz daha fazla
 imza hesabı. Yeni değerler kaldı.
+
+## Birleştirme mesafesi 0,35 -> 0,28 denemesi (16 Ekim) — alınmadı
+
+| | 0,35 | 0,28 |
+|---|---|---|
+| Tek kişilik kayıt (kayıtlı imzalar) | 73/85 | 70/85 |
+| Sentetik diyalog (kayıtlı imzalar) | 26/28 | 22/28 |
+| Sentetik, duraksamasız (yeni pencere) | 14/14, %100 | 13/14, %98,8 |
+| 9 Vietnamca diyalog | 7/9, DER %8,8 | 7/9, DER %8,8 |
+
+Hiçbir sette iyileşme yok, üçünde kötüleşme. Varsayılan 0,35 kaldı; `DIARIZER_MERGE_DISTANCE`
+ayarı korundu (sesleri çok benzer kişiler için, ama önce `num_speakers` denenmeli).
