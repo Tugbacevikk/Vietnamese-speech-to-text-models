@@ -198,7 +198,30 @@ durun. Çok sayıda iş için callback daha verimlidir.
 Sesler `AUDIO_RETENTION_HOURS` (varsayılan 24) sonra silinir (düzeltilmiş işlerinki hariç); sonrasında `reanalyze` ve
 ses dinleme 409/410 döner.
 
-## 7. Veri setine aktarma (isteğe bağlı)
+## 7. Temiz transkript (okunacak metin)
+
+`GET /jobs/{id}/transcript` kayıttaki satırları DEĞİŞTİRMEDEN okunur bir görünüm verir:
+
+```
+[00:00 - 00:57] [Sunucu - Kadın]: Vừa rồi và chúc bác nhiều sức khỏe. Vâng mỗi người thì lại có...
+[00:57 - 01:06] [Katılımcı 1 - Erkek]: Bác sĩ ạ vâng trước hết thì cũng xin hỏi bác là...
+```
+
+| Parametre | Değerler | Varsayılan |
+|---|---|---|
+| `etiket` | `genel` (Konuşmacı 1, 2…), `studyo` (en çok söz alan Sunucu, diğerleri Katılımcı 1, 2…), `yok` | `TRANSCRIPT_LABELS` |
+| `temizle` | dolgu sesleri (á, ờ, ừm; ıı, ee) ve kekeleme tekrarı ("thì thì") atılır; anlamlı ikilemeler ("từ từ", "yavaş yavaş") kalır | `true` |
+| `noktalama` | cümle sınırı = konuşmadaki gerçek sessizlik (VAD); büyük harf, sonda `.` ya da soru kalıbıyla `?` | `true` |
+| `bicim` | `txt` ya da `json` (`[{speaker, label, start, end, text}]`) | `txt` |
+
+- Konuşmacı değişince yeni satır; aynı kişinin art arda satırları tek blok.
+- **Cinsiyet** yalnızca sesten ölçülür (ses perdesi, `speaker_info.f0`): ≤155 Hz erkek,
+  ≥185 Hz kadın, arası belirsiz (etikete yazılmaz). Rolden ya da metinden tahmin edilmez.
+- `studyo` rolü bir varsayımdır (en çok söz alan kişi sunucu sayılır); gerçek stüdyo
+  kayıtları için uygundur, telefon görüşmesinde `genel` kullanın.
+- Sonuç JSON'unda da `speaker_labels` (genel) ve `speaker_info` ({f0, gender}) var.
+
+## 8. Veri setine aktarma (isteğe bağlı)
 
 Kontrol edilmiş sonuçlar modelin doğruluğunu ölçmek (test) ya da ince ayar (eğitim) için
 kullanılabilir. Varsayılan **kapalı**; `ENABLE_DATASET_EXPORT=1` ile açılır.
@@ -214,7 +237,7 @@ kullanılabilir. Varsayılan **kapalı**; `ENABLE_DATASET_EXPORT=1` ile açılı
    - Aynı ses iki bölüme giremez (ses özeti `ozetler.tsv`'de tutulur): test sonucu şişmez.
 4. `scripts/duzeltmeleri_disa_aktar.py` yalnızca onay verilmiş işlerin düzeltmelerini dışa aktarır.
 
-## 8. İzleme
+## 9. İzleme
 
 | Uç | Ne için |
 |---|---|

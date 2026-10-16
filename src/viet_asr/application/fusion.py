@@ -17,45 +17,11 @@ from dataclasses import replace
 from viet_asr.domain import BELIRSIZ, SpeakerSegment, Utterance, Word
 
 from .config import FusionConfig
-
-_STUTTERS = {
-    "thì", "với", "các", "cái", "đặc", "là", "và", "của", "được", "người",
-    "những", "cho", "trong", "để", "có", "bị", "rụng", "cung", "cấp", "làm", "đẹp", "rồi", "còn",
-    "nhuộm", "phục", "hồi",
-    "ve", "de", "da", "ile", "için", "ama", "fakat", "ki", "bu", "bir", "şu", "o", "ise"
-}
-
-_DROP_PARTICLES = {"á", "ơ", "ờ", "ờm", "ừm"}
-
+from .transcript_view import clean_tokens
 
 def _clean_words(ws: list[Word]) -> list[Word]:
-    if not ws:
-        return ws
-    # Dolgu seslerini temizle: á, ơ, ờ, ờm, ừm
-    words = [w for w in ws if w.text.lower() not in _DROP_PARTICLES]
-    if not words:
-        return words
-
-    # Ardışık tekrarlar: 3+ tekrar varsa 1'e indir; 2 tekrar varsa ve _STUTTERS içindeyse 1'e indir
-    new_w = []
-    i = 0
-    while i < len(words):
-        j = i
-        while j < len(words) and words[j].text.lower() == words[i].text.lower():
-            j += 1
-        count = j - i
-        w_lower = words[i].text.lower()
-        if count >= 3:
-            new_w.append(words[i])
-        elif count == 2:
-            if w_lower in _STUTTERS:
-                new_w.append(words[i])
-            else:
-                new_w.extend(words[i:j])
-        else:
-            new_w.append(words[i])
-        i = j
-    return new_w
+    """clean_repeats açıkken satırlara da aynı temizlik (kural tek yerde: transcript_view)."""
+    return [ws[i] for i in clean_tokens([w.text for w in ws])]
 
 
 _COMPOUNDS = {
@@ -72,7 +38,10 @@ _COMPOUNDS = {
     ("phát", "biểu"), ("bộ", "đôi"), ("dầu", "gội"), ("rụng", "tóc"),
     ("hành", "kinh"), ("kinh", "nguyệt"), ("chu", "kỳ"), ("phụ", "khoa"),
     ("buồng", "trứng"), ("tử", "cung"), ("đau", "bụng"), ("rối", "loạn"),
-    ("tiền", "mãn"), ("mãn", "kinh"), ("nội", "tiết")
+    ("tiền", "mãn"), ("mãn", "kinh"), ("nội", "tiết"),
+    ("sức", "khỏe"), ("khỏe", "mạnh"), ("hiệu", "quả"), ("tốt", "nhất"), ("xương", "khớp"),
+    ("cơ", "thể"), ("thuốc", "men"), ("huyết", "áp"), ("bệnh", "nhân"), ("vấn", "đề"),
+    ("tình", "trạng"), ("nguyên", "nhân"), ("chương", "trình"), ("câu", "hỏi"), ("thưa", "bác")
 }
 _SENTENCE_STARTER_WORDS = {
     "tuy", "nhưng", "sau", "còn", "nếu", "đặc", "thường", "vì", "do",
@@ -148,7 +117,7 @@ class FusionEngine:
                 best, dist = s.speaker, d
         return best if best is not None and dist <= self.cfg.max_gap else BELIRSIZ
 
-    def merge(self, words: list[Word], labels: list[str]) -> list[Utterance]:
+    def merge(self, words: list[Word], labels: list[str], pauses: list[float] = ()) -> list[Utterance]:
         """Etiketlenmiş kelimeleri konuşma satırlarına toplar."""
         out: list[tuple[Utterance, list[Word]]] = []
         cur_spk, cur = None, []
@@ -156,14 +125,16 @@ class FusionEngine:
             if cur and (spk != cur_spk or w.start - cur[-1].end > self.cfg.new_utterance_gap):
                 for part in self._split(cur):
                     p = _clean_words(part) if self.cfg.clean_repeats else part
-                    out.append((_utt(cur_spk, p, punctuate=self.cfg.punctuate), p))
+                    out.append((_utt(cur_spk, p, punctuate=self.cfg.punctuate, gap=self.cfg.sentence_gap,
+                     pauses=pauses), p))
                 cur = []
             cur_spk = spk
             cur.append(w)
         if cur:
             for part in self._split(cur):
                 p = _clean_words(part) if self.cfg.clean_repeats else part
-                out.append((_utt(cur_spk, p, punctuate=self.cfg.punctuate), p))
+                out.append((_utt(cur_spk, p, punctuate=self.cfg.punctuate, gap=self.cfg.sentence_gap,
+                     pauses=pauses), p))
         return [_with_conf(u, ws, self.cfg.low_conf) for u, ws in out]
 
     def _split(self, ws: list[Word]) -> list[list[Word]]:
@@ -200,12 +171,16 @@ class FusionEngine:
         out.append(ws)
         return out
 
-    def fuse(self, words: list[Word], speakers: list[SpeakerSegment]) -> list[Utterance]:
+    def fuse(self, words: list[Word], speakers: list[SpeakerSegment],
+             pauses: list[float] | None = None) -> list[Utterance]:
+        """pauses: sessizliklerin orta noktaları (sn, VAD'dan). Zipformer'ın kelime bitiş zamanı
+        tahmini (sonraki kelimenin başı, en fazla 1 sn) olduğundan duraklamalar kelime
+        zamanlarından görünmüyor; cümle sınırı için gerçek sessizlik buradan gelir."""
         words = sorted(words, key=lambda s: s.start)
         labels = self.assign(words, speakers)
         if self.cfg.sandwich_max > 0:
             labels = self.smooth(words, labels)
-        return self.merge(words, labels)
+        return self.merge(words, labels, sorted(pauses or []))
 
     def smooth(self, words: list[Word], labels: list[str]) -> list[str]:
         """A, kısa B, A -> A, A, A: iki yanında aynı kişi olan kısa konuşma parçası (sandwich_max
@@ -290,13 +265,21 @@ def _format_sentence(text: str, ws: list[Word]) -> str:
     return res
 
 
-def _utt(speaker: str, ws: list[Word], punctuate: bool = False) -> Utterance:
+def _utt(speaker: str, ws: list[Word], punctuate: bool = False, gap: float = 0.0,
+         pauses=()) -> Utterance:
     if not ws:
         return Utterance(speaker=speaker, start=0.0, end=0.0, text="")
     text = " ".join(s.text for s in ws)
     if punctuate and text:
         text = _format_sentence(text, ws)
-    return Utterance(speaker=speaker, start=ws[0].start, end=ws[-1].end, text=text)
+    def silent(i: int) -> bool:  # iki kelimenin başlangıcı arasında VAD sessizliği var mı
+        k = bisect_right(pauses, ws[i - 1].start)
+        return k < len(pauses) and pauses[k] <= ws[i].start
+
+    breaks = tuple(i for i in range(1, len(ws))
+                   if gap > 0 and (ws[i].start - ws[i - 1].end >= gap or silent(i))
+                   and (ws[i - 1].text.lower(), ws[i].text.lower()) not in _COMPOUNDS)
+    return Utterance(speaker=speaker, start=ws[0].start, end=ws[-1].end, text=text, breaks=breaks)
 
 
 def _with_conf(u: Utterance, ws: list[Word], low: float) -> Utterance:

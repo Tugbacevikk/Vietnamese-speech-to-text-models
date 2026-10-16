@@ -47,6 +47,8 @@ input[type=password], select { background: var(--input); color: var(--text); bor
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
 h2 { font-size: 1.15rem; font-weight: 600; }
 dialog { margin: auto; background: var(--card, var(--input)); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 18px; max-width: 420px; width: calc(100% - 32px); }
+dialog.wide { max-width: 860px; }
+dialog pre { white-space: pre-wrap; max-height: 60vh; overflow: auto; background: var(--input); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; font-size: .9rem; line-height: 1.5; }
 dialog::backdrop { background: rgba(0,0,0,.45); }
 dialog label { display: block; font-size: .85rem; margin: 10px 0 4px; }
 dialog input[type=text], dialog select, dialog textarea { width: 100%; font: inherit; background: var(--input); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
@@ -133,6 +135,7 @@ audio { width: 100%; margin-bottom: 12px; }
     <div class="row">
       <h2>Sonuç</h2>
       <div class="row" style="justify-content:flex-end">
+        <button class="btn ghost" id="cleanView" title="konuşmacı bloklarıyla, temizlenmiş ve noktalanmış metin">Temiz metin</button>
         <button class="btn ghost" data-export="txt">TXT</button>
         <button class="btn ghost" data-export="srt">SRT</button>
         <button class="btn ghost" data-export="json">JSON</button>
@@ -156,6 +159,21 @@ audio { width: 100%; margin-bottom: 12px; }
   </section>
 </div>
 
+<dialog id="cleanDialog" class="wide">
+  <form method="dialog">
+    <div class="row" style="justify-content:space-between;margin-top:0">
+      <b>Temiz metin</b>
+      <select id="cleanLabels" aria-label="konuşmacı adları">
+        <option value="genel">Konuşmacı 1, 2…</option>
+        <option value="studyo">Sunucu / Katılımcı</option>
+        <option value="yok">speaker_00…</option>
+      </select>
+    </div>
+    <p class="sub">Dolgu sesleri ve kekeleme tekrarları çıkarıldı, duraklamalara göre noktalandı. Cinsiyet yalnızca ses perdesinden ve kesinse yazılır. Kayıttaki satırlar değişmez.</p>
+    <pre id="cleanText"></pre>
+    <div class="row"><button class="btn ghost" type="button" id="cleanCopy">Kopyala</button><button class="btn ghost" type="button" id="cleanSave">İndir</button><button class="btn" value="close">Kapat</button></div>
+  </form>
+</dialog>
 <dialog id="dsDialog">
   <form method="dialog" id="dsForm">
     <b>Veri setine ekle</b>
@@ -211,6 +229,8 @@ function setStatus(text, err = false) { $("status").textContent = text; $("statu
 function fmt(s) { const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`; }
 // speaker_00 -> "Konuşmacı 1"; elle verilen ad (ör. "doktor") olduğu gibi gösterilir
 function speakerName(s) {
+  const lab = current && current.result && current.result.speaker_labels;
+  if (lab && lab[s]) return lab[s];
   if (s === "BELIRSIZ") return "Belirsiz";
   const m = /^speaker_(\d+)$/.exec(s);
   return m ? "Konuşmacı " + (parseInt(m[1], 10) + 1) : s;
@@ -423,6 +443,31 @@ $("reanalyze").addEventListener("click", async () => {
     setStatus("Yeniden analiz kuyrukta…");
     poll(current.job_id, performance.now());
   } catch (e) { setStatus("Başlatılamadı: " + e.message, true); }
+});
+
+async function loadClean() {
+  const mode = $("cleanLabels").value;
+  store.set("asr_labels", mode);
+  $("cleanText").textContent = "Hazırlanıyor…";
+  try {
+    const r = await api(`/jobs/${encodeURIComponent(current.job_id)}/transcript?etiket=${mode}`);
+    $("cleanText").textContent = await r.text();
+  } catch (e) { $("cleanText").textContent = "Alınamadı: " + e.message; }
+}
+$("cleanView").addEventListener("click", () => {
+  if (!current) return;
+  $("cleanLabels").value = store.get("asr_labels") || "genel";
+  $("cleanDialog").showModal(); loadClean();
+});
+$("cleanLabels").addEventListener("change", loadClean);
+$("cleanCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("cleanText").textContent); setStatus("Kopyalandı."); }
+  catch { setStatus("Kopyalanamadı; metni seçip kopyalayın.", true); }
+});
+$("cleanSave").addEventListener("click", () => {
+  const a = el("a", { href: URL.createObjectURL(new Blob([$("cleanText").textContent], { type: "text/plain;charset=utf-8" })),
+                      download: `${current.job_id}_temiz.txt` });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });
 
 $("toDataset").addEventListener("click", () => {

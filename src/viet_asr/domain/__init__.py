@@ -9,6 +9,7 @@ from .models import (
     JobStatus,
     LanguageDecision,
     LanguageSource,
+    SpeakerInfo,
     SpeakerSegment,
     Transcript,
     UnsupportedLanguageError,
@@ -19,6 +20,6 @@ from .models import (
 
 __all__ = [
     "BELIRSIZ", "NOTIFY_DEFAULT", "NOTIFY_EVENTS", "PROFILES", "AudioJob", "Correction", "JobRecord", "JobStatus", "LanguageDecision", "LanguageSource",
-    "SpeakerSegment", "Transcript", "UnsupportedLanguageError", "Utterance",
+    "SpeakerInfo", "SpeakerSegment", "Transcript", "UnsupportedLanguageError", "Utterance",
     "VadSegment", "Word",
 ]

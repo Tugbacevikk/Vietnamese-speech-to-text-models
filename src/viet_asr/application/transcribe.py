@@ -14,7 +14,7 @@ from .coverage import add_rescued, coverage
 
 from .fusion import FusionEngine
 from .language import LanguageResolver
-from .ports import AsrEngines, AudioLoader, Diarizer, Notifier, ResultRepository, Vad
+from .ports import AsrEngines, AudioLoader, Diarizer, Notifier, ResultRepository, SpeakerProfiler, Vad
 
 log = logging.getLogger(__name__)
 
@@ -24,10 +24,12 @@ class TranscribeAndDiarize:
                  engines: AsrEngines, diarizer: Diarizer, fusion: FusionEngine,
                  repo: ResultRepository, notifier: Notifier | None = None,
                  chunker: Vad | None = None, profiles: ProfileConfig | None = None,
-                 safety: SafetyNetConfig | None = None):
-        """chunker: 'full' bölmeli motorlar için sesin tamamını parçalayan bölücü."""
+                 safety: SafetyNetConfig | None = None, profiler: SpeakerProfiler | None = None):
+        """chunker: 'full' bölmeli motorlar için sesin tamamını parçalayan bölücü.
+        profiler: konuşmacı başına ses perdesi/cinsiyet (temiz transkript etiketleri için)."""
         self.loader, self.vad, self.language, self.engines = loader, vad, language, engines
         self.chunker = chunker
+        self.profiler = profiler
         self.profiles = profiles or ProfileConfig()
         self.safety = safety or SafetyNetConfig()
         self.diarizer, self.fusion, self.repo, self.notifier = diarizer, fusion, repo, notifier
@@ -103,8 +105,17 @@ class TranscribeAndDiarize:
             diarize_segs = self.chunker.split(audio) if (full and self.chunker) else segments
             speakers = self.diarizer.diarize(audio, diarize_segs, job.num_speakers)
         lap("konusmaci")
-        utterances = self.fusion.fuse(words, speakers)
+        # cümle sınırı için gerçek sessizlikler: VAD parçaları iki yandan pad (0,2 sn) genişletildiği
+        # için aralarında boşluk kalması ~0,4 sn'den uzun sessizlik demek (daha kısası ve uzun
+        # konuşmanın zorla bölündüğü yer bitişik kalır). 4,6 dk'lık iki diyalogda 29 ve 14 sınır.
+        pauses = [(a.end + b.start) / 2 for a, b in zip(segments, segments[1:]) if b.start - a.end > 0.01]
+        utterances = self.fusion.fuse(words, speakers, pauses=pauses)
         lap("birlestirme")
+        infos: tuple = ()
+        if self.profiler is not None and speakers:
+            used = {u.speaker for u in utterances}
+            infos = tuple(i for i in self.profiler.profile(audio, speakers) if i.speaker in used)
+            lap("ses_profili")
         if any(u.conf is not None for u in utterances):
             quality["dusuk_guvenli_kelime"] = sum(len(u.low_conf) for u in utterances)
 
@@ -120,4 +131,4 @@ class TranscribeAndDiarize:
                  job.job_id, lang.code, duration, dt, rtf, len(utterances), wh_status)
         return Transcript(job_id=job.job_id, duration=duration, utterances=utterances,
                           model=asr.name, language=lang, profile=profile, timings=timings,
-                          quality=quality)
+                          quality=quality, speakers=infos)

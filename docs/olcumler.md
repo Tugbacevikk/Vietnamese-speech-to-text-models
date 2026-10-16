@@ -216,3 +216,18 @@ model 0,94. Kodda bulunan iki neden:
 
 Medium modeli bu ortamda indirilemediği için yeni süre burada ölçülemedi; sonuçta artık
 aşama süreleri (`timings`) var ve arayüzde "Aşamalar" olarak görünüyor.
+
+## Temiz transkript ve ses perdesi — 16 Ekim 2026
+
+- **Ses perdesi (F0) doğrulaması:** Piper sesleri — Vietnamca 3 kadın sesi 233–267 Hz (kadın),
+  Türkçe dfki ve fahrettin 105 Hz (erkek), fettah 192 Hz (tek tepeli dağılım, oktav hatası değil;
+  ses gerçekten tiz ya da adı yanıltıcı — dinlenerek doğrulanamadı). Eşikler bu yüzden
+  ≤155 erkek / ≥185 kadın, arası belirsiz (yanlış etiket yerine etiketsiz).
+- VietMed 9 diyaloğun doğru konuşmacı aralıklarında F0: 97–136 Hz ve 185–233 Hz iki öbek,
+  4 konuşmacı 163–180 arası (belirsiz). Sunucuların bir kısmı kadın (011_a 207 Hz): rolden
+  cinsiyet çıkarmak yanlış olurdu.
+- 9 diyalog (cümle sınırı ve bileşik kelime listesi eklendikten sonra): kişi 7/9, DER %8,8
+  (önce %9,0), cpWER %28,6, WER %12,5 — kayıttaki metin değişmedi.
+- **Sınır:** VietMed'deki TV programlarında konuşmacılar az duraklıyor; duraklamaya dayalı
+  noktalama uzun cümleler üretiyor. Dil bilgisine göre noktalama ve bağlama göre kelime
+  düzeltme ("con" -> "câu") dil modeli ister; kurala dökülünce başka kayıtları bozuyor.

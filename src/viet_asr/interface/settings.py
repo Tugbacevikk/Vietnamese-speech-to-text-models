@@ -111,6 +111,8 @@ class Settings:
     queued_stale_sec: int = field(default_factory=lambda: int(os.environ.get("QUEUED_STALE_SEC", "300")))
     # Kontrol edilmiş sonuçları veri setine (test/eğitim) aktarma; varsayılan kapalı. Açıkken bile
     # her aktarım kontrol eden kişinin adı ve açık onay ister; önce bekleyen kuyruğa düşer.
+    # temiz transkriptte konuşmacı adları: genel (Konuşmacı 1) | studyo (Sunucu, Katılımcı 1) | yok
+    transcript_labels: str = field(default_factory=lambda: os.environ.get("TRANSCRIPT_LABELS", "genel"))
     enable_dataset_export: bool = field(default_factory=lambda: os.environ.get(
         "ENABLE_DATASET_EXPORT", "0").lower() in ("1", "true", "evet"))
     dataset_dir: str = field(default_factory=lambda: os.environ.get("DATASET_DIR", "data/veri_seti"))

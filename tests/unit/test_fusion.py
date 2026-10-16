@@ -184,3 +184,11 @@ def test_punctuate_acikken_icte_nokta_yok_sonda_tek_noktalama_var():
     assert res[0].text[-1] in ".?"
     assert res[0].text[:-1] == "Bác sĩ nói với chúng tôi rằng không sao"
 
+
+
+def test_cumle_siniri_vad_sessizliginden():
+    # Zipformer: bitiş = sonraki başlangıç, kelime aralığından duraklama görünmez
+    ws = [Y(t, i * 0.3, (i + 1) * 0.3) for i, t in enumerate("a b c d e f".split())]
+    (u,) = eng().fuse(ws, [S(A, 0, 3)], pauses=[0.75])      # c (0.6) ile d (0.9) arasında sessizlik
+    assert u.breaks == (3,)
+    assert eng().fuse(ws, [S(A, 0, 3)])[0].breaks == ()

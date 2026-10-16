@@ -421,3 +421,25 @@ def test_veri_seti_egitim_bolumu(tmp_path):
     with pytest.raises(ValueError):
         dataset.write_pending(tmp_path, "j2", audio, utts, {"dil": "vi"})
         dataset.approve(tmp_path, "j2", use="hepsi")
+
+
+def test_temiz_transkript_ucu(ctx):
+    from viet_asr.domain import LanguageDecision, LanguageSource, SpeakerInfo, Transcript, Utterance
+
+    store, queue, c = ctx
+    jid = post(c, {"language": "vi"}).json()["job_id"]
+    assert c.get(f"/jobs/{jid}/transcript").status_code == 409
+    store.save(Transcript(jid, 20.0, [Utterance("speaker_00", 0, 5, "ờ xin chào quý vị"),
+                                      Utterance("speaker_01", 5.5, 9, "thưa bác sĩ cho em hỏi")], "m",
+                          LanguageDecision("vi", 1.0, LanguageSource.REQUEST),
+                          speakers=(SpeakerInfo("speaker_01", 221.0, "kadın", 3.0),)))
+    r = c.get(f"/jobs/{jid}/transcript?etiket=studyo")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/plain")
+    assert r.text.splitlines() == ["[00:00 - 00:05] [Sunucu]: Xin chào quý vị.",
+                                   "[00:06 - 00:09] [Katılımcı 1 - Kadın]: Thưa bác sĩ cho em hỏi."]
+    j = c.get(f"/jobs/{jid}/transcript?bicim=json&temizle=0&noktalama=0").json()
+    assert j[0]["text"] == "ờ xin chào quý vị" and j[1]["label"] == "Konuşmacı 2 - Kadın"
+    assert c.get(f"/jobs/{jid}/transcript?etiket=x").status_code == 422
+    res = c.get(f"/jobs/{jid}").json()["result"]
+    assert res["speaker_labels"]["speaker_01"] == "Konuşmacı 2 - Kadın"
+    assert res["speaker_info"]["speaker_01"] == {"f0": 221.0, "gender": "kadın"}

@@ -194,6 +194,8 @@ class FusionConfig:
     max_gap: float = 0.5
     # aynı konuşmacının arasında bu kadar sessizlik varsa yeni satır başlar (sn)
     new_utterance_gap: float = 1.5
+    # satır içinde bu kadar duraklama cümle sınırı sayılır (temiz transkriptte nokta)
+    sentence_gap: float = 0.6
     # tek satır en fazla bu kadar sürer (sn); uzun konuşma en uzun duraklamadan bölünür.
     # 13 Ekim arayüz denemesi: bir doktorun 92 sn'si tek satırdı (okuması ve altyazısı zor).
     # 0 = bölme yok.

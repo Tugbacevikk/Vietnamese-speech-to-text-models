@@ -317,3 +317,19 @@ def test_veri_seti_onayi(store):
     assert len(store.corrections()) == 2 and store.corrections(consented_only=True) == []
     assert store.set_consent("v", "Dr. A", "test") is True
     assert [c.job_id for c in store.corrections(consented_only=True)] == ["v"]
+
+
+def test_konusmaci_profili_ve_cumle_sinirlari_saklanir(store):
+    from dataclasses import replace
+
+    from viet_asr.domain import SpeakerInfo
+
+    store.create(AudioJob("sp", "/sp.wav", "vi"))
+    t = transcript("sp")
+    t = replace(t, utterances=[replace(t.utterances[0], breaks=(1,))] + t.utterances[1:],
+                speakers=(SpeakerInfo("speaker_00", 118.5, "erkek", 12.0), SpeakerInfo("speaker_01", None, None, 1.0)))
+    store.save(t)
+    got = store.get_transcript("sp")
+    assert got.speakers == t.speakers and got.utterances[0].breaks == (1,)
+    store.update_utterance("sp", 0, text="x y")
+    assert store.get_transcript("sp").utterances[0].breaks == ()     # düzeltilen satırda geçersiz

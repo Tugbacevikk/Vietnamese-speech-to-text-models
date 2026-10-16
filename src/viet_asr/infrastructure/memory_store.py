@@ -101,7 +101,7 @@ class MemoryJobStore:
                 return None
             old = t.utterances[idx]
             new = replace(old, speaker=speaker if speaker is not None else old.speaker,
-                          text=text if text is not None else old.text, edited=True)
+                          text=text if text is not None else old.text, edited=True, breaks=())
             utts = list(t.utterances)
             utts[idx] = new
             self.results[job_id] = replace(t, utterances=utts)

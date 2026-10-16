@@ -78,6 +78,8 @@ class JobRow(Base):
     timings: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB(), "postgresql"))
     # kapsama yüzdesi, yazısız konuşma, kurtarılan kelime, düşük güvenli kelime sayısı
     quality: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB(), "postgresql"))
+    # konuşmacı profili [{"speaker", "f0", "gender", "voiced_sec"}]: temiz transkript etiketleri
+    speaker_info: Mapped[list | None] = mapped_column(JSON().with_variant(JSONB(), "postgresql"))
     # veri setine aktarma onayı (kim, ne zaman, hangi amaçla: test | egitim); yoksa aktarılmaz
     consent_by: Mapped[str | None] = mapped_column(Text)
     consent_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
@@ -114,6 +116,7 @@ class UtteranceRow(Base):
     edited_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     conf: Mapped[float | None] = mapped_column(Float)        # kelime güvenlerinin ortalaması
     low_conf: Mapped[str | None] = mapped_column(Text)       # düşük güvenli kelime sıraları "2,5"
+    breaks: Mapped[str | None] = mapped_column(Text)         # cümle sınırı olan kelime sıraları "7,15"
     # arayüzden silindi (uydurma satır): sonuçta görünmez, ince ayar için kayıtta kalır
     deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 

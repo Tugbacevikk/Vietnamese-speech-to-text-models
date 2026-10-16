@@ -75,6 +75,7 @@ curl -H "X-API-Key: $K" http://localhost:8001/jobs/<job_id>        # durum + son
 | `POST /jobs` | ses yükle; `language` (tr, vi, auto), `num_speakers` (1–20), `callback_url`, `external_id`, `profile` (full, feedback), `notify` |
 | `GET /jobs/{id}` | durum; bittiyse konuşmacılı satırlar |
 | `GET /jobs?limit=20` | son işler |
+| `GET /jobs/{id}/transcript` | temiz transkript: `[dd:ss - dd:ss] [Sunucu - Erkek]: metin` (`?etiket=genel\|studyo\|yok`, `bicim=txt\|json`) |
 | `GET /jobs/{id}/audio` | yüklenen ses (saklama süresi dolmadıysa) |
 | `DELETE /jobs/{id}` | bitmiş işi, sonucunu ve sesini siler |
 | `PATCH /jobs/{id}/utterances/{n}` | n. satırın metnini ve/veya konuşmacısını düzelt (`{"text", "speaker"}`) |

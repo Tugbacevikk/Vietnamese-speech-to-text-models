@@ -19,6 +19,7 @@ from viet_asr.infrastructure.sherpa_asr import build_asr
 from viet_asr.infrastructure.cluster_diarizer import EmbeddingClusterDiarizer
 from viet_asr.infrastructure.sherpa_diarizer import SherpaOnnxDiarizer
 from viet_asr.infrastructure.sherpa_vad import SileroVad
+from viet_asr.infrastructure.voice import PitchProfiler
 from viet_asr.infrastructure.whisper_lid import LazyDetector, WhisperLanguageDetector
 
 
@@ -105,7 +106,7 @@ def build_pipeline(cfg: PipelineConfig, repo: ResultRepository,
         language=build_resolver(cfg, with_detection), engines=build_engines(cfg),
         diarizer=build_diarizer(cfg.diarizer), fusion=build_fusion(cfg.fusion), repo=repo,
         chunker=EnergyChunker(cfg.chunk.max_len, cfg.chunk.min_len), profiles=cfg.profile,
-        safety=cfg.safety)
+        safety=cfg.safety, profiler=PitchProfiler())
 
 
 # geriye dönük ad (CLI ve testler)

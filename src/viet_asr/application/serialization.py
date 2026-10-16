@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from viet_asr.domain import JobRecord, LanguageDecision, Transcript
 
+from .transcript_view import speaker_labels
+
 
 def decision_to_dict(d: LanguageDecision | None) -> dict | None:
     if d is None:
@@ -29,6 +31,11 @@ def transcript_to_dict(t: Transcript) -> dict:
         **({"quality": t.quality} if t.quality else {}),
         # aşama süreleri (sn): yavaşlığın nereden geldiği görülsün (dil, vad, asr, guvenlik_agi...)
         **({"timings": dict(t.timings)} if t.timings else {}),
+        # okunur adlar: "Konuşmacı 1 - Kadın" (cinsiyet yalnızca ses perdesi kesinse)
+        "speaker_labels": speaker_labels(t.utterances, t.speakers, "genel"),
+        # konuşmacı başına ses perdesi (Hz) ve kaba cinsiyet (erkek | kadın | null = belirsiz)
+        **({"speaker_info": {i.speaker: {"f0": i.f0, "gender": i.gender} for i in t.speakers}}
+           if t.speakers else {}),
     }
 
 

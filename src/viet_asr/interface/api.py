@@ -11,6 +11,7 @@
                         notify (callback olayları, virgülle: running,done,failed,rejected)
     GET  /jobs          son işler (?limit=20; arayüzdeki geçmiş)
     GET  /jobs/{id}     durum; bittiyse sonuç (konuşmacılı satırlar)
+    GET  /jobs/{id}/transcript  temiz transkript (?etiket=genel|studyo|yok&temizle=1&noktalama=1&bicim=txt|json)
     GET  /jobs/{id}/audio   yüklenen ses (saklama süresi dolmadıysa; arayüzde dinlemek için)
     DELETE /jobs/{id}   bitmiş işi, sonucunu ve sesini siler (kuyruktaki/işlenen iş silinmez)
     POST /jobs/{id}/dataset {"reviewer","consent","use","notes"}  veri setinin onay kuyruğuna
@@ -171,6 +172,28 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
     @api.get("/jobs", dependencies=[auth])
     def list_jobs(limit: int = 20):
         return [record_to_dict(r) for r in store.recent_jobs(max(1, min(limit, 200)))]
+
+    @api.get("/jobs/{job_id}/transcript", dependencies=[auth])
+    def get_transcript_view(job_id: str, etiket: str | None = None, temizle: bool = True,
+                            noktalama: bool = True, bicim: str = "txt"):
+        """Temiz transkript: konuşmacı değişiminde yeni satır, [dd:ss - dd:ss] [Etiket]: metin.
+        etiket: genel | studyo | yok (varsayılan TRANSCRIPT_LABELS). Kayıttaki satırlar değişmez."""
+        from viet_asr.application.transcript_view import LABEL_MODES, as_text, blocks
+
+        mode = etiket or settings.transcript_labels
+        if mode not in LABEL_MODES or bicim not in ("txt", "json"):
+            raise HTTPException(422, f"etiket {LABEL_MODES} biri, bicim txt ya da json olmalı")
+        rec = store.get(job_id)
+        if rec is None:
+            raise HTTPException(404, "iş bulunamadı")
+        t = store.get_transcript(job_id) if rec.status == JobStatus.DONE else None
+        if t is None:
+            raise HTTPException(409, "iş henüz bitmedi")
+        bs = blocks(t, mode, clean=temizle, punctuate=noktalama)
+        if bicim == "json":
+            return [{"speaker": b.speaker, "label": b.label, "start": round(b.start, 2),
+                     "end": round(b.end, 2), "text": b.text} for b in bs]
+        return PlainTextResponse(as_text(bs), media_type="text/plain; charset=utf-8")
 
     @api.get("/jobs/{job_id}/audio", dependencies=[auth])
     def get_audio(job_id: str):

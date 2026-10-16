@@ -109,6 +109,20 @@ class Utterance:
     index: int = -1       # kayıttaki sıra numarası (silinen satırlar atlansa da değişmez)
     conf: float | None = None          # kelime güvenlerinin ortalaması
     low_conf: tuple[int, ...] = ()     # metinde düşük güvenli kelimelerin sırası (0'dan)
+    # cümle sınırları: metinde bu sıradaki kelimeden ÖNCE uzun duraklama var (temiz
+    # transkriptte nokta konur). Düzeltilen satırda boşalır (kelime sırası değişebilir).
+    breaks: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class SpeakerInfo:
+    """Konuşmacının sesinden ölçülenler: ortanca ses perdesi (Hz), kaba cinsiyet
+    ("erkek" | "kadın" | None = belirsiz) ve ölçümde kullanılan ötümlü ses süresi (sn)."""
+
+    speaker: str
+    f0: float | None = None
+    gender: str | None = None
+    voiced_sec: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -161,6 +175,7 @@ class Transcript:
     # kalite: konuşma süresi, yazıya dökülmemiş konuşma, kapsama yüzdesi, kurtarılan kelime,
     # düşük güvenli satır sayısı
     quality: dict[str, float] = field(default_factory=dict)
+    speakers: tuple[SpeakerInfo, ...] = ()
 
     @property
     def text(self) -> str:

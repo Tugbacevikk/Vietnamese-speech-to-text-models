@@ -28,7 +28,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from viet_asr.application.serialization import transcript_to_dict
 from viet_asr.domain import (
-    NOTIFY_DEFAULT, AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, LanguageSource, Transcript, Utterance,
+    NOTIFY_DEFAULT, AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, LanguageSource, SpeakerInfo,
+    Transcript, Utterance,
 )
 from viet_asr.infrastructure.db.models import JobRow, OutboxRow, UtteranceRow, utcnow
 from viet_asr.infrastructure.db.url import normalize_url
@@ -187,11 +188,13 @@ class SqlAlchemyJobStore:
                 s, t.job_id, must=True, status=JobStatus.DONE.value, model=t.model,
                 duration=t.duration, lang_code=d.code, lang_confidence=d.confidence,
                 lang_source=d.source.value, lang_uncertain=d.uncertain, error=None,
-                profile=t.profile, timings=t.timings or None, quality=t.quality or None)
+                profile=t.profile, timings=t.timings or None, quality=t.quality or None,
+                speaker_info=[_info_dict(i) for i in t.speakers] or None)
             s.execute(delete(UtteranceRow).where(UtteranceRow.job_id == t.job_id))  # tekrar işlenirse
             s.add_all(UtteranceRow(job_id=t.job_id, idx=i, speaker=u.speaker, start_s=u.start,
                                    end_s=u.end, text=u.text, conf=u.conf,
-                                   low_conf=",".join(map(str, u.low_conf)) or None)
+                                   low_conf=",".join(map(str, u.low_conf)) or None,
+                                   breaks=",".join(map(str, u.breaks)) or None)
                       for i, u in enumerate(t.utterances))
             if cb and "done" in events:
                 self._outbox(s, t.job_id, "job.done", cb,
@@ -222,8 +225,10 @@ class SqlAlchemyJobStore:
                               timings=dict(j.timings or {}), quality=dict(j.quality or {}),
                               utterances=[Utterance(r.speaker, r.start_s, r.end_s, r.text,
                                                     r.edited_at is not None, r.idx, r.conf,
-                                                    _ints(r.low_conf) if r.edited_at is None else ())
-                                          for r in rows])
+                                                    _ints(r.low_conf) if r.edited_at is None else (),
+                                                    _ints(r.breaks) if r.edited_at is None else ())
+                                          for r in rows],
+                              speakers=tuple(SpeakerInfo(**d) for d in (j.speaker_info or [])))
 
     def set_consent(self, job_id: str, by: str, use: str) -> bool:
         """Veri setine aktarma onayı (kim, hangi amaçla). Bitmiş iş değilse False."""
@@ -451,6 +456,10 @@ def _record(r: JobRow) -> JobRecord:
                    r.profile, tuple(r.notify.split(",")) if r.notify is not None else None)
     return JobRecord(job=job, status=JobStatus(r.status), decision=_decision(r), error=r.error,
                      created_at=r.created_at, updated_at=r.updated_at)
+
+
+def _info_dict(i: SpeakerInfo) -> dict:
+    return {"speaker": i.speaker, "f0": i.f0, "gender": i.gender, "voiced_sec": i.voiced_sec}
 
 
 def _ints(v: str | None) -> tuple[int, ...]:

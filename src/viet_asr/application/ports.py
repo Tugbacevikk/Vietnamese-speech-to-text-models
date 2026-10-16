@@ -12,7 +12,7 @@ from typing import Protocol
 import numpy as np
 
 from viet_asr.domain import (
-    AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, SpeakerSegment, Transcript,
+    AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, SpeakerInfo, SpeakerSegment, Transcript,
     Utterance, VadSegment, Word,
 )
 
@@ -35,6 +35,12 @@ AsrEngines = Mapping[str, AsrEngine]
 class LanguageDetector(Protocol):
     def probabilities(self, audio: np.ndarray) -> dict[str, float]:
         """Modelin bildiği TÜM diller için olasılık (toplamı 1). Kısıtlama uygulamada yapılır."""
+        ...
+
+
+class SpeakerProfiler(Protocol):
+    def profile(self, audio: np.ndarray, speakers: list[SpeakerSegment]) -> list[SpeakerInfo]:
+        """Konuşmacı başına sesten ölçülenler (ses perdesi, kaba cinsiyet)."""
         ...
 
 
