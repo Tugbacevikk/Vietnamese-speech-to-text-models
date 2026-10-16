@@ -17,8 +17,6 @@ import logging
 import threading
 import time
 
-import uvicorn
-
 from viet_asr.application.jobs import DetectLanguage, RunTranscription
 from viet_asr.infrastructure.audio import SoundfileLoader
 from viet_asr.infrastructure.sherpa_vad import SileroVad
@@ -81,34 +79,15 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
     app.state.streams = streams
     app.state.maintenance = build_maintenance(store, settings)
 
-    # canlı altyazı (/canli, /ws/live): aynı süreç, aynı modeller; oturum kaydı bitince toplu işe
-    import uuid
+    # canlı altyazı (/canli, /ws/live, WebRTC): aynı süreç, aynı modeller; oturum kaydı bitince toplu işe
+    if settings.enable_live:
+        from viet_asr.application.jobs import SubmitJob as _Submit
+        from viet_asr.interface.composition import wire_live
 
-    from viet_asr.application.jobs import SubmitJob as _Submit
-    from viet_asr.domain import AudioJob
-    from viet_asr.interface.composition import build_live, build_live_speakers
-    from viet_asr.interface.live_server import add_live_routes
-
-    engines, detector, detect_lang = build_live(settings, cfg, pipeline.engines, resolver)
-    if live_engines is not None:
-        engines, detect_lang = live_engines, live_detect
-    submit = _Submit(store, queue, settings.languages)
-
-    def submit_recording(path: str, language: str | None, callback_url: str | None = None,
-                         session_id: str | None = None) -> str:
-        """Oturum kaydı toplu işe: konuşmacı ayrımı; bitince 'job.done' aynı callback adresine."""
-        return submit(AudioJob(uuid.uuid4().hex, path, language, callback_url,
-                               external_id=f"live:{session_id}" if session_id else None))
-
-    def notify_ended(url: str, payload: dict, job_id: str | None) -> None:
-        store.add_event("live.ended", url, payload, job_id)
-
-    speakers = live_speakers if live_speakers is not None else build_live_speakers(settings, cfg)
-    add_live_routes(app, settings, engines, live_detector or detector, submit_recording, detect_lang,
-                    notify_ended, speaker_factory=speakers or None)
-    if warm_up and live_engines is None:  # canlı motorlar açılışta arka planda hazırlanır
-        for e in engines.values():
-            e.start_loading()
+        wire_live(app, settings, cfg, pipeline.engines, resolver, store,
+                  _Submit(store, queue, settings.languages), warm=warm_up,
+                  live_engines=live_engines, live_detector=live_detector, live_detect=live_detect,
+                  live_speakers=live_speakers)
     return app, store, queue, dispatcher
 
 
@@ -140,14 +119,14 @@ def main(argv=None):
 
     threading.Thread(target=bakim, daemon=True, name="bakim").start()
     n, why = (a.workers, "--workers") if a.workers else s.concurrency_plan()
-    log.info("hazır: http://%s:%d  (diller: %s, eşzamanlı iş: %d — %s)", a.host, a.port,
-             ",".join(s.languages), n, why)
-    log.info("canlı altyazı: http://%s:%d/canli", a.host, a.port)
+    log.info("hazır  (diller: %s, eşzamanlı iş: %d — %s)", ",".join(s.languages), n, why)
     if "tr" in s.languages and s.model_for("tr").startswith("faster-whisper"):
         log.info("Türkçe: Whisper %s, %d iş parçacığı, beam_size=%d, aynı anda %d çözüm (WHISPER_THREADS)",
                  s.model_for("tr"), s.whisper_threads, s.whisper_beam_size, s.whisper_workers(n))
     try:
-        uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
+        from viet_asr.interface.serve import run
+
+        run(app, s, a.host, a.port)
     finally:
         dispatcher.stop()
         queue.shutdown(wait=False)

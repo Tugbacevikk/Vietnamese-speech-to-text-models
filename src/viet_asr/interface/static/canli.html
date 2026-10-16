@@ -104,6 +104,11 @@
     <label class="check"><input id="analyze" type="checkbox" checked> Bitince konuşmacı ayrımlı transkript hazırla</label>
     <label class="check"><input id="ns" type="checkbox" checked> Tarayıcı gürültü bastırma</label>
     <label class="check" id="spkRow" hidden><input id="spk" type="checkbox" checked> Konuşmacıları ayır (soru-cevap)</label>
+    <label>Bağlantı<select id="transport">
+      <option value="auto">Otomatik (başka cihazdan WebRTC, bu bilgisayarda WebSocket)</option>
+      <option value="webrtc">WebRTC (Opus/UDP: Wi-Fi, telefon)</option>
+      <option value="websocket">WebSocket (en sağlam, aynı bilgisayar)</option>
+    </select></label>
     <label id="keyRow" hidden>API anahtarı<input id="apiKey" type="password" autocomplete="off" placeholder="sunucu istiyor"></label>
   </div>
 </details>
@@ -111,119 +116,32 @@
 <main id="stage"><div class="empty" id="empty">“Başlat”a basıp konuşmaya başlayın.</div><div id="partial"></div></main>
 <div class="exit-hint">Çıkmak için Esc</div>
 
+<script src="/canli_istemci.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const stage = $("stage"), partialEl = $("partial");
-let ws = null, ctx = null, node = null, src = null, mic = null, wakeLock = null;
-let running = false, source = null, retryTimer = null, offset = 0, sent = 0;
-// kopunca aynı oturuma dönmek için: sunucunun verdiği kimlik ve belirteç, alınan son satır
-let sessionId = null, resumeToken = null, lastId = -1, gotReady = false, fatal = false;
+let wakeLock = null;
 const speakersSeen = new Set();
 const spkNo = (s) => Number(String(s).split("_").pop()) + 1;  // speaker_00 -> 1
-// bağlantı yokken çekilen ses (100 ms'lik paketler); bağlantı gelince gönderilir, en fazla 60 sn
-const pending = [], PENDING_MAX = 600;
 const transcript = [];
 
-/* ---------- Ses yakalama: AudioWorklet ile 16 kHz Int16 paketler ---------- */
-const WORKLET = `
-class Pcm16 extends AudioWorkletProcessor {
-  constructor() { super(); this.ratio = sampleRate / 16000; this.pos = 0; this.buf = new Float32Array(1600); this.n = 0; this.sq = 0; this.cnt = 0; }
-  process(inputs) {
-    const ch = inputs[0][0];
-    if (!ch) return true;
-    for (let k = 0; k < ch.length; k++) { this.sq += ch[k] * ch[k]; }
-    this.cnt += ch.length;
-    while (this.pos < ch.length) {
-      const i = this.pos | 0, f = this.pos - i;
-      const s = ch[i] * (1 - f) + (i + 1 < ch.length ? ch[i + 1] : ch[i]) * f;
-      this.buf[this.n++] = s;
-      if (this.n === this.buf.length) {
-        const out = new Int16Array(this.n);
-        for (let j = 0; j < this.n; j++) { const v = Math.max(-1, Math.min(1, this.buf[j])); out[j] = v * 32767; }
-        this.port.postMessage({ pcm: out.buffer, rms: Math.sqrt(this.sq / this.cnt) }, [out.buffer]);
-        this.n = 0; this.sq = 0; this.cnt = 0;
-      }
-      this.pos += this.ratio;
-    }
-    this.pos -= ch.length;
-    return true;
-  }
-}
-registerProcessor("pcm16", Pcm16);`;
-
-async function makeContext(preferred16k) {
-  const c = preferred16k ? new AudioContext({ sampleRate: 16000 }) : new AudioContext();
-  await c.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" })));
-  return c;
-}
-
-async function openAudio(kind) {
-  if (kind.type === "mic") {
-    mic = await navigator.mediaDevices.getUserMedia({ audio: {
-      deviceId: kind.deviceId ? { exact: kind.deviceId } : undefined,
-      channelCount: 1, echoCancellation: false, noiseSuppression: $("ns").checked, autoGainControl: true } });
-    try { ctx = await makeContext(true); src = ctx.createMediaStreamSource(mic); }
-    catch { await ctx?.close().catch(() => {}); ctx = await makeContext(false); src = ctx.createMediaStreamSource(mic); }
-  } else {
-    ctx = await makeContext(false);
-    const buf = await ctx.decodeAudioData(await kind.file.arrayBuffer());
-    src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(ctx.destination);           // dinleyerek takip et
-    src.onended = () => { if (running) stop(); };
-  }
-  node = new AudioWorkletNode(ctx, "pcm16");
-  node.port.onmessage = ({ data }) => {
-    $("lvl").style.width = Math.min(100, data.rms * 600) + "%";
-    if (ws && ws.readyState === 1 && gotReady) { sent += data.pcm.byteLength / 2; ws.send(data.pcm); }
-    else if (running) { pending.push(data.pcm); if (pending.length > PENDING_MAX) pending.shift(); }
-  };
-  src.connect(node);
-  if (src.start) src.start();
-}
-
-function closeAudio() {
-  try { src?.disconnect(); src?.stop?.(); } catch {}
-  mic?.getTracks().forEach((t) => t.stop());
-  node?.port.close();
-  ctx?.close().catch(() => {});
-  ctx = node = src = mic = null;
-  $("lvl").style.width = "0";
-}
-
-/* ---------- Sunucu bağlantısı ---------- */
-function connect() {
-  gotReady = false; fatal = false;
-  const p = new URLSearchParams({
+/* ---------- Ses yakalama + sunucu bağlantısı: canli_istemci.js (WebSocket ya da WebRTC) ---------- */
+const client = new LiveClient({
+  params: () => ({
     language: $("langSel").value,
     silence_ms: $("silence_ms").value, partial_sec: $("partial_sec").value,
     max_sec: $("max_sec").value, save: $("save").checked ? "1" : "0",
     analyze: $("save").checked && $("analyze").checked ? "1" : "0",
-    speakers: $("spk").checked ? "1" : "0" });
-  const key = $("apiKey").value.trim();
-  if (key) p.set("key", key);
-  if (sessionId) { p.set("resume", sessionId); p.set("token", resumeToken); p.set("after", lastId); }
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/ws/live?${p}`);
-  ws.binaryType = "arraybuffer";
-
-  ws.onmessage = async (e) => {
-    const m = JSON.parse(e.data);
+    speakers: $("spk").checked ? "1" : "0", key: $("apiKey").value.trim() }),
+  transport: () => $("transport").value,
+  noiseSuppression: () => $("ns").checked,
+  onStatus: setStatus,
+  onLevel: (rms) => { $("lvl").style.width = Math.min(100, rms * 600) + "%"; },
+  onStopped: () => { resetButtons(); wakeLock?.release().catch(() => {}); wakeLock = null; },
+  onMessage: (m) => {
     if (m.type === "ready") {
-      if (!m.resumed) {
-        // yeni oturum: sunucunun zamanı sıfırdan başlar; önceki oturumların sesi kadar kaydır
-        offset = sent / 16000; lastId = -1;
-        if (sessionId) setStatus("Önceki oturum kapanmıştı, yeni oturum başladı");
-      }
-      sessionId = m.session_id; resumeToken = m.resume_token; gotReady = true;
-      while (pending.length) { const b = pending.shift(); sent += b.byteLength / 2; ws.send(b); }
-      setStatus(m.resumed ? "Dinleniyor (bağlantı geri geldi)" : "Dinleniyor", "live");
       if (m.model) showModel(m.model, m.device, m.language);
       else { $("dev").hidden = false; $("dev").textContent = "dil bekleniyor…"; }
-      if (!ctx) {
-        try { await openAudio(source); }
-        catch (err) { setStatus("Ses açılamadı: " + err.message); running = false; ws.close(); resetButtons(); }
-      }
     } else if (m.type === "language") {
       showModel(m.model, m.device, m.code, m.confidence);
     } else if (m.type === "partial") {
@@ -236,31 +154,13 @@ function connect() {
     } else if (m.type === "stats") {
       $("lag").hidden = false; $("lag").textContent = `gecikme ${m.lag_sec.toFixed(1)} sn`;
     } else if (m.type === "error") {
-      if (!gotReady) fatal = true;  // bağlantı reddedildi (anahtar, ayar): yeniden denemek boşuna
-      setStatus("Hata: " + m.message);
-    } else if (m.type === "done") {
-      sessionId = null;
-      setStatus(m.webhook ? "Tamamlandı · bildirim gönderildi" : "Tamamlandı", "ok");
-      if (m.job_id) {
-        $("jobLink").href = "/?job=" + encodeURIComponent(m.job_id);
-        $("jobLink").hidden = false;
-      }
+      if (/anahtar/i.test(m.message)) $("keyRow").hidden = false;
+    } else if (m.type === "done" && m.job_id) {
+      $("jobLink").href = "/?job=" + encodeURIComponent(m.job_id);
+      $("jobLink").hidden = false;
     }
-  };
-
-  ws.onclose = () => {
-    ws = null; gotReady = false;
-    if (running && fatal) {
-      running = false; closeAudio(); resetButtons(); pending.length = 0;
-      wakeLock?.release().catch(() => {}); wakeLock = null;
-      $("keyRow").hidden = false;
-    } else if (running) {
-      // Beklenmedik kopma: ses açık kalır ve biriktirilir, 1,5 sn sonra aynı oturuma dön
-      setStatus("Bağlantı koptu, yeniden bağlanılıyor… (ses biriktiriliyor)");
-      retryTimer = setTimeout(connect, 1500);
-    }
-  };
-}
+  },
+});
 
 /* ---------- Ekran ---------- */
 function fmt(sec) {
@@ -268,10 +168,8 @@ function fmt(sec) {
   return (h ? h + ":" : "") + String(m).padStart(h ? 2 : 1, "0") + ":" + String(s % 60).padStart(2, "0");
 }
 function addLine(m) {
-  if (m.id <= lastId) return;  // geri bağlanınca yeniden gönderilen satır zaten ekranda
-  lastId = m.id;
   $("empty")?.remove();
-  const start = m.start + offset;
+  const start = m.start + client.offset;
   transcript.push({ start, text: m.text, speaker: m.speaker || null });
   const p = document.createElement("p");
   p.className = "line";
@@ -311,21 +209,15 @@ function resetButtons() {
 
 /* ---------- Başlat / Durdur ---------- */
 async function start(kind) {
-  if (running) return;
-  running = true; source = kind; offset = 0; sent = 0; $("jobLink").hidden = true;
-  sessionId = null; resumeToken = null; lastId = -1; pending.length = 0;
+  if (client.running) return;
+  $("jobLink").hidden = true; $("lag").hidden = true;
   speakersSeen.clear(); document.body.classList.remove("multi");
   $("startBtn").disabled = true; $("fileIn").disabled = true; $("stopBtn").disabled = false; $("micSel").disabled = true; $("langSel").disabled = true;
-  setStatus("Model hazırlanıyor…");
   try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
-  connect();
+  await client.start(kind);
 }
 function stop() {
-  running = false;
-  clearTimeout(retryTimer);
-  closeAudio();
-  if (ws && ws.readyState === 1) { ws.send(JSON.stringify({ type: "stop" })); setStatus("Son cümle işleniyor…"); }
-  else setStatus("Durduruldu");
+  client.stop();
   wakeLock?.release().catch(() => {}); wakeLock = null;
   resetButtons();
 }
@@ -359,6 +251,8 @@ async function listLangs() {
   } catch {}
 }
 try { $("apiKey").value = localStorage.getItem("asr_api_key") || ""; } catch {}
+try { $("transport").value = localStorage.getItem("captionTransport") || "auto"; } catch {}
+$("transport").onchange = () => { try { localStorage.setItem("captionTransport", $("transport").value); } catch {} };
 $("apiKey").onchange = () => { try { localStorage.setItem("asr_api_key", $("apiKey").value.trim()); } catch {} };
 $("langSel").onchange = () => { try { localStorage.setItem("captionLang", $("langSel").value); } catch {} };
 listLangs();
@@ -408,7 +302,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "+" || e.key === "=") setSize(curSize() + 4);
   else if (e.key === "-") setSize(curSize() - 4);
 });
-window.addEventListener("beforeunload", (e) => { if (running) { e.preventDefault(); e.returnValue = ""; } });
+window.addEventListener("beforeunload", (e) => { if (client.running) { e.preventDefault(); e.returnValue = ""; } });
 </script>
 </body>
 </html>

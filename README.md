@@ -127,13 +127,29 @@ curl -H "X-API-Key: $K" http://localhost:8001/jobs/<job_id>        # durum + son
 
 ## Canlı altyazı (mikrofon)
 
-`http://127.0.0.1:8000/canli` (ana sayfada "🎙 Canlı altyazı"): tarayıcı mikrofonu açar, metin
+`http://127.0.0.1:8001/canli` ya da ana sayfadaki "Canlı akış" kutusunda **Giriş: 🎙 Mikrofon**: tarayıcı mikrofonu açar, metin
 konuşurken ekrana akar. Dil seçimi (Vietnamca / Türkçe / otomatik), sunum modu (tam ekran, büyük
 yazı), canlı konuşmacı etiketi, "Dosyayla test", metni indirme. Durdur'a basınca kayıt normal
 analize gider (konuşmacı ayrımlı transkript). [Live-stream](https://github.com/Tugbacevikk/Live-stream)
 reposundan taşındı; aynı süreç ve aynı modeller, ayrıca kurulum yok. Vietnamca'da ses parçalara
 **bitişik** bölünür (hiçbir ses atılmaz): aynı kayıtlarda WER %17,1 -> %10,8
 ([docs/olcumler.md](docs/olcumler.md)). Protokol: [docs/entegrasyon.md](docs/entegrasyon.md#11-canlı-altyazı-mikrofon-wslive).
+
+**Başka cihazdan** (telefon, tablet, diğer bilgisayar; aynı ağda): `.env`'de
+
+```
+HOST=0.0.0.0
+HTTPS=1
+```
+
+Sunucu açılışta adresleri yazar (`adres: https://192.168.1.20:8001`); o cihazda bu adresi açın.
+İlk açılışta "bağlantı gizli değil" uyarısı çıkar (sertifika bu bilgisayarın kendisinin):
+"Gelişmiş > yine de devam et". Tarayıcılar mikrofonu yalnızca `https` sayfada açtığı için bu gerekli.
+Windows ilk açılışta Python için güvenlik duvarı izni sorar: "Özel ağlar"a izin verin.
+
+**Bağlantı yolu** (/canli > Ayarlar > Bağlantı): *Otomatik* — bu bilgisayarda WebSocket, başka
+cihazdan WebRTC (ses Opus ile UDP'den: Wi-Fi'da paket kaybına dayanıklı); WebRTC kurulamazsa
+kendiliğinden WebSocket'e döner. İkisinde de aynı bölücü ve model çalışır, doğruluk aynı.
 
 ## Canlı akış (RTP / yayın)
 

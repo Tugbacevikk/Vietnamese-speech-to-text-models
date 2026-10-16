@@ -30,6 +30,8 @@ server = [
     "psycopg[binary]>=3.1",
     "httpx",
     "websockets",  # canlı akış: WS /streams/{id}/ws (uvicorn)
+    "aiortc>=1.9",  # canlı altyazı WebRTC ile (başka cihaz, Opus/UDP); kurulu değilse WebSocket
+    "cryptography",  # HTTPS=1: kendinden imzalı sertifika (başka cihazdan mikrofon)
 ]
 bench = ["jiwer", "datasets<4.0", "sentencepiece"]
 

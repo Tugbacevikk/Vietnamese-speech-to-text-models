@@ -275,3 +275,39 @@ def build_live_speakers(settings, cfg: PipelineConfig):
         return None
     embedder = SpeakerEmbedder(model, num_threads=1)
     return lambda: SpeakerTracker(embedder.embed, threshold=settings.live_speaker_threshold)
+
+
+def wire_live(app, settings, cfg: PipelineConfig, engines: LazyAsrEngines, resolver: LanguageResolver,
+              store, submit, *, warm: bool, live_engines=None, live_detector=None, live_detect=None,
+              live_speakers=None):
+    """Canlı altyazıyı (/canli, /ws/live, WebRTC) uygulamaya bağlar; yerel ve tam mod ortak.
+
+    submit: SubmitJob — oturum kaydı bitince konuşmacı ayrımı için toplu işe gider ('live:<id>').
+    warm: canlı motorlar açılışta arka planda yüklensin mi (tam modda ilk oturumda yüklenir).
+    live_*: testler için sahte motorlar, algılayıcı, dil tespiti, konuşmacı izleyici."""
+    import uuid
+
+    from viet_asr.domain import AudioJob
+    from viet_asr.interface.live_server import add_live_routes
+
+    live, detector, detect_lang = build_live(settings, cfg, engines, resolver)
+    if live_engines is not None:
+        live, detect_lang = live_engines, live_detect
+
+    def submit_recording(path: str, language: str | None, callback_url: str | None = None,
+                         session_id: str | None = None) -> str:
+        """Oturum kaydı toplu işe: konuşmacı ayrımı; bitince 'job.done' aynı callback adresine.
+        Mutlak yol: tam modda işçiler başka süreçte (aynı bilgisayar) dosyayı bulabilsin."""
+        return submit(AudioJob(uuid.uuid4().hex, str(Path(path).resolve()), language, callback_url,
+                               external_id=f"live:{session_id}" if session_id else None))
+
+    def notify_ended(url: str, payload: dict, job_id: str | None) -> None:
+        store.add_event("live.ended", url, payload, job_id)
+
+    speakers = live_speakers if live_speakers is not None else build_live_speakers(settings, cfg)
+    add_live_routes(app, settings, live, live_detector or detector, submit_recording, detect_lang,
+                    notify_ended, speaker_factory=speakers or None)
+    if warm and live_engines is None:
+        for e in live.values():
+            e.start_loading()
+    return live

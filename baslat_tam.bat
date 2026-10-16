@@ -23,7 +23,7 @@ for /f "tokens=1,2" %%A in ('%PY% -c "from viet_asr.interface.settings import Se
     set PORT=%%B
 )
 
-start "Ses Analizi - API"        cmd /k "%PY% -m uvicorn viet_asr.interface.api:app --host %HOST% --port %PORT%"
+start "Ses Analizi - API"        cmd /k "%PY% -m viet_asr.interface.api --host %HOST% --port %PORT%"
 timeout /t 5 /nobreak > nul
 start "Ses Analizi - Dil"        cmd /k "%PY% -m viet_asr.interface.stream_worker --kuyruk lid"
 start "Ses Analizi - Vietnamca"  cmd /k "%PY% -m viet_asr.interface.stream_worker --kuyruk vi"

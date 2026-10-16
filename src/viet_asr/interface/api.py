@@ -502,9 +502,49 @@ def _production_app() -> FastAPI:
         return not missing, (f"çalışan işçi yok: {missing}" if missing else
                              ", ".join(f"{q}={n}" for q, n in alive.items()))
 
-    return create_app(store, queue, s, {"veritabani": store.ping, "kuyruk": r.ping},
-                      queue_stats=lambda: queue.stats(["lid", *s.languages]), rate_limiter=limiter,
-                      readiness={"isciler": workers})
+    # Canlı altyazı ve canlı akış bu süreçte çözülür (gecikme için kuyruğa girmez); modeller ilk
+    # oturumda yüklenir. Oturum bitince kayıt kuyruğa: konuşmacı ayrımını işçiler yapar.
+    engines = resolver = cfg = None
+    if s.enable_live or s.enable_streams:
+        from viet_asr.interface.composition import build_engines, build_resolver, config_from_settings
+
+        cfg = config_from_settings(s)
+        engines, resolver = build_engines(cfg), build_resolver(cfg)
+    from viet_asr.application.jobs import SubmitJob
+
+    submit = SubmitJob(store, queue, s.languages)
+    streams = None
+    if s.enable_streams:
+        from viet_asr.interface.streams import StreamManager
+
+        streams = StreamManager(engines, cfg.vad, s.data_dir, submit=submit, languages=list(s.languages),
+                                max_sessions=s.stream_max_sessions, allow_files=s.allow_local_paths,
+                                max_speech=s.stream_max_speech)
+    app = create_app(store, queue, s, {"veritabani": store.ping, "kuyruk": r.ping},
+                     queue_stats=lambda: queue.stats(["lid", *s.languages]), rate_limiter=limiter,
+                     readiness={"isciler": workers}, streams=streams)
+    app.state.streams = streams
+    if s.enable_live:
+        from viet_asr.interface.composition import wire_live
+
+        wire_live(app, s, cfg, engines, resolver, store, submit, warm=False)
+    return app
+
+
+def main(argv=None):
+    """Tam mod API'si: python -m viet_asr.interface.api [--host --port] (HTTPS=1 destekli)."""
+    import argparse
+    import logging
+
+    from viet_asr.interface.serve import run
+
+    s = Settings()
+    p = argparse.ArgumentParser(description="Tam mod API sunucusu")
+    p.add_argument("--host", default=s.host)
+    p.add_argument("--port", type=int, default=s.port)
+    a = p.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    run(_production_app(), s, a.host, a.port)
 
 
 def __getattr__(name):  # uvicorn viet_asr.interface.api:app -> ilk erişimde kurulur
@@ -512,3 +552,7 @@ def __getattr__(name):  # uvicorn viet_asr.interface.api:app -> ilk erişimde ku
         globals()["app"] = _production_app()
         return globals()["app"]
     raise AttributeError(name)
+
+
+if __name__ == "__main__":
+    main()

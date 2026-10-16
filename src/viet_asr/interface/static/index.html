@@ -144,17 +144,28 @@ audio { width: 100%; margin-bottom: 12px; }
       <span class="sub" id="liveInfo"></span>
     </div>
     <div class="opts">
-      <label style="flex:2">Kaynak
+      <label>Giriş
+        <select id="liveKind" title="Ses nereden gelecek">
+          <option value="mic">🎙 Mikrofon (bu cihaz)</option>
+          <option value="net">Ağ akışı (RTP / yayın / SDP)</option>
+        </select>
+      </label>
+      <label style="flex:2" id="liveSrcRow">Kaynak
         <input type="text" id="liveSrc" value="rtp://0.0.0.0:5004" aria-label="kaynak" title="rtp://ip:port (G.711/L16), http(s) yayın adresi ya da .sdp dosyası">
       </label>
       <label>Dil
         <select id="liveLang"><option value="vi">Vietnamca</option><option value="tr">Türkçe</option></select>
+      </label>
+      <label id="liveMicRow">Mikrofon
+        <select id="liveMic"><option value="">Varsayılan</option></select>
       </label>
       <button class="btn" id="liveStart">Dinlemeye başla</button>
       <button class="btn danger hidden" id="liveStop">Durdur</button>
     </div>
     <textarea id="liveSdp" rows="3" placeholder="SDP (isteğe bağlı): santralin verdiği v=0 … m=audio 5004 RTP/AVP 96 … a=rtpmap:96 L16/16000 metni. Verilirse port ve ses biçimi buradan alınır (PCMU, PCMA, L16, Opus, G.722)." aria-label="SDP"></textarea>
     <div id="liveLines" class="live"></div>
+    <p class="sub" id="liveHint">Mikrofon: telefondan ya da başka bilgisayardan da açılabilir (aynı ağda
+      <code>https://BU-BILGISAYARIN-IP:8001</code>; sunucu <code>HTTPS=1</code> ile başlatılmalı). Tam ekran altyazı: <a href="/canli">/canli</a>.</p>
   </section>
 
   <section class="card hidden" id="result">
@@ -214,6 +225,7 @@ audio { width: 100%; margin-bottom: 12px; }
     <div class="row"><button class="btn ghost" value="cancel" formnovalidate>Vazgeç</button><button class="btn" value="ok" id="dsOk" disabled>Gönder</button></div>
   </form>
 </dialog>
+<script src="/canli_istemci.js"></script>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -567,7 +579,55 @@ function liveDone(ev) {
     : `Bitti: ${o.sure_sn || 0} sn, ${o.parca || 0} parça, gecikme p95 ${o.gecikme_p95_sn ?? "-"} sn` + (ev.son_is ? " · tam analiz kuyrukta" : "");
   if (ev.son_is) { const id = ev.son_is; setTimeout(() => { loadHistory(); openJob(id); }, 1500); }
 }
+// mikrofon: /ws/live ya da WebRTC (canli_istemci.js); satırlar ağ akışıyla aynı kutuda
+let micClient = null, micPartial = 0;
+function liveKindChanged() {
+  const mic = $("liveKind").value === "mic";
+  $("liveSrcRow").classList.toggle("hidden", mic); $("liveSdp").classList.toggle("hidden", mic);
+  $("liveMicRow").classList.toggle("hidden", !mic);
+  if (mic) listLiveMics();
+  store.set("liveKind", $("liveKind").value);
+}
+async function listLiveMics() {
+  try {
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput" && d.deviceId && d.deviceId !== "default");
+    const cur = $("liveMic").value;
+    $("liveMic").replaceChildren(el("option", { value: "" }, "Varsayılan"), ...devs.map((d, i) => el("option", { value: d.deviceId }, d.label || "Mikrofon " + (i + 1))));
+    $("liveMic").value = cur;
+  } catch {}
+}
+function micStopped() {
+  $("liveStart").classList.remove("hidden"); $("liveStop").classList.add("hidden");
+  $("liveKind").disabled = false; $("liveLang").disabled = false;
+}
+function startMic() {
+  $("liveLines").replaceChildren(); micPartial = 0;
+  $("liveStart").classList.add("hidden"); $("liveStop").classList.remove("hidden");
+  $("liveKind").disabled = true; $("liveLang").disabled = true;
+  micClient = new LiveClient({
+    params: () => ({ language: $("liveLang").value, key: $("apiKey").value.trim() }),
+    onStatus: (t) => { $("liveInfo").textContent = t; },
+    onStopped: micStopped,
+    onMessage: (m) => {
+      const off = micClient.offset;
+      if (m.type === "partial") liveLine({ index: "ara", start: m.start + off, text: m.text, final: false });
+      else if (m.type === "discard") $("liveLines").querySelector('p[data-i="ara"]')?.remove();
+      else if (m.type === "final") {
+        $("liveLines").querySelector('p[data-i="ara"]')?.remove();
+        liveLine({ index: "k" + m.id, start: m.start + off,
+                   text: (m.speaker ? `Konuşmacı ${Number(m.speaker.split("_").pop()) + 1}: ` : "") + m.text, final: true });
+      } else if (m.type === "stats") $("liveInfo").textContent = `canlı · gecikme ${m.lag_sec.toFixed(1)} sn` + (micClient.mode === "webrtc" ? " · WebRTC" : "");
+      else if (m.type === "done" && m.job_id) {
+        $("liveInfo").textContent = "Bitti · konuşmacı ayrımlı analiz kuyrukta";
+        const id = m.job_id; setTimeout(() => { loadHistory(); openJob(id); }, 1500);
+      }
+    },
+  });
+  micClient.start({ type: "mic", deviceId: $("liveMic").value }).then(() => setTimeout(listLiveMics, 1000));
+}
+$("liveKind").addEventListener("change", liveKindChanged);
 $("liveStart").addEventListener("click", async () => {
+  if ($("liveKind").value === "mic") { startMic(); return; }
   try {
     const r = await api("/streams", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kaynak: $("liveSrc").value.trim(), dil: $("liveLang").value,
@@ -583,6 +643,7 @@ $("liveStart").addEventListener("click", async () => {
   } catch (e) { $("liveInfo").textContent = "Başlatılamadı: " + e.message; }
 });
 $("liveStop").addEventListener("click", async () => {
+  if (micClient?.running) { micClient.stop(); micStopped(); return; }
   if (!liveId) return;
   try { await api(`/streams/${liveId}`, { method: "DELETE" }); } catch (e) { $("liveInfo").textContent = e.message; }
 });
@@ -592,7 +653,18 @@ async function health() {
     const r = await fetch("/health"); const h = await r.json();
     $("health").className = "dot " + (r.ok ? "ok" : "bad");
     $("toDataset").classList.toggle("hidden", !(h.features && h.features.dataset_export));
-    $("live").classList.toggle("hidden", !(h.features && h.features.streams));
+    // canlı kutu: mikrofon her zaman (canlı altyazı açıksa), ağ akışı yalnızca ENABLE_STREAMS'le
+    const net = !!(h.features && h.features.streams);
+    let mic = false; try { mic = (await fetch("/live/health")).ok; } catch {}
+    $("live").classList.toggle("hidden", !(net || mic));
+    $("liveKind").querySelector('option[value="net"]').disabled = !net;
+    $("liveKind").querySelector('option[value="mic"]').disabled = !mic;
+    if (!$("liveKind").dataset.init) {
+      $("liveKind").dataset.init = "1";
+      const saved = store.get("liveKind");
+      $("liveKind").value = (saved === "net" && net) || !mic ? "net" : "mic";
+      liveKindChanged();
+    }
     $("health").title = r.ok ? `çalışıyor · diller: ${h.languages.join(", ")}` : "sorun: " + JSON.stringify(h.checks);
   } catch { $("health").className = "dot bad"; $("health").title = "sunucuya ulaşılamıyor"; }
 }

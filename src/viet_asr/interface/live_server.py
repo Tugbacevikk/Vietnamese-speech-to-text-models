@@ -4,6 +4,9 @@ Tugbacevikk/Live-stream'den taşındı (16 Ekim); fark: Vietnamca'da bitişik b�
     GET /canli        -> altyazı ekranı (sunum modu: F, yazı boyu: + / -)
     GET /live/health  -> diller ve modellerin durumu
     WS  /ws/live      -> canlı ses akışı  (/ws: ilk sürümün istemcileri için aynı uç)
+    POST /webrtc/teklif -> aynı oturum WebRTC ile: ses Opus/UDP (başka cihazdan, kayıplı ağda
+                         daha dayanıklı), mesajlar veri kanalından (aynı JSON'lar). aiortc ister.
+    GET /canli_istemci.js -> tarayıcı istemcisi (ses yakalama + WebSocket/WebRTC)
 
 WebSocket protokolü
   İstemci -> Sunucu : ikili mesaj = Int16 little-endian PCM, 16 kHz, mono
@@ -31,6 +34,11 @@ WebSocket protokolü
                        "webhook": true}  job_id: konuşmacı ayrımlı transkript için açılan toplu
                       iş (GET /jobs/{job_id}); webhook: oturum sonu bildirimi kuyruğa yazıldı
 
+WebRTC: tarayıcı SDP teklifi gönderir {"sdp", "type": "offer", "ayarlar": {yukarıdaki sorgu
+parametreleri}}, yanıt {"sdp", "type": "answer", "session_id"}. Ses parçası (Opus) 16 kHz'e çevrilip
+WebSocket'le aynı bölücüye girer; "altyazi" veri kanalında yukarıdaki mesajlar akar, {"type":
+"stop"} de oradan gider. ICE sunucusu kullanılmaz (kapalı ağ: aynı ağdaki adresler yeter).
+
 Kopma: bağlantı beklenmedik koparsa oturum hemen kapanmaz, LIVE_RESUME_SEC (30 sn) bekler.
 İstemci resume+token ile dönerse aynı oturum (aynı kayıt, satır numaraları, dil) sürer;
 dönmezse oturum "disconnect" nedeniyle kapanır (kayıt, toplu iş, bildirim).
@@ -52,7 +60,7 @@ from datetime import datetime, timezone
 from collections.abc import Callable
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
 from viet_asr.application.live import (
@@ -63,6 +71,8 @@ from viet_asr.interface.security import callback_problem, key_ok
 
 log = logging.getLogger(__name__)
 _PAGE = Path(__file__).parent / "static" / "canli.html"
+_CLIENT_JS = Path(__file__).parent / "static" / "canli_istemci.js"
+_MAX_PEERS = 16  # aynı anda açık WebRTC bağlantısı
 LANG_NAMES = {"tr": "Türkçe", "vi": "Vietnamca"}
 _background: set[asyncio.Task] = set()  # iptalden korunan oturum sonu görevleri
 
@@ -125,7 +135,8 @@ class _Run:
         self.callback, self.analyze, self.lang = callback, analyze, lang
         self.started_at = _now()
         self.finals: asyncio.Queue[FinalJob | None] = asyncio.Queue()
-        self.ws: WebSocket | None = None
+        self.ws = None               # mesaj kanalı: WebSocket ya da WebRTC veri kanalı (send_json/close)
+        self.feeder: object | None = None  # sesi şu an kim besliyor (geri bağlanınca eski bağlantı susar)
         self.send_lock = asyncio.Lock()
         self.partial_busy = False
         self.announced = False
@@ -145,6 +156,30 @@ class _Run:
                 await ws.send_json(msg)
             except Exception:
                 pass
+
+
+class _Reject(Exception):
+    """Oturum açılamadı: istemciye gösterilecek ileti."""
+
+
+def webrtc_available() -> bool:
+    from importlib.util import find_spec
+
+    return find_spec("aiortc") is not None and find_spec("av") is not None
+
+
+class _ChannelSink:
+    """WebRTC veri kanalını WebSocket gibi kullandırır (send_json / close)."""
+
+    def __init__(self, channel):
+        self.channel = channel
+
+    async def send_json(self, msg: dict) -> None:
+        if self.channel.readyState == "open":
+            self.channel.send(json.dumps(msg, ensure_ascii=False))
+
+    async def close(self) -> None:
+        self.channel.close()
 
 
 def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], detector_factory: Callable,
@@ -170,6 +205,10 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
     def live_page():
         return FileResponse(_PAGE, media_type="text/html; charset=utf-8")
 
+    @app.get("/canli_istemci.js", include_in_schema=False)
+    def live_client():
+        return FileResponse(_CLIENT_JS, media_type="text/javascript; charset=utf-8")
+
     @app.get("/live/health")
     def live_health():
         return {
@@ -181,6 +220,7 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
             "webhook": bool(settings.live_webhook_url and notify_ended),
             "auth": bool(settings.api_key),
             "speakers": speaker_factory is not None,
+            "webrtc": webrtc_available(),
             "ready": all(e.asr is not None for e in engines.values()),
         }
 
@@ -281,7 +321,7 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
         return None
 
     # ------------------------------------------------------------------ bağlantı
-    async def new_run(ws: WebSocket, q) -> _Run | None:
+    async def new_run(q) -> _Run:
         try:
             seg_cfg = SegmenterConfig(
                 end_silence_ms=int(q.get("silence_ms", settings.end_silence_ms)),
@@ -292,31 +332,26 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
             want_speakers = q.get("speakers", "1") == "1"
             analyze = save and q.get("analyze", "1" if settings.live_auto_analyze else "0") == "1"
         except ValueError:
-            await reject(ws, "Geçersiz ayar değeri.")
-            return None
+            raise _Reject("Geçersiz ayar değeri.") from None
         asked = (q.get("callback_url") or "").strip() or None
         if asked and asked != settings.live_webhook_url and not settings.api_key:
             # anahtarsız biri sunucuya istediği adrese istek attıramasın
-            await reject(ws, "Oturum başına callback_url için sunucuda API_KEY tanımlı olmalı "
-                             "(ya da adresi LIVE_WEBHOOK_URL ile verin).")
-            return None
+            raise _Reject("Oturum başına callback_url için sunucuda API_KEY tanımlı olmalı "
+                          "(ya da adresi LIVE_WEBHOOK_URL ile verin).")
         callback = asked or settings.live_webhook_url or None
         problem = callback_problem(callback, settings)
         if problem:
-            await reject(ws, problem)
-            return None
+            raise _Reject(problem)
         lang = q.get("language", default).strip().lower()
         if lang == "auto" and (len(languages) == 1 or detect_language is None):
             lang = languages[0]  # tek dil açık: tespit gereksiz
         if lang != "auto" and lang not in engines:
-            await reject(ws, f"'{lang}' dili açık değil; seçenekler: {', '.join(languages)}")
-            return None
+            raise _Reject(f"'{lang}' dili açık değil; seçenekler: {', '.join(languages)}")
         try:  # dil belliyse onun modeli, 'auto' ise hepsi hazır olsun
             for code in ([lang] if lang != "auto" else languages):
                 await engines[code].wait_ready()
         except Exception as e:
-            await reject(ws, f"Model yüklenemedi: {e}")
-            return None
+            raise _Reject(f"Model yüklenemedi: {e}") from e
 
         lock = LanguageLock(None if lang == "auto" else lang, detect_language, fallback=languages[0])
 
@@ -351,27 +386,18 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
                 "device": e.device if e else None, "model": e.model_name if e else None,
                 "recording": r.recorder.name if r.recorder else None}
 
-    async def ws_endpoint(ws: WebSocket):
-        await ws.accept()
-        q = ws.query_params
-        if not key_ok(settings, q.get("key") or ws.headers.get("x-api-key")):
-            await reject(ws, "Geçersiz ya da eksik API anahtarı (sayfadaki Ayarlar > API anahtarı).")
-            return
-
-        r, resumed = None, False
+    async def attach(q) -> tuple[_Run, bool]:
+        """Kopan oturuma dönüş (resume + token) ya da yeni oturum. Açılamazsa _Reject."""
         old = runs.get(q.get("resume") or "")
         if old is not None and not old.closed and old.ws is None and q.get("token") == old.token:
             if old.expiry is not None:
                 old.expiry.cancel()
                 old.expiry = None
-            r, resumed = old, True
-            log.info("canlı oturum %s: bağlantı geri geldi", r.id)
-        if r is None:
-            r = await new_run(ws, q)
-            if r is None:
-                return
-        r.ws = ws
-        r.t_conn = None
+            log.info("canlı oturum %s: bağlantı geri geldi", old.id)
+            return old, True
+        return await new_run(q), False
+
+    async def greet(r: _Run, resumed: bool, q) -> None:
         await r.send(ready_msg(r, resumed))
         if resumed:  # kopukken kesinleşen satırlar
             try:
@@ -382,6 +408,49 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
                 if item["id"] > after:
                     await r.send({"type": "final", **item})
 
+    def feed(r: _Run, data: bytes) -> None:
+        """16 kHz Int16 ses -> bölücü; çıkan işler kuyruğa (iletim yolundan bağımsız)."""
+        if r.t_conn is None:
+            r.t_conn, r.stream_at_conn = time.monotonic(), r.session.segmenter.stream_time
+        for job in r.session.feed_pcm16(data):
+            if isinstance(job, FinalJob):
+                r.finals.put_nowait(job)
+            elif not r.partial_busy:  # yetişemiyorsak ara metni atla, gecikme birikmesin
+                r.partial_busy = True
+                asyncio.create_task(partial_task(r, job))
+
+    async def on_text(r: _Run, text: str) -> bool:
+        """İstemcinin metin mesajı; oturum bittiyse True."""
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(data, dict) or data.get("type") != "stop":
+            return False
+        chan = r.ws
+        job_id, notified = await finish(r, "stop")
+        await r.send({"type": "done", "session_id": r.id, "job_id": job_id, "webhook": notified})
+        if chan is not None:
+            try:
+                await chan.close()
+            except Exception:
+                pass
+        return True
+
+    async def ws_endpoint(ws: WebSocket):
+        await ws.accept()
+        q = ws.query_params
+        if not key_ok(settings, q.get("key") or ws.headers.get("x-api-key")):
+            await reject(ws, "Geçersiz ya da eksik API anahtarı (sayfadaki Ayarlar > API anahtarı).")
+            return
+        try:
+            r, resumed = await attach(q)
+        except _Reject as e:
+            await reject(ws, str(e))
+            return
+        r.ws, r.feeder, r.t_conn = ws, ws, None
+        await greet(r, resumed, q)
+
         finished = False
         try:
             while True:
@@ -389,25 +458,10 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
                 if msg["type"] == "websocket.disconnect":
                     break
                 if msg.get("bytes"):
-                    if r.t_conn is None:
-                        r.t_conn, r.stream_at_conn = time.monotonic(), r.session.segmenter.stream_time
-                    for job in r.session.feed_pcm16(msg["bytes"]):
-                        if isinstance(job, FinalJob):
-                            r.finals.put_nowait(job)
-                        elif not r.partial_busy:  # yetişemiyorsak ara metni atla, gecikme birikmesin
-                            r.partial_busy = True
-                            asyncio.create_task(partial_task(r, job))
+                    feed(r, msg["bytes"])
                 elif msg.get("text"):
-                    try:
-                        data = json.loads(msg["text"])
-                    except json.JSONDecodeError:
-                        continue
-                    if data.get("type") == "stop":
+                    if await on_text(r, msg["text"]):
                         finished = True
-                        job_id, notified = await finish(r, "stop")
-                        await r.send({"type": "done", "session_id": r.id, "job_id": job_id,
-                                      "webhook": notified})
-                        await ws.close()
                         break
         except WebSocketDisconnect:
             pass
@@ -419,6 +473,121 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
                         await asyncio.shield(task)
                     except asyncio.CancelledError:
                         pass
+
+    # ------------------------------------------------------------------ WebRTC
+    peers: set = set()
+    app.state.live_peers = peers
+
+    async def close_peers():
+        await asyncio.gather(*(pc.close() for pc in list(peers)), return_exceptions=True)
+        peers.clear()
+
+    app.router.on_shutdown.append(close_peers)
+
+    @app.post("/webrtc/teklif")
+    async def webrtc_offer(body: dict, request: Request):
+        """Tarayıcının SDP teklifi -> yanıt. Ses Opus/UDP ile gelir, metin veri kanalıyla gider."""
+        if not webrtc_available():
+            raise HTTPException(503, "WebRTC için aiortc kurulu değil: pip install -e \".[server]\" "
+                                     "(WebSocket bağlantısı çalışmaya devam eder).")
+        from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
+        from aiortc.mediastreams import MediaStreamError
+        import av
+
+        sdp, kind = body.get("sdp"), body.get("type")
+        if not isinstance(sdp, str) or kind != "offer" or len(sdp) > 20000:
+            raise HTTPException(400, "Geçersiz teklif: {'sdp': '...', 'type': 'offer'} bekleniyor.")
+        q = {k: str(v) for k, v in (body.get("ayarlar") or {}).items() if v is not None}
+        if not key_ok(settings, q.get("key") or request.headers.get("x-api-key")):
+            raise HTTPException(401, "Geçersiz ya da eksik API anahtarı.")
+        if len(peers) >= _MAX_PEERS:
+            raise HTTPException(503, f"Aynı anda en fazla {_MAX_PEERS} WebRTC bağlantısı.")
+        try:
+            r, resumed = await attach(q)
+        except _Reject as e:
+            raise HTTPException(400, str(e)) from None
+
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))  # kapalı ağ: STUN yok
+        peers.add(pc)
+        me = object()  # bu bağlantının kimliği: ses yalnızca güncel bağlantıdan beslenir
+        r.feeder = me
+        state = {"sink": None, "done": False}
+        # kanal açılmazsa oturum asılı kalmasın (geri dönüşle aynı bekleme)
+        r.expiry = background(expire(r, max(settings.live_resume_sec, 20.0)))
+
+        async def lost():
+            """Bağlantı koptu: oturum geri dönüşü bekler (WebSocket'teki gibi)."""
+            if state["done"]:
+                return
+            state["done"] = True
+            if r.ws is state["sink"] and r.ws is not None:
+                park(r)
+            peers.discard(pc)
+            await pc.close()
+
+        @pc.on("datachannel")
+        def on_channel(channel):
+            sink = _ChannelSink(channel)
+
+            async def opened():
+                if r.closed or r.feeder is not me:
+                    return
+                if r.expiry is not None:
+                    r.expiry.cancel()
+                    r.expiry = None
+                state["sink"] = r.ws = sink
+                r.t_conn = None
+                await greet(r, resumed, q)
+
+            @channel.on("message")
+            async def on_message(message):
+                if isinstance(message, str) and r.ws is sink and await on_text(r, message):
+                    state["done"] = True
+                    peers.discard(pc)
+                    await asyncio.sleep(0.5)  # 'done' iletisi gitsin
+                    await pc.close()
+
+            @channel.on("close")
+            async def on_close():
+                await lost()
+
+            if channel.readyState == "open":
+                asyncio.ensure_future(opened())
+            else:
+                channel.on("open", lambda: asyncio.ensure_future(opened()))
+
+        @pc.on("track")
+        def on_track(track):
+            if track.kind != "audio":
+                return
+
+            async def pump():
+                resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
+                while True:
+                    try:
+                        frame = await track.recv()
+                    except MediaStreamError:
+                        break
+                    if r.closed or r.feeder is not me:
+                        break
+                    for f in resampler.resample(frame):
+                        feed(r, f.to_ndarray().tobytes())
+
+            background(pump())
+
+        @pc.on("connectionstatechange")
+        async def on_state():
+            if pc.connectionState in ("failed", "closed"):
+                await lost()
+
+        try:
+            await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="offer"))
+            await pc.setLocalDescription(await pc.createAnswer())
+        except Exception as e:
+            peers.discard(pc)
+            await pc.close()
+            raise HTTPException(400, f"WebRTC teklifi işlenemedi: {e}") from e
+        return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, "session_id": r.id}
 
     app.add_api_websocket_route("/ws/live", ws_endpoint)
     app.add_api_websocket_route("/ws", ws_endpoint)

@@ -26,6 +26,15 @@ class Settings:
     # development: API anahtarı ve http/özel ağ callback'i serbest; production: zorunlu/kısıtlı
     app_env: str = field(default_factory=lambda: os.environ.get("APP_ENV", "development").lower())
     host: str = field(default_factory=lambda: os.environ.get("HOST", "127.0.0.1"))
+    # Başka cihazdan (telefon, diğer bilgisayar) mikrofon: tarayıcılar mikrofonu yalnızca https'de
+    # açar. HTTPS=1: sertifika yoksa kendinden imzalı üretilir (DATA_DIR/tls). HOST=0.0.0.0 da gerekir.
+    https: bool = field(default_factory=lambda: os.environ.get("HTTPS", "0").lower() in ("1", "true", "evet"))
+    tls_cert: str = field(default_factory=lambda: os.environ.get("TLS_CERT", ""))
+    tls_key: str = field(default_factory=lambda: os.environ.get("TLS_KEY", ""))
+    tls_dir: str = field(default_factory=lambda: os.environ.get("TLS_DIR", "data/tls"))
+    # Canlı altyazı (/canli, /ws/live, WebRTC). Tam modda modeller API sürecinde ilk oturumda yüklenir.
+    enable_live: bool = field(default_factory=lambda: os.environ.get(
+        "ENABLE_LIVE", "1").lower() in ("1", "true", "evet"))
     port: int = field(default_factory=lambda: int(os.environ.get("PORT", "8001")))
     api_key: str = field(default_factory=lambda: os.environ.get("API_KEY", "").strip())
     webhook_secret: str = field(default_factory=lambda: os.environ.get("WEBHOOK_SECRET", "").strip())

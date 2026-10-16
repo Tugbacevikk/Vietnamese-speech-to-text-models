@@ -322,3 +322,20 @@ hızda çözüldü:
   aktı, gecikme göstergesi 1,0-1,7 sn, Durdur'dan sonra kayıt toplu işe gitti ve tamamlandı,
   konsolda hata yok.
 
+### Mikrofon: WebSocket mi, WebRTC mi (16 Ekim)
+
+Aynı Zipformer, "Dosyayla test" (kayıt gerçek zaman hızında, tarayıcıdan), iki iletim yolu:
+
+| Kayıt | WebSocket (16 kHz ham ses) | WebRTC (Opus/UDP) |
+|---|---|---|
+| vietmed_0249 (93 sn) | WER %5,5 | %5,7 |
+| vietmed_0362 (92 sn) | %12,2 | %10,0 |
+| Kesin satır gecikmesi (0249, 9 satır, 2 çekirdekli deneme makinesi) | 0,7–3,6 sn | 0,8–3,4 sn (ort. ~0,2 sn fazla) |
+
+- Opus sıkıştırması doğruluğu düşürmedi (fark, aynı sesin parçalara farklı yerden bölünmesinden).
+- Başka cihaz denemesi: sunucu `HOST=0.0.0.0 HTTPS=1`, sayfa ağ adresinden (`https://192.0.2.2`)
+  açıldı; "Otomatik" WebRTC'yi seçti, ana sayfadaki Mikrofon girişi ve /canli ikisi de çalıştı,
+  oturum sonunda kayıt toplu işe gitti, konsolda hata yok.
+- İki sunucu ve iki tarayıcı aynı anda çalışırken (2 çekirdek) gecikme 5 sn'ye çıktı: gecikme
+  işlemci yüküne bağlı, iletim yoluna değil.
+

@@ -341,3 +341,31 @@ toplu iş açma), `callback_url`.
   `job_id` dolu ise toplu iş bitince aynı adrese `job.done` da gelir (konuşmacılı satırlar).
 - Kayıtlar `RECORDINGS_DIR`'de (wav + txt + jsonl), `RECORDINGS_RETENTION_DAYS` gün sonra silinir.
 
+### WebRTC ile (başka cihaz, kayıplı ağ)
+
+Aynı oturum, ses WebSocket yerine WebRTC ile: tarayıcı sesi Opus ile UDP'den yollar, mesajlar
+"altyazi" veri kanalından gelir (yukarıdaki JSON'ların aynısı, `stop` da oradan gider).
+
+```
+POST /webrtc/teklif   (X-API-Key gerekiyorsa başlıkta)
+  {"sdp": "<tarayıcının teklifi>", "type": "offer",
+   "ayarlar": {"language": "vi", "silence_ms": 700, ...}}      # /ws/live sorgu parametreleri
+-> {"sdp": "<sunucunun yanıtı>", "type": "answer", "session_id": "..."}
+```
+
+- İstemci önce `createDataChannel("altyazi")` ve mikrofon izini ekler, ICE adaylarını toplar
+  (aynı ağda ~0,1 sn), sonra teklifi gönderir. STUN/TURN yok: kapalı ağ, aynı ağdaki adresler yeter.
+- Sunucu Opus'u 16 kHz'e çevirip WebSocket'le aynı bölücüye verir; kayıt, toplu iş, `live.ended`
+  aynı. Kopunca `ayarlar`'a `resume`, `token`, `after` eklenip yeni teklifle aynı oturuma dönülür.
+- `GET /live/health` -> `"webrtc": true` (sunucuda `aiortc` kurulu). Hazır istemci:
+  `GET /canli_istemci.js` (`LiveClient`; ana sayfa ve /canli bunu kullanır).
+- Hata: 400 (ayar, geçersiz teklif), 401 (anahtar), 503 (aiortc yok ya da 16 bağlantı dolu).
+
+### Başka cihazdan erişim (HTTPS)
+
+Tarayıcı mikrofonu yalnızca güvenli sayfada verir (`https://` ya da bu bilgisayarda `localhost`).
+`.env`: `HOST=0.0.0.0`, `HTTPS=1` -> açılışta `data/tls`'de bu bilgisayarın adları ve ağ adresleri
+için kendinden imzalı sertifika üretilir, adresler günlüğe yazılır. Kurumun sertifikası varsa
+`TLS_CERT` / `TLS_KEY`. Tam modda da aynı: `baslat_tam.bat` API'yi `python -m
+viet_asr.interface.api` ile başlatır (HTTPS ve canlı altyazı dahil; konuşmacı ayrımı işçilerde).
+
