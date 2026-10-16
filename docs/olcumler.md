@@ -254,3 +254,10 @@ imza hesabı. Yeni değerler kaldı.
 
 Hiçbir sette iyileşme yok, üçünde kötüleşme. Varsayılan 0,35 kaldı; `DIARIZER_MERGE_DISTANCE`
 ayarı korundu (sesleri çok benzer kişiler için, ama önce `num_speakers` denenmeli).
+
+## Birleştirme mesafesi 0,15 + yeni özdeğer kuralı (16 Ekim) — alınmadı
+
+Kayıtlı imzalarla: tek kişilik 73 -> 64/85, kesit 34 -> 29/56, sentetik 26 -> 5/28; gerçek
+diyalog 7 -> 8/9, DER %17,1 -> %13,5. Gerçek diyaloglarda kazanç var ama diğer üç sette büyük
+kayıp. Yeni özdeğer kuralı 0,35 ile öncekiyle birebir aynı sonucu veriyor (zararsız, kaldı).
+Varsayılan 0,35; benzer sesli kayıtlar için `DIARIZER_MERGE_DISTANCE` ya da `num_speakers`.
