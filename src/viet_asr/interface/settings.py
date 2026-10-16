@@ -69,6 +69,13 @@ class Settings:
     detect_roles: bool = field(default_factory=lambda: os.environ.get("DETECT_ROLES", "0") == "1")
     # aynı kelimenin art arda tekrarı ve dolgu sesleri temizliği (varsayılan kapalı)
     clean_repeats: bool = field(default_factory=lambda: os.environ.get("CLEAN_REPEATS", "0") == "1")
+    # LLM destekli konuşmacı ayrıştırma ve rol düzeltme (Ollama / OpenAI)
+    enable_llm_refiner: bool = field(default_factory=lambda: os.environ.get("ENABLE_LLM_REFINER", "1").lower() in ("1", "true", "yes"))
+    llm_provider: str = field(default_factory=lambda: os.environ.get("LLM_PROVIDER", "ollama"))
+    llm_url: str = field(default_factory=lambda: os.environ.get("LLM_URL", "http://127.0.0.1:11434/api/generate"))
+    llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL", "llama3.2:latest"))
+    llm_timeout: int = field(default_factory=lambda: int(os.environ.get("LLM_TIMEOUT", "45")))
+    llm_num_predict: int = field(default_factory=lambda: int(os.environ.get("LLM_NUM_PREDICT", "150")))
     # sunucudaki bir dosya yolunu doğrudan kabul et (toplu iş için; yalnızca güvenilir ağda aç)
     allow_local_paths: bool = field(default_factory=lambda: os.environ.get(
         "ALLOW_LOCAL_PATHS", "0") == "1")

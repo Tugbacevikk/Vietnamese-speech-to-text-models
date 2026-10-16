@@ -14,7 +14,7 @@ from .coverage import add_rescued, coverage
 
 from .fusion import FusionEngine
 from .language import LanguageResolver
-from .ports import AsrEngines, AudioLoader, Diarizer, Notifier, ResultRepository, Vad
+from .ports import AsrEngines, AudioLoader, Diarizer, Notifier, ResultRepository, SpeakerRefiner, Vad
 
 log = logging.getLogger(__name__)
 
@@ -24,13 +24,15 @@ class TranscribeAndDiarize:
                  engines: AsrEngines, diarizer: Diarizer, fusion: FusionEngine,
                  repo: ResultRepository, notifier: Notifier | None = None,
                  chunker: Vad | None = None, profiles: ProfileConfig | None = None,
-                 safety: SafetyNetConfig | None = None):
+                 safety: SafetyNetConfig | None = None,
+                 refiner: SpeakerRefiner | None = None):
         """chunker: 'full' bölmeli motorlar için sesin tamamını parçalayan bölücü."""
         self.loader, self.vad, self.language, self.engines = loader, vad, language, engines
         self.chunker = chunker
         self.profiles = profiles or ProfileConfig()
         self.safety = safety or SafetyNetConfig()
         self.diarizer, self.fusion, self.repo, self.notifier = diarizer, fusion, repo, notifier
+        self.refiner = refiner
 
     def run(self, job: AudioJob, decision: LanguageDecision | None = None) -> Transcript:
         """decision verilirse (ör. dil tespiti ayrı kuyrukta yapıldıysa) tekrar tespit edilmez."""
@@ -105,6 +107,9 @@ class TranscribeAndDiarize:
         lap("konusmaci")
         utterances = self.fusion.fuse(words, speakers)
         lap("birlestirme")
+        if self.refiner is not None and getattr(self.refiner, "enabled", True):
+            utterances = self.refiner.refine(utterances, language=lang.code)
+            lap("llm_refiner")
         if any(u.conf is not None for u in utterances):
             quality["dusuk_guvenli_kelime"] = sum(len(u.low_conf) for u in utterances)
 

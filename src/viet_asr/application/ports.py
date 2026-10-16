@@ -45,6 +45,12 @@ class Diarizer(Protocol):
         ...
 
 
+class SpeakerRefiner(Protocol):
+    def refine(self, utterances: list[Utterance], language: str = "vi") -> list[Utterance]:
+        """Diyalog akışını ve rollerini analiz ederek konuşmacı atamalarını düzeltir."""
+        ...
+
+
 class TextNormalizer(Protocol):
     def normalize(self, text: str) -> str: ...
 
