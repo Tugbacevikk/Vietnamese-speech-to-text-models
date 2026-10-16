@@ -154,7 +154,7 @@ class DiarizerConfig:
     # Aynı kaydın iki kişisi arası uzaklık 0,38-0,58, telefondaki tek kişinin kendi içi ~0,3:
     # tek bir sabit eşik ikisine birden uymuyor; spektral yöntem buna daha dayanıklı.
     method: str = "spectral"
-    merge_distance: float = 0.35  # spectral: merkezleri bundan yakın kümeler aynı kişi
+    merge_distance: float = 0.28  # spectral: merkezleri bundan yakın kümeler aynı kişi
     embedding_model: str = "models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
     segmentation_model: str = "models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
     # konuşmacı sayısı: 0 = sesten bul (istekte verilirse o kullanılır)

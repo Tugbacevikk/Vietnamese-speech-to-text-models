@@ -37,7 +37,8 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                    whisper_batch_size: int = 8,
                    diarizer_window: float = 1.0,
                    diarizer_hop: float = 0.4,
-                   diarizer_min_window: float = 0.4) -> PipelineConfig:
+                   diarizer_min_window: float = 0.4,
+                   diarizer_merge_distance: float = 0.28) -> PipelineConfig:
     """workers: aynı süreçte aynı anda işlenecek ses sayısı (yerel mod); motorlar buna göre
     paralel çağrıya hazırlanır. whisper_threads/whisper_workers: faster-whisper'a ayrı bütçe
     (bir çözüm kaç iş parçacığı, aynı anda kaç çözüm); verilmezse threads ve workers."""
@@ -68,7 +69,8 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
             embedding_model=str(d / ("3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
                                      if diarizer == "cluster" else "wespeaker_en_voxceleb_resnet34_LM.onnx")),
             num_speakers=speakers, num_threads=threads,
-            window=diarizer_window, hop=diarizer_hop, min_window=diarizer_min_window))
+            window=diarizer_window, hop=diarizer_hop, min_window=diarizer_min_window,
+            merge_distance=diarizer_merge_distance))
 
 
 def build_diarizer(cfg: DiarizerConfig):
@@ -184,7 +186,8 @@ def config_from_settings(s, workers: int = 1) -> PipelineConfig:
                           whisper_batch_size=getattr(s, "whisper_batch_size", 8),
                           diarizer_window=getattr(s, "diarizer_window", 1.0),
                           diarizer_hop=getattr(s, "diarizer_hop", 0.4),
-                          diarizer_min_window=getattr(s, "diarizer_min_window", 0.4))
+                          diarizer_min_window=getattr(s, "diarizer_min_window", 0.4),
+                          diarizer_merge_distance=getattr(s, "diarizer_merge_distance", 0.28))
 
 
 def verify_models_or_exit(settings) -> None:

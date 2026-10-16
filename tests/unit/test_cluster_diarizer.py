@@ -61,3 +61,31 @@ def test_nme_spectral_explicit_k():
 
     labels_k3 = nme_spectral(E, k=3)
     assert len(np.unique(labels_k3)) == 3
+
+
+def test_merge_close_threshold():
+    """merge_distance eşiğine göre yakın kümeler birleştirilir, uzaklar korunur."""
+    from viet_asr.application.config import DiarizerConfig
+    from viet_asr.infrastructure.cluster_diarizer import EmbeddingClusterDiarizer
+
+    c1 = np.zeros(192)
+    c1[0] = 1.0
+    c2 = np.zeros(192)
+    c2[0] = 0.70
+    c2[1] = np.sqrt(1.0 - 0.70**2)
+
+    E = np.vstack([np.tile(c1, (10, 1)), np.tile(c2, (10, 1))])
+    lab = np.array([0] * 10 + [1] * 10)
+
+    # merge_distance = 0.35 iken (kosinüs uzaklığı 0.30 < 0.35) tek kümeye birleşir
+    d35 = EmbeddingClusterDiarizer.__new__(EmbeddingClusterDiarizer)
+    d35.cfg = DiarizerConfig(merge_distance=0.35)
+    res35 = d35._merge_close(E, lab.copy())
+    assert len(np.unique(res35)) == 1
+
+    # merge_distance = 0.28 iken (0.30 >= 0.28) ayrı kalır
+    d28 = EmbeddingClusterDiarizer.__new__(EmbeddingClusterDiarizer)
+    d28.cfg = DiarizerConfig(merge_distance=0.28)
+    res28 = d28._merge_close(E, lab.copy())
+    assert len(np.unique(res28)) == 2
+
