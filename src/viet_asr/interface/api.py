@@ -12,6 +12,7 @@
     GET  /jobs          son işler (?limit=20; arayüzdeki geçmiş)
     GET  /jobs/{id}     durum; bittiyse sonuç (konuşmacılı satırlar)
     POST /streams {"kaynak": "rtp://0.0.0.0:5004", "dil": "vi"}  canlı akış (RTP, URL, SDP)
+                        ya da {"sdp": "v=0 ... m=audio 5004 RTP/AVP 96 ... a=rtpmap:96 L16/16000"}
     GET  /streams/{id}   canlı parçalar; WS /streams/{id}/ws anlık; DELETE /streams/{id} durdurur
     GET  /jobs/{id}/transcript  temiz transkript (?etiket=genel|studyo|yok&temizle=1&noktalama=1&bicim=txt|json)
     GET  /jobs/{id}/audio   yüklenen ses (saklama süresi dolmadıysa; arayüzde dinlemek için)
@@ -69,7 +70,9 @@ class DatasetExport(BaseModel):
 
 
 class StreamStart(BaseModel):
-    kaynak: str = Field(..., min_length=3, max_length=500)    # rtp://0.0.0.0:5004, URL, .sdp
+    kaynak: str = Field("", max_length=500)                   # rtp://0.0.0.0:5004, URL, .sdp
+    # SDP metni (santralin verdiği): port ve biçim buradan; PCMU/PCMA/L16 bizim alıcı, Opus/G.722 ffmpeg
+    sdp: str | None = Field(None, max_length=20000)
     dil: str = Field("vi", max_length=8)
     codec: str = Field("auto", pattern="^(auto|pcmu|pcma|l16)$")
     clock_rate: int | None = Field(None, ge=8000, le=48000)
@@ -200,6 +203,8 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         problem = callback_problem(body.callback_url, settings)
         if problem:
             raise HTTPException(422, problem)
+        if not body.sdp and len(body.kaynak.strip()) < 3:
+            raise HTTPException(422, "kaynak ya da sdp verilmeli")
         try:
             s = _streams().start(StreamSpec(**body.model_dump()))
         except StreamError as e:

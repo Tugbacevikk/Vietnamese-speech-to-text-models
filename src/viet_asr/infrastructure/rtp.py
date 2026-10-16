@@ -49,14 +49,21 @@ def _alaw_table() -> np.ndarray:
 ULAW, ALAW = _ulaw_table(), _alaw_table()
 
 
-def decode(payload: bytes, codec: str) -> np.ndarray:
+def decode(payload: bytes, codec: str, channels: int = 1) -> np.ndarray:
+    """Yükü float32 mono sese çevirir; çok kanallıysa (ör. L16 stereo) kanalların ortalaması."""
     if codec == "pcmu":
-        return ULAW[np.frombuffer(payload, dtype=np.uint8)]
-    if codec == "pcma":
-        return ALAW[np.frombuffer(payload, dtype=np.uint8)]
-    if codec == "l16":
-        return np.frombuffer(payload, dtype=">i2").astype(np.float32) / 32768.0
-    raise ValueError(f"desteklenmeyen RTP biçimi: {codec} (ffmpeg kaynağını kullanın)")
+        x = ULAW[np.frombuffer(payload, dtype=np.uint8)]
+    elif codec == "pcma":
+        x = ALAW[np.frombuffer(payload, dtype=np.uint8)]
+    elif codec == "l16":
+        n = len(payload) // 2 * 2
+        x = np.frombuffer(payload[:n], dtype=">i2").astype(np.float32) / 32768.0
+    else:
+        raise ValueError(f"desteklenmeyen RTP biçimi: {codec} (ffmpeg kaynağını kullanın)")
+    if channels > 1:
+        k = len(x) // channels * channels
+        x = x[:k].reshape(-1, channels).mean(axis=1)
+    return x
 
 
 @dataclass(frozen=True)
@@ -128,12 +135,15 @@ class RtpSource:
 
     codec: "auto" (yük türünden: 0 PCMU, 8 PCMA), "pcmu", "pcma", "l16".
     clock_rate: L16 ya da dinamik yük türü için örnekleme hızı.
+    formats: SDP'den yük türü -> (biçim, hız, kanal); ör. {96: ("l16", 16000, 1)} (sdp.py).
     """
 
     def __init__(self, host: str = "0.0.0.0", port: int = 5004, codec: str = "auto",
                  clock_rate: int | None = None, idle_timeout: float = 5.0, first_timeout: float = 60.0,
-                 jitter_depth: int = 8):
+                 jitter_depth: int = 8, formats: dict[int, tuple[str, int, int]] | None = None):
         self.host, self.port, self.codec, self.clock_rate = host, port, codec, clock_rate
+        self.formats = formats or {}
+        self.channels = 1
         self.idle_timeout, self.first_timeout = idle_timeout, first_timeout
         self.jitter = JitterBuffer(jitter_depth)
         self._stop = threading.Event()
@@ -151,11 +161,17 @@ class RtpSource:
         self._stop.set()
 
     def _codec_of(self, pt: int) -> tuple[str, int]:
+        if pt in self.formats:
+            name, rate, self.channels = self.formats[pt]
+            return name, rate
+        if self.formats:
+            raise ValueError(f"yük türü {pt} SDP'de tanımlı değil ({sorted(self.formats)})")
         if self.codec != "auto":
             rate = self.clock_rate or (8000 if self.codec in ("pcmu", "pcma") else 16000)
             return self.codec, rate
         if pt in STATIC_PT:
             name, rate = STATIC_PT[pt]
+            self.channels = 2 if pt == 10 else 1  # RFC 3551: 10 = L16 stereo, 11 = mono
             return name, self.clock_rate or rate
         raise ValueError(f"dinamik yük türü {pt}: codec ve clock_rate verin ya da ffmpeg+SDP kullanın")
 
@@ -181,6 +197,9 @@ class RtpSource:
                     continue
                 p = parse(data)
                 if p is None:
+                    continue
+                if self.formats and p.pt not in self.formats:  # ör. tuş sesi (telephone-event)
+                    self.stats["yabanci"] += 1
                     continue
                 if self.ssrc is None:
                     self.ssrc = p.ssrc
@@ -211,6 +230,6 @@ class RtpSource:
             self.stats["kayip"] += 1
             pcm = np.zeros(self._frame_len or rate // 50, np.float32)
         else:
-            pcm = decode(p.payload, codec)
+            pcm = decode(p.payload, codec, self.channels)
             self._frame_len = len(pcm)
         return self._to16k(pcm, rate)

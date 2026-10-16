@@ -52,10 +52,43 @@ class StreamSpec:
     num_speakers: int | None = None
     callback_url: str | None = None
     idle_timeout: float = 5.0
+    sdp: str | None = None   # SDP metni (santralin verdiği); kaynak yerine ya da rtp:// ile birlikte
 
 
-def parse_source(spec: StreamSpec, allow_files: bool):
+def source_from_sdp(text: str, spec: StreamSpec, work_dir: Path | None = None):
+    """SDP'ye göre alıcı: PCMU/PCMA/L16 bizim RTP alıcımız, diğerleri (Opus, G.722) ffmpeg.
+    kaynak rtp://adres:port verilmişse dinlenecek adres/port oradan (port 0 = boş port)."""
+    from viet_asr.infrastructure import sdp as sdp_mod
+
+    try:
+        media = sdp_mod.parse(text)
+    except sdp_mod.SdpError as e:
+        raise StreamError(f"SDP: {e}") from e
+    u = urlparse(spec.kaynak.strip()) if spec.kaynak and spec.kaynak.startswith("rtp://") else None
+    host = (u.hostname if u else None) or "0.0.0.0"
+    port = u.port if (u and u.port is not None) else media.port
+    native = {f.pt: (f.native, f.clock_rate, f.channels) for f in media.formats if f.native}
+    if native:
+        return RtpSource(host, port, "auto", None, idle_timeout=spec.idle_timeout, formats=native)
+    if u and u.port is not None and u.port != media.port:
+        raise StreamError("ffmpeg ile çözülen biçimlerde (Opus, G.722) port SDP'deki m= portu olmalı")
+    # ffmpeg SDP'yi dosyadan okur; geçici dosya akış bitince silinir
+    import tempfile
+
+    d = Path(work_dir) if work_dir else Path(tempfile.gettempdir())
+    d.mkdir(parents=True, exist_ok=True)
+    f = tempfile.NamedTemporaryFile("w", suffix=".sdp", dir=d, delete=False, encoding="utf-8")
+    f.write(text)
+    f.close()
+    src = FfmpegSource(f.name, idle_timeout=spec.idle_timeout, cleanup=f.name)
+    src.port = media.port
+    return src
+
+
+def parse_source(spec: StreamSpec, allow_files: bool, work_dir: Path | None = None):
     """Kaynak yazımından AudioStream nesnesi."""
+    if spec.sdp:
+        return source_from_sdp(spec.sdp, spec, work_dir)
     k = spec.kaynak.strip()
     u = urlparse(k)
     if u.scheme == "rtp" and not k.lower().endswith(".sdp"):
@@ -72,7 +105,9 @@ def parse_source(spec: StreamSpec, allow_files: bool):
         raise StreamError("sunucudaki dosya/SDP yolu kapalı (ALLOW_LOCAL_PATHS=1 ile açılır)")
     if not p.is_file():
         raise StreamError(f"dosya yok: {k}")
-    return FfmpegSource(str(p), realtime=p.suffix.lower() != ".sdp")
+    if p.suffix.lower() == ".sdp":  # SDP dosyası: biçime göre bizim alıcı ya da ffmpeg
+        return source_from_sdp(p.read_text(encoding="utf-8", errors="replace"), spec, work_dir)
+    return FfmpegSource(str(p), realtime=True)
 
 
 @dataclass
@@ -130,7 +165,7 @@ class StreamManager:
         with self._lock:
             if self.active() >= self.max_sessions:
                 raise StreamError(f"en fazla {self.max_sessions} canlı akış (STREAM_MAX_SESSIONS)")
-            source = parse_source(spec, self.allow_files)
+            source = parse_source(spec, self.allow_files, self.dir)
             self._prune()
             sid = uuid.uuid4().hex
             s = StreamSession(sid, spec, datetime.now(timezone.utc).isoformat(timespec="seconds"),

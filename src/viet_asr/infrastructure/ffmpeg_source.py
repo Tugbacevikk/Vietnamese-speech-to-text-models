@@ -25,9 +25,14 @@ SR = 16000
 
 class FfmpegSource:
     def __init__(self, src: str, realtime: bool = False, chunk_sec: float = 0.1,
-                 extra_input_args: list[str] | None = None):
+                 extra_input_args: list[str] | None = None, idle_timeout: float | None = None,
+                 cleanup: str | None = None):
+        """idle_timeout: RTP/UDP'de bu kadar sn paket gelmezse akış biter (görüşme bitti).
+        cleanup: akış bitince silinecek dosya (geçici SDP)."""
         self.src, self.realtime, self.chunk = src, realtime, int(chunk_sec * SR) * 2
         self.extra = extra_input_args or []
+        self.idle_timeout, self.cleanup = idle_timeout, cleanup
+        self.first_timeout = 60.0
         self.proc: subprocess.Popen | None = None
         self._stop = threading.Event()
 
@@ -38,6 +43,8 @@ class FfmpegSource:
         args = [exe, "-hide_banner", "-loglevel", "error", "-nostdin"]
         if self.src.lower().endswith(".sdp"):
             args += ["-protocol_whitelist", "file,udp,rtp", "-reorder_queue_size", "64"]
+            # biçim SDP'de yazılı: ffmpeg'in akışı 5 sn dinleyip biçim araması (gecikme) gereksiz
+            args += ["-fflags", "nobuffer", "-probesize", "32", "-analyzeduration", "0"]
         if self.realtime:
             args += ["-re"]
         return args + self.extra + ["-i", self.src, "-vn", "-ac", "1", "-ar", str(SR),
@@ -46,17 +53,49 @@ class FfmpegSource:
     def close(self) -> None:
         self._stop.set()
         if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
+            self.proc.kill()  # UDP'de bekleyen ffmpeg SIGTERM'e geç yanıt veriyor; yazılacak bir şey yok
+
+    def _chunks(self) -> Iterator[bytes]:
+        """stdout'tan ham baytlar. idle_timeout verilmişse okuma ayrı iş parçacığında yapılır ve
+        o kadar sn veri gelmezse akış biter (RTP'de görüşme bitince ffmpeg kendiliğinden çıkmaz).
+        İlk veri için first_timeout (60 sn) beklenir."""
+        read = self.proc.stdout.read1 if hasattr(self.proc.stdout, "read1") else self.proc.stdout.read
+        if not self.idle_timeout:
+            while not self._stop.is_set():
+                data = read(self.chunk)
+                if not data:
+                    return
+                yield data
+            return
+        import queue
+
+        q: queue.Queue = queue.Queue(maxsize=256)
+
+        def pump():
+            while True:
+                data = read(self.chunk)
+                q.put(data)
+                if not data:
+                    return
+
+        threading.Thread(target=pump, daemon=True, name="ffmpeg-oku").start()
+        got_any = False
+        while not self._stop.is_set():
+            try:
+                data = q.get(timeout=self.idle_timeout if got_any else self.first_timeout)
+            except queue.Empty:
+                log.info("ffmpeg kaynağı: %.0f sn veri yok, akış bitti", self.idle_timeout)
+                return
+            if not data:
+                return
+            got_any = True
+            yield data
 
     def frames(self) -> Iterator[np.ndarray]:
         self.proc = subprocess.Popen(self.command(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         rest = b""
         try:
-            while not self._stop.is_set():
-                data = self.proc.stdout.read1(self.chunk) if hasattr(self.proc.stdout, "read1") \
-                    else self.proc.stdout.read(self.chunk)
-                if not data:
-                    break
+            for data in self._chunks():
                 data, rest = rest + data, b""
                 if len(data) % 2:
                     data, rest = data[:-1], data[-1:]
@@ -64,10 +103,18 @@ class FfmpegSource:
         finally:
             self.close()
             if self.proc:
-                try:
-                    _, err = self.proc.communicate(timeout=5)
+                try:  # stdout'u okuma iş parçacığı tutuyor olabilir: communicate değil wait
+                    self.proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     self.proc.kill()
-                    err = b""
+                    self.proc.wait()
+                err = self.proc.stderr.read() if self.proc.stderr else b""
                 if self.proc.returncode not in (0, None, -15, 255) and err:
                     log.warning("ffmpeg: %s", err.decode(errors="replace").strip()[-500:])
+            if self.cleanup:
+                import os
+
+                try:
+                    os.unlink(self.cleanup)
+                except OSError:
+                    pass

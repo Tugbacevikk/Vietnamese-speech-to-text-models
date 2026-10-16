@@ -51,12 +51,15 @@ class StreamSummary:
 
 class StreamTranscriber:
     def __init__(self, vad_factory: Callable[[], StreamingVad], low_conf: float = 0.5,
-                 interim_every: float = 1.5, min_interim: float = 1.0, max_chunk: float = 15.0,
+                 interim_every: float = 1.5, min_interim: float = 1.0, max_chunk: float = 8.0,
                  min_chunk: float = 5.0):
         self.vad_factory = vad_factory
         self.low_conf = low_conf
         self.interim_every, self.min_interim = interim_every, min_interim
-        self.max_chunk = max_chunk  # bitişik modda VAD kesim vermezse en sessiz yerden zorla kes
+        # bitişik modda VAD kesim vermezse (duraklamasız uzun konuşma) en sessiz yerden zorla kes.
+        # 4 VietMed kaydında çevrimdışı benzetim: 15 sn -> WER %11,0, kesin metin en geç 7,1 sn
+        # sonra; 8 sn -> WER %10,8, en geç 3,0 sn (kesim parçanın son %40'ında aranır).
+        self.max_chunk = max_chunk
         # bitişik modda parça en az bu kadar (dosya hattındaki EnergyChunker min_len): kısa parçada
         # bağlam az, dolgu sesleri daha çok yazılıyor. Bu arada ekranda ara sonuç görünür.
         self.min_chunk = min_chunk
@@ -152,14 +155,14 @@ class StreamTranscriber:
 
 
 def _quietest_cut(a: np.ndarray, frame: float = 0.1) -> int:
-    """Zorla kesim: parçanın son %60'ındaki en sessiz 100 ms'nin ortası (kelime ortasından
-    kesme olasılığını azaltır; EnergyChunker'ın kuralı)."""
+    """Zorla kesim: parçanın son %40'ındaki en sessiz 100 ms'nin ortası (kelime ortasından
+    kesmez; sona yakın kestiği için kesin metin geç kalmaz)."""
     n = int(frame * SR)
     k = len(a) // n
     if k < 2:
         return len(a)
     rms = np.sqrt((a[:k * n].reshape(k, n) ** 2).mean(axis=1))
-    lo = int(k * 0.4)
+    lo = int(k * 0.6)
     i = lo + int(np.argmin(rms[lo:]))
     return i * n + n // 2
 

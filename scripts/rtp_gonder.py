@@ -57,12 +57,21 @@ def main(argv=None) -> int:
     ap.add_argument("--kayip", type=float, default=0.0, help="paket kaybı oranı (0-1)")
     ap.add_argument("--karistir", type=float, default=0.0, help="sırası bozulan paket oranı")
     ap.add_argument("--tohum", type=int, default=0)
+    ap.add_argument("--sdp-cikti", default=None, help="dinleyiciye verilecek SDP'yi bu dosyaya yaz")
+    ap.add_argument("--bekle", type=float, default=0.0, help="göndermeden önce bu kadar sn bekle")
     a = ap.parse_args(argv)
     audio, sr = sf.read(a.dosya, dtype="float32", always_2d=True)
     audio = audio.mean(axis=1)
     if sr != 16000:
         audio = soxr.resample(audio, sr, 16000)
     host, port = a.hedef.rsplit(":", 1)
+    if a.sdp_cikti:
+        from viet_asr.infrastructure.sdp import RtpFormat, write
+
+        fmt = RtpFormat(0, "PCMU", 8000) if a.codec == "pcmu" else RtpFormat(96, "L16", 16000)
+        Path(a.sdp_cikti).write_text(write(int(port), fmt, host), encoding="utf-8")
+    if a.bekle:
+        time.sleep(a.bekle)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     rng = random.Random(a.tohum)
     t0, held, sent = time.monotonic(), None, 0

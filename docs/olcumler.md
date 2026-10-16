@@ -283,3 +283,24 @@ Varsayılan 0,35; benzer sesli kayıtlar için `DIARIZER_MERGE_DISTANCE` ya da `
   yoklar. Temiz transkript bunları zaten süzüyor; ham canlı metinde duruyorlar.
 - Paket kaybı ve sıra bozulması WER'i bozmadı (kayıp yeri sessizlikle doluyor, sıra tamponu
   diziyor). Arayüz denemesi: 25 sn akış, ara sonuçlar ~1 sn'de, bitince tam analiz kuyruğa girdi.
+
+### SDP ile L16 ve Opus (aynı gün)
+
+Aynı doktor kaydı (93 sn), SDP'den biçim ve port: L16 16 kHz bizim alıcı, Opus 32 kbit/sn ffmpeg;
+iki akış aynı anda, ara sonuç açık.
+
+| | WER | Kesin metin p95 / en çok | Ara sonuç p95 |
+|---|---|---|---|
+| L16 (WAV'ın ham hali) | %6,2 | 2,8 / 3,8 sn | 0,5 sn |
+| Opus (OGG'nin içindeki ses) | %6,0 | 3,2 / 3,9 sn | 0,7 sn |
+| (karşılaştırma) G.711 8 kHz | %7,2 | 1,3 / 1,8 sn | 1,0 sn |
+
+- 16 kHz'lik biçimler telefon sesinden (8 kHz) ~1 puan daha doğru.
+- İlk denemede iki parçanın kesin metni 6,5 ve 8,5 sn gecikti: konuşmacı 13 sn duraklamadan
+  konuştu, parça 15 sn sınırında zorla kesildi ve kesim noktası 6-9 sn geride kaldı. 4 kayıtla
+  çevrimdışı benzetim: sınır 15 -> 8 sn, kesim parçanın son %40'ında: WER %11,0 -> %10,8, kesin
+  metin en geç 7,1 -> 3,0 sn. Ara sonuçlar bu sırada ekranda (~0,6 sn).
+- Son parçanın gecikmesi akışın bittiğinin anlaşılma süresidir (`idle_timeout`, burada 2 sn).
+- ffmpeg'in akış başında 5 sn biçim araması SDP'de biçim yazılı olduğu için kapatıldı
+  (ilk ses 0,06 sn'de geliyor); paket kesilince ffmpeg kendiliğinden çıkmadığı için okuma
+  zaman aşımı eklendi.

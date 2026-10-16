@@ -1,7 +1,7 @@
 """Komut satırından canlı akış: kaynağı dinler, metni anında satır satır yazar.
 
     python -m viet_asr.interface.akis --kaynak rtp://0.0.0.0:5004 --dil vi
-    python -m viet_asr.interface.akis --kaynak cagri.sdp --dil vi --json
+    python -m viet_asr.interface.akis --sdp cagri.sdp --dil vi --json      # biçim ve port SDP'den
     python -m viet_asr.interface.akis --kaynak http://radyo/akim.ogg --kayit akim.wav
     python -m viet_asr.interface.akis --kaynak rtp://0.0.0.0:5004 --api http://127.0.0.1:8001
 
@@ -30,7 +30,8 @@ from viet_asr.interface.streams import FAST_ENGINES, StreamError, StreamSpec, pa
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--kaynak", required=True)
+    ap.add_argument("--kaynak", default="", help="rtp://0.0.0.0:5004, URL, dosya ya da .sdp")
+    ap.add_argument("--sdp", default=None, help="SDP dosyası (port ve biçim buradan; --kaynak rtp:// ile port değişir)")
     ap.add_argument("--dil", default="vi")
     ap.add_argument("--codec", default="auto", choices=["auto", "pcmu", "pcma", "l16"])
     ap.add_argument("--clock-rate", type=int, default=None)
@@ -48,7 +49,11 @@ def main(argv=None) -> int:
     if a.dil not in cfg.languages:
         print(f"dil '{a.dil}' yok: {', '.join(cfg.languages)}", file=sys.stderr)
         return 2
-    spec = StreamSpec(a.kaynak, a.dil, a.codec, a.clock_rate, idle_timeout=a.bekleme)
+    if not a.kaynak and not a.sdp:
+        print("--kaynak ya da --sdp verilmeli", file=sys.stderr)
+        return 2
+    sdp_text = Path(a.sdp).read_text(encoding="utf-8", errors="replace") if a.sdp else None
+    spec = StreamSpec(a.kaynak, a.dil, a.codec, a.clock_rate, idle_timeout=a.bekleme, sdp=sdp_text)
     try:
         source = parse_source(spec, allow_files=True)
     except StreamError as e:

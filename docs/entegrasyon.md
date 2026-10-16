@@ -252,7 +252,8 @@ DELETE /streams/{id}                                       -> durdurur (ses yine
 | Kaynak | Ne |
 |---|---|
 | `rtp://0.0.0.0:5004` | UDP portunda RTP dinle: G.711 PCMU/PCMA (telefon, 8 kHz) ve L16. Sıra bozulması ve paket kaybı düzeltilir; başka akış (SSRC) karışırsa atılır. Port 0 = boş port seçilir, yanıtta döner |
-| `/yol/cagri.sdp` | RTP + SDP dosyası (Opus, G.722 vb.; ffmpeg ile) |
+| `{"sdp": "v=0 …"}` | **SDP metni** (santralin SIP ile verdiği): port ve biçim buradan okunur. PCMU, PCMA ve L16 (WAV'ın başlıksız ham hali, mono/stereo) bizim alıcıyla; Opus (OGG'nin içindeki ses), G.722 vb. ffmpeg ile. Tuş sesi (telephone-event) paketleri atılır. `kaynak: "rtp://0.0.0.0:0"` ile birlikte verilirse dinleme adresi/portu oradan (yalnızca bizim alıcının biçimlerinde) |
+| `/yol/cagri.sdp` | SDP dosyası (aynısı; `ALLOW_LOCAL_PATHS=1`) |
 | `http(s)://…/akim.ogg` | OGG/MP3/WAV yayını; `rtsp://`, `srt://`, `udp://` de olur (ffmpeg) |
 | `/yol/kayit.wav` | dosyayı gerçek zaman hızında oynat (deneme; `ALLOW_LOCAL_PATHS=1`) |
 
@@ -262,7 +263,7 @@ bir); aynı `index`in `final: true` olayı gelince yerine geçer. `latency`: par
 metnin hazır olmasına kadar geçen süre.
 
 - **Vietnamca (Zipformer):** parçalar bitişik, hiçbir ses atılmaz (VAD yalnızca kesim yerini
-  seçer; en az 5, en fazla 15 sn). Ara sonuç var.
+  seçer; en az 5, en fazla 8 sn). Ara sonuç var.
 - **Türkçe (Whisper):** yalnızca konuşma parçaları, en fazla `STREAM_MAX_SPEECH` sn; ara sonuç
   yok (Whisper ara çözümleri akışı geride bırakır).
 - **Konuşmacı:** canlı metinde yok. Santraller her tarafı genelde ayrı RTP akışı (ayrı port)
@@ -270,6 +271,17 @@ metnin hazır olmasına kadar geçen süre.
   tam analizde (`son_is`).
 - Tam modda (API ayrı süreç) canlı akış CLI ile: `python -m viet_asr.interface.akis --kaynak
   rtp://0.0.0.0:5004 --dil vi --api http://127.0.0.1:8001`.
+- SDP örneği (L16, 16 kHz):
+
+  ```
+  v=0
+  c=IN IP4 10.0.0.5
+  m=audio 5004 RTP/AVP 96
+  a=rtpmap:96 L16/16000/1
+  ```
+
+  Opus: `m=audio 5004 RTP/AVP 111` + `a=rtpmap:111 opus/48000/2`. Komut satırı:
+  `python -m viet_asr.interface.akis --sdp cagri.sdp --dil vi`.
 - Deneme göndericisi: `python scripts/rtp_gonder.py kayit.wav --hedef 127.0.0.1:5004
   [--kayip 0.02 --karistir 0.05]` ya da `ffmpeg -re -i kayit.wav -ar 8000 -ac 1 -c:a pcm_mulaw
   -f rtp rtp://127.0.0.1:5004`.

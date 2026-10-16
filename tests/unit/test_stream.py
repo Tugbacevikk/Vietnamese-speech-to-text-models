@@ -231,3 +231,33 @@ def test_bitisik_mod_sesi_atlamaz_ve_zorla_keser():
     assert asr.seen[0] == (0.0, 1.0)                        # VAD'ın kaçırdığı 0-0,5 sn de çözülür
     assert all(b[0] == a[1] for a, b in zip(asr.seen, asr.seen[1:]))   # bitişik, boşluk yok
     assert asr.seen[-1][1] == 5.0 and all(e - s <= 2.0 + 1e-6 for s, e in asr.seen)
+
+
+def test_akis_ucu_sdp_metniyle(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from viet_asr.infrastructure.memory_store import MemoryJobStore
+    from viet_asr.interface.api import create_app
+    from viet_asr.interface.settings import Settings
+    from viet_asr.interface.streams import StreamManager
+
+    store = MemoryJobStore()
+    mgr = StreamManager({"vi": FakeAsr()}, None, tmp_path, submit=None, vad_factory=FakeVad)
+    c = TestClient(create_app(store, None, Settings(data_dir=str(tmp_path), languages=["vi"], enable_streams=True),
+                              streams=mgr))
+    assert c.post("/streams", json={"dil": "vi"}).status_code == 422          # kaynak da sdp de yok
+    sdp_text = "v=0\nc=IN IP4 127.0.0.1\nm=audio 0 RTP/AVP 96\na=rtpmap:96 L16/16000/1\n"
+    r = c.post("/streams", json={"sdp": sdp_text, "kaynak": "rtp://127.0.0.1:0", "dil": "vi", "idle_timeout": 1.0})
+    assert r.status_code == 201, r.text
+    port = r.json()["port"]
+    audio = (0.3 * np.sin(2 * np.pi * 300 * np.arange(32000) / 16000)).astype(np.float32)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for p in packets(audio, "l16"):                                        # yük türü 96, L16 16 kHz
+        sock.sendto(p, ("127.0.0.1", port))
+        time.sleep(0.002)
+    for _ in range(100):
+        if mgr.get(r.json()["id"]).durum != "dinleniyor":
+            break
+        time.sleep(0.1)
+    got = c.get(f"/streams/{r.json()['id']}").json()
+    assert got["durum"] == "bitti" and got["parca_sayisi"] == 2 and got["ozet"]["rtp"]["paket"] == 100

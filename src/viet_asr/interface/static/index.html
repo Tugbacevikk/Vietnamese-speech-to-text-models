@@ -81,6 +81,7 @@ audio { width: 100%; margin-bottom: 12px; }
 .live p { margin: 0; padding: 6px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 64px 1fr; gap: 10px; }
 .live p small { color: var(--muted); font-variant-numeric: tabular-nums; }
 .live p.ara span { color: var(--muted); font-style: italic; }
+#liveSdp { width: 100%; box-sizing: border-box; margin-top: 8px; background: var(--input); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font: .8rem ui-monospace, monospace; resize: vertical; }
 #liveSrc { width: 100%; box-sizing: border-box; background: var(--input); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font: inherit; }
 .hist { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .hist button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; text-align: left; background: var(--input);
@@ -151,6 +152,7 @@ audio { width: 100%; margin-bottom: 12px; }
       <button class="btn" id="liveStart">Dinlemeye başla</button>
       <button class="btn danger hidden" id="liveStop">Durdur</button>
     </div>
+    <textarea id="liveSdp" rows="3" placeholder="SDP (isteğe bağlı): santralin verdiği v=0 … m=audio 5004 RTP/AVP 96 … a=rtpmap:96 L16/16000 metni. Verilirse port ve ses biçimi buradan alınır (PCMU, PCMA, L16, Opus, G.722)." aria-label="SDP"></textarea>
     <div id="liveLines" class="live"></div>
   </section>
 
@@ -567,7 +569,8 @@ function liveDone(ev) {
 $("liveStart").addEventListener("click", async () => {
   try {
     const r = await api("/streams", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kaynak: $("liveSrc").value.trim(), dil: $("liveLang").value }) });
+      body: JSON.stringify({ kaynak: $("liveSrc").value.trim(), dil: $("liveLang").value,
+                             ...($("liveSdp").value.trim() ? { sdp: $("liveSdp").value } : {}) }) });
     const s = await r.json(); liveId = s.id;
     $("liveLines").replaceChildren();
     $("liveInfo").textContent = s.port ? `UDP ${s.port} dinleniyor…` : "Bağlanıyor…";
