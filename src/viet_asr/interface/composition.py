@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from viet_asr.application.config import (
-    DiarizerConfig, FusionConfig, LidConfig, LlmRefinerConfig, PipelineConfig, ProfileConfig, VadConfig, WhisperParams,
+    DiarizerConfig, FusionConfig, LidConfig, PipelineConfig, ProfileConfig, VadConfig, WhisperParams,
 )
 from viet_asr.application.language import LanguageResolver
 from viet_asr.application.ports import ResultRepository
@@ -14,7 +14,6 @@ from viet_asr.infrastructure.chunker import EnergyChunker
 from viet_asr.infrastructure.native_fusion import build_fusion
 from viet_asr.infrastructure.catalog import language_profile, lid_stages
 from viet_asr.infrastructure.engines import LazyAsrEngines
-from viet_asr.infrastructure.llm_refiner import LlmSpeakerRefiner
 from viet_asr.infrastructure.normalizer import normalizer_for
 from viet_asr.infrastructure.sherpa_asr import build_asr
 from viet_asr.infrastructure.cluster_diarizer import EmbeddingClusterDiarizer
@@ -37,15 +36,9 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                    whisper_beam_size: int = 5,
                    whisper_batch_size: int = 8,
                    diarizer_window: float = 1.0,
-                    diarizer_hop: float = 0.4,
-                    diarizer_min_window: float = 0.4,
-                    diarizer_merge_distance: float = 0.15,
-                    enable_llm_refiner: bool = True,
-                    llm_provider: str = "ollama",
-                    llm_url: str = "http://127.0.0.1:11434/api/generate",
-                    llm_model: str = "llama3.2:latest",
-                    llm_timeout: int = 45,
-                    llm_num_predict: int = 150) -> PipelineConfig:
+                   diarizer_hop: float = 0.4,
+                   diarizer_min_window: float = 0.4,
+                   diarizer_merge_distance: float = 0.15) -> PipelineConfig:
     """workers: aynı süreçte aynı anda işlenecek ses sayısı (yerel mod); motorlar buna göre
     paralel çağrıya hazırlanır. whisper_threads/whisper_workers: faster-whisper'a ayrı bütçe
     (bir çözüm kaç iş parçacığı, aynı anda kaç çözüm); verilmezse threads ve workers."""
@@ -77,11 +70,7 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                                      if diarizer == "cluster" else "wespeaker_en_voxceleb_resnet34_LM.onnx")),
             num_speakers=speakers, num_threads=threads,
             window=diarizer_window, hop=diarizer_hop, min_window=diarizer_min_window,
-            merge_distance=diarizer_merge_distance),
-        llm_refiner=LlmRefinerConfig(
-            enabled=enable_llm_refiner, provider=llm_provider,
-            url=llm_url, model=llm_model, timeout_sec=llm_timeout,
-            num_predict=llm_num_predict))
+            merge_distance=diarizer_merge_distance))
 
 
 def build_diarizer(cfg: DiarizerConfig):
@@ -116,8 +105,7 @@ def build_pipeline(cfg: PipelineConfig, repo: ResultRepository,
         language=build_resolver(cfg, with_detection), engines=build_engines(cfg),
         diarizer=build_diarizer(cfg.diarizer), fusion=build_fusion(cfg.fusion), repo=repo,
         chunker=EnergyChunker(cfg.chunk.max_len, cfg.chunk.min_len), profiles=cfg.profile,
-        safety=cfg.safety,
-        refiner=LlmSpeakerRefiner(cfg.llm_refiner))
+        safety=cfg.safety)
 
 
 # geriye dönük ad (CLI ve testler)
@@ -199,13 +187,7 @@ def config_from_settings(s, workers: int = 1) -> PipelineConfig:
                           diarizer_window=getattr(s, "diarizer_window", 1.0),
                           diarizer_hop=getattr(s, "diarizer_hop", 0.4),
                           diarizer_min_window=getattr(s, "diarizer_min_window", 0.4),
-                          diarizer_merge_distance=getattr(s, "diarizer_merge_distance", 0.15),
-                          enable_llm_refiner=getattr(s, "enable_llm_refiner", True),
-                          llm_provider=getattr(s, "llm_provider", "ollama"),
-                          llm_url=getattr(s, "llm_url", "http://127.0.0.1:11434/api/generate"),
-                          llm_model=getattr(s, "llm_model", "llama3.2:latest"),
-                          llm_timeout=getattr(s, "llm_timeout", 45),
-                          llm_num_predict=getattr(s, "llm_num_predict", 150))
+                          diarizer_merge_distance=getattr(s, "diarizer_merge_distance", 0.15))
 
 
 def verify_models_or_exit(settings) -> None:

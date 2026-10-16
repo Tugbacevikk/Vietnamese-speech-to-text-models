@@ -247,18 +247,6 @@ class SafetyNetConfig:
 
 
 @dataclass(frozen=True)
-class LlmRefinerConfig:
-    """LLM tabanlı konuşmacı ayrıştırma ve rol düzeltme servisi (Ollama / OpenAI)."""
-
-    enabled: bool = True
-    provider: str = "ollama"  # "ollama" veya "openai"
-    url: str = "http://127.0.0.1:11434/api/generate"
-    model: str = "llama3.2:latest"
-    timeout_sec: int = 45
-    num_predict: int = 150
-
-
-@dataclass(frozen=True)
 class PipelineConfig:
     languages: dict[str, LanguageProfile]
     lid: LidConfig | None = field(default_factory=LidConfig)  # None: dil istekte zorunlu
@@ -268,4 +256,3 @@ class PipelineConfig:
     fusion: FusionConfig = field(default_factory=FusionConfig)
     profile: ProfileConfig = field(default_factory=ProfileConfig)
     safety: SafetyNetConfig = field(default_factory=SafetyNetConfig)
-    llm_refiner: LlmRefinerConfig = field(default_factory=LlmRefinerConfig)
