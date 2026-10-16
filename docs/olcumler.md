@@ -231,3 +231,14 @@ aşama süreleri (`timings`) var ve arayüzde "Aşamalar" olarak görünüyor.
 - **Sınır:** VietMed'deki TV programlarında konuşmacılar az duraklıyor; duraklamaya dayalı
   noktalama uzun cümleler üretiyor. Dil bilgisine göre noktalama ve bağlama göre kelime
   düzeltme ("con" -> "câu") dil modeli ister; kurala dökülünce başka kayıtları bozuyor.
+
+## Konuşmacı penceresi 1,5/0,75 sn -> 1,0/0,4 sn (Tuğba, 16 Ekim) — sert montaj geçişleri
+
+| | 1,5 / 0,75 / 0,5 (önceki) | 1,0 / 0,4 / 0,4 (yeni) |
+|---|---|---|
+| Sentetik, sıra değişiminde duraksama yok (14 diyalog) | kişi 12/14, cümle %96,4 | **kişi 14/14, cümle %100** |
+| 9 Vietnamca diyalog | 7/9, DER %8,8, cpWER %28,6 | 7/9, DER %8,8, cpWER %28,5 |
+| En kötü oran (9 diyalog, 2 iş parçacığı) | 0,24 | 0,30 |
+
+Ani konuşmacı değişiminde açık kazanç, gerçek diyaloglarda kayıp yok; bedeli biraz daha fazla
+imza hesabı. Yeni değerler kaldı.
