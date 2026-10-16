@@ -200,8 +200,14 @@ class SqlAlchemyJobStore:
                 self._outbox(s, t.job_id, "job.done", cb,
                              {"status": JobStatus.DONE.value, **transcript_to_dict(t)})
 
+    def add_event(self, event: str, url: str, payload: dict, job_id: str | None = None) -> None:
+        """İş durumundan bağımsız bildirim (ör. canlı oturum bitti: live.ended). Aynı outbox'tan,
+        aynı imza ve tekrar kurallarıyla gider; job_id verilirse iş silinince o da silinir."""
+        with self._tx() as s:
+            self._outbox(s, job_id, event, url, payload)
+
     @staticmethod
-    def _outbox(s: Session, job_id: str, event: str, url: str, payload: dict) -> None:
+    def _outbox(s: Session, job_id: str | None, event: str, url: str, payload: dict) -> None:
         now = utcnow()
         s.add(OutboxRow(job_id=job_id, event=event, url=url, payload=payload,
                         next_attempt_at=now, created_at=now))

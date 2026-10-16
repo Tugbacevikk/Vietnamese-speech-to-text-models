@@ -82,6 +82,15 @@ class TrNormalizer:
         return _clean(text, self.strip_punct, self.latin_only)
 
 
+def live_normalizer(lang: str):
+    """Canlı altyazı ekranı. Türkçe: büyük harf ve noktalama korunur (Whisper üretir).
+    Vietnamca: Zipformer noktalamasız yazar -> küçük harf. İkisinde de başka alfabeden uydurma
+    kelime süzülür. (Live-stream'den.)"""
+    if lang == "vi":
+        return ViNormalizer(strip_punct=False, latin_only=True)
+    return TrNormalizer(lowercase=False, strip_punct=False, latin_only=True)
+
+
 def normalizer_for(lang: str):
     """Sistem çıktısının biçimi: iki dilde de küçük harf, noktalamasız."""
     if lang == "vi":

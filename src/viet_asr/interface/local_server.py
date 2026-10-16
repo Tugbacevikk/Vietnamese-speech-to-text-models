@@ -34,8 +34,10 @@ from viet_asr.interface.settings import Settings
 log = logging.getLogger(__name__)
 
 
-def build_local(settings: Settings, workers: int | None = None, warm_up: bool = True):
-    """Yerel sistemi kurar; (app, store, queue, dispatcher) döndürür (testler de kullanır)."""
+def build_local(settings: Settings, workers: int | None = None, warm_up: bool = True,
+                live_engines=None, live_detector=None, live_detect=None, live_speakers=None):
+    """Yerel sistemi kurar; (app, store, queue, dispatcher) döndürür (testler de kullanır).
+    live_*: testler için sahte canlı altyazı motorları (dil -> motor), algılayıcı, dil tespiti."""
     store = store_from_settings(settings, url=settings.local_db)
     store.migrate()
     n = workers or settings.concurrency
@@ -43,7 +45,8 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
     queue = ThreadJobQueue(asr_workers=n,
                            max_attempts=settings.max_job_attempts)
     pipeline = build_pipeline(cfg, store, with_detection=False)
-    detect = DetectLanguage(store, queue, SoundfileLoader(), SileroVad(cfg.vad), build_resolver(cfg))
+    resolver = build_resolver(cfg)
+    detect = DetectLanguage(store, queue, SoundfileLoader(), SileroVad(cfg.vad), resolver)
     queue.bind(detect, RunTranscription(store, pipeline), give_up=store.fail)
     if warm_up:  # ilk işte model yükleme gecikmesi olmasın
         for lang in settings.languages:
@@ -77,6 +80,35 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
                      readiness={"modeller": models_ready}, streams=streams)
     app.state.streams = streams
     app.state.maintenance = build_maintenance(store, settings)
+
+    # canlı altyazı (/canli, /ws/live): aynı süreç, aynı modeller; oturum kaydı bitince toplu işe
+    import uuid
+
+    from viet_asr.application.jobs import SubmitJob as _Submit
+    from viet_asr.domain import AudioJob
+    from viet_asr.interface.composition import build_live, build_live_speakers
+    from viet_asr.interface.live_server import add_live_routes
+
+    engines, detector, detect_lang = build_live(settings, cfg, pipeline.engines, resolver)
+    if live_engines is not None:
+        engines, detect_lang = live_engines, live_detect
+    submit = _Submit(store, queue, settings.languages)
+
+    def submit_recording(path: str, language: str | None, callback_url: str | None = None,
+                         session_id: str | None = None) -> str:
+        """Oturum kaydı toplu işe: konuşmacı ayrımı; bitince 'job.done' aynı callback adresine."""
+        return submit(AudioJob(uuid.uuid4().hex, path, language, callback_url,
+                               external_id=f"live:{session_id}" if session_id else None))
+
+    def notify_ended(url: str, payload: dict, job_id: str | None) -> None:
+        store.add_event("live.ended", url, payload, job_id)
+
+    speakers = live_speakers if live_speakers is not None else build_live_speakers(settings, cfg)
+    add_live_routes(app, settings, engines, live_detector or detector, submit_recording, detect_lang,
+                    notify_ended, speaker_factory=speakers or None)
+    if warm_up and live_engines is None:  # canlı motorlar açılışta arka planda hazırlanır
+        for e in engines.values():
+            e.start_loading()
     return app, store, queue, dispatcher
 
 
@@ -97,6 +129,11 @@ def main(argv=None):
         while True:
             try:
                 app.state.maintenance.run_once()
+                from viet_asr.infrastructure.recorder import delete_old_recordings
+
+                n_old = delete_old_recordings(s.recordings_dir, s.recordings_retention_days)
+                if n_old:
+                    log.info("bakım: %d eski canlı oturum dosyası silindi", n_old)
             except Exception:
                 log.exception("bakım turu başarısız")
             time.sleep(60)
@@ -105,6 +142,7 @@ def main(argv=None):
     n, why = (a.workers, "--workers") if a.workers else s.concurrency_plan()
     log.info("hazır: http://%s:%d  (diller: %s, eşzamanlı iş: %d — %s)", a.host, a.port,
              ",".join(s.languages), n, why)
+    log.info("canlı altyazı: http://%s:%d/canli", a.host, a.port)
     if "tr" in s.languages and s.model_for("tr").startswith("faster-whisper"):
         log.info("Türkçe: Whisper %s, %d iş parçacığı, beam_size=%d, aynı anda %d çözüm (WHISPER_THREADS)",
                  s.model_for("tr"), s.whisper_threads, s.whisper_beam_size, s.whisper_workers(n))

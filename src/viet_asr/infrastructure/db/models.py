@@ -129,7 +129,8 @@ class OutboxRow(Base):
     # PostgreSQL'de BIGINT, SQLite'ta INTEGER (SQLite yalnız INTEGER PRIMARY KEY'i otomatik artırır)
     id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True,
                                     autoincrement=True)
-    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
+    # işe bağlı olmayan olaylarda (canlı oturum sonu: live.ended) boş olabilir
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True)
     event: Mapped[str] = mapped_column(Text)
     url: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(), "postgresql"))

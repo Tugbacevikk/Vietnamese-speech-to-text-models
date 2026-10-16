@@ -135,7 +135,13 @@ def memory_estimate(model: str) -> tuple[float, float]:
 
 
 # Whisper'ın sessizlik/gürültüde uydurduğu, gözlenmiş cümleler
-DROP_PHRASES = {"tr": ("İzlediğiniz için teşekkür ederim.",)}
+# (bir parçanın metni bunlardan biriyse atılır; Live-stream'de canlı denemelerde görülenler eklendi)
+DROP_PHRASES = {"tr": (
+    "İzlediğiniz için teşekkür ederim.", "İzlediğiniz için teşekkürler.", "Altyazı M.K.",
+    "Altyazı", "Abone olmayı unutmayın.", "Abone olun.", "Videoyu beğenmeyi unutmayın.",
+    "Bir sonraki videoda görüşmek üzere.", "Müzik", "Thanks for watching!",
+    "Subtitles by the Amara.org community",
+)}
 
 
 def lid_stages(models_dir: str | Path) -> tuple[tuple[str, str], ...]:

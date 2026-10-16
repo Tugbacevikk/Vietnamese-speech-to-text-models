@@ -229,3 +229,49 @@ def build_maintenance(store, settings, queue=None, queue_idle=None):
     return Maintenance(store, safe_file_remover(settings.data_dir), settings.audio_retention_hours,
                        settings.result_retention_days, settings.processing_stale_sec,
                        queue=queue, queue_idle=queue_idle, queued_stale_sec=settings.queued_stale_sec)
+
+
+def build_live(settings, cfg: PipelineConfig, engines: LazyAsrEngines, resolver: LanguageResolver):
+    """Canlı altyazı: dil başına motor, konuşma algılayıcı üreticisi ve dil tespiti (Live-stream'den).
+
+    Motorlar toplu işin model nesneleridir (bellekte bir kez). Yalnızca Türkçe için LIVE_MODEL
+    farklı bir model seçebilir (4 GB GPU'da medium yetişmezse small)."""
+    from viet_asr.domain import VadSegment
+    from viet_asr.infrastructure.live_vad import make_detector
+    from viet_asr.infrastructure.normalizer import live_normalizer
+    from viet_asr.interface.live_server import LiveEngine
+
+    live = {}
+    for lang in settings.languages:
+        batch_model = settings.model_for(lang)
+        model = (settings.live_model or batch_model) if lang == "tr" else batch_model
+        if model == batch_model:
+            load = (lambda code=lang: engines[code])
+        else:
+            prof = cfg.languages[lang]
+            live_prof = language_profile(lang, settings.models_dir, model,
+                                         num_threads=prof.asr.num_threads, whisper=prof.asr.whisper)
+            load = (lambda p=live_prof, code=lang: build_asr(p, normalizer_for(code)))
+        live[lang] = LiveEngine(load, model, normalizer=live_normalizer(lang))
+
+    def detector():
+        return make_detector(settings.live_vad, cfg.vad.model, settings.live_vad_threshold)
+
+    def detect(audio):
+        """Otomatik dil: oturumun ilk cümlesinden (toplu işle aynı kademeli tespit)."""
+        return resolver.resolve(None, [VadSegment(0.0, audio)])
+
+    return live, detector, detect
+
+
+def build_live_speakers(settings, cfg: PipelineConfig):
+    """Oturum başına konuşmacı izleyici üreticisi (imza modeli toplu işinkiyle aynı). Kapalıysa
+    ya da model yoksa None."""
+    from viet_asr.application.live import SpeakerTracker
+    from viet_asr.infrastructure.live_speaker import SpeakerEmbedder
+
+    model = cfg.diarizer.embedding_model
+    if not settings.live_speakers or not Path(model).exists():
+        return None
+    embedder = SpeakerEmbedder(model, num_threads=1)
+    return lambda: SpeakerTracker(embedder.embed, threshold=settings.live_speaker_threshold)

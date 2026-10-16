@@ -17,3 +17,4 @@ models/tts-test/
 .vscode/
 kabul_sonucu.json
 output_transcript.txt
+recordings/

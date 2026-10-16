@@ -51,7 +51,7 @@ def build_request(payload: dict, event: str, job_id: str, delivery_id: str,
     """Gövde ve başlıklar (gerçek teslim ve test bildirimi aynı biçimde)."""
     body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     headers = {"Content-Type": "application/json; charset=utf-8", "User-Agent": USER_AGENT,
-               "X-Event": event, "X-Job-Id": job_id, "X-Delivery-Id": delivery_id}
+               "X-Event": event, "X-Job-Id": job_id or "", "X-Delivery-Id": delivery_id}
     if secret:
         ts = str(int(time.time()))
         headers["X-Timestamp"] = ts

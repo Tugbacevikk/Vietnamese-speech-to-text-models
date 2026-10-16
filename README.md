@@ -125,6 +125,16 @@ curl -H "X-API-Key: $K" http://localhost:8001/jobs/<job_id>        # durum + son
  "quality": {"kapsama_yuzde": 98.1, "kurtarilan_kelime": 0}}
 ```
 
+## Canlı altyazı (mikrofon)
+
+`http://127.0.0.1:8000/canli` (ana sayfada "🎙 Canlı altyazı"): tarayıcı mikrofonu açar, metin
+konuşurken ekrana akar. Dil seçimi (Vietnamca / Türkçe / otomatik), sunum modu (tam ekran, büyük
+yazı), canlı konuşmacı etiketi, "Dosyayla test", metni indirme. Durdur'a basınca kayıt normal
+analize gider (konuşmacı ayrımlı transkript). [Live-stream](https://github.com/Tugbacevikk/Live-stream)
+reposundan taşındı; aynı süreç ve aynı modeller, ayrıca kurulum yok. Vietnamca'da ses parçalara
+**bitişik** bölünür (hiçbir ses atılmaz): aynı kayıtlarda WER %17,1 -> %10,8
+([docs/olcumler.md](docs/olcumler.md)). Protokol: [docs/entegrasyon.md](docs/entegrasyon.md#11-canlı-altyazı-mikrofon-wslive).
+
 ## Canlı akış (RTP / yayın)
 
 Arayüzde "Canlı akış" kutusu ya da `POST /streams {"kaynak": "rtp://0.0.0.0:5004", "dil": "vi"}`:

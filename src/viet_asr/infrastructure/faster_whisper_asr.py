@@ -144,6 +144,8 @@ class FasterWhisperAsr:
                     raise load_err
         self.model = whisper_model
         self.batched = batched
+        # canlı ekranda gösterilir ("medium · GPU"): CTranslate2 modelinin gerçekten açıldığı cihaz
+        self.device = str(getattr(getattr(whisper_model, "model", None), "device", "cpu"))
 
     # sıcaklık denemesine kalan en fazla parça (en uzunlar): her deneme ayrı 30 sn'lik çözüm
     RESCUE_MAX_RETRY = 4
@@ -217,6 +219,37 @@ class FasterWhisperAsr:
         if raw is None:
             raw = self._one_by_one(segments, fast)
         return drop_repeats(self._words(raw), self.wp.max_repeat)
+
+    def transcribe_text(self, samples: np.ndarray, fast: bool = False, prompt: str | None = None,
+                        normalizer: TextNormalizer | None = None) -> str:
+        """Canlı altyazı: tek cümlenin sesi -> metin (kelime zamanı yok, daha hızlı). Live-stream'den.
+
+        fast=True: ara metin (beam 1, sıcaklık geri çekilmesi yok).
+        prompt: önceki cümleler; Whisper'a bağlam olur (özel adlar, konu tutarlılığı).
+        normalizer: ekran biçimi (büyük harf ve noktalama korunur); verilmezse toplu iş biçimi."""
+        if samples.size == 0:
+            return ""
+        wp = self.wp
+        result, _ = self.model.transcribe(
+            samples, language=self.language, task="transcribe", vad_filter=False,
+            beam_size=1 if fast else wp.beam_size,
+            temperature=0.0 if fast else (0.0, 0.2, 0.4),
+            initial_prompt=prompt or wp.initial_prompt, hotwords=wp.hotwords,
+            condition_on_previous_text=False, without_timestamps=True,
+            repetition_penalty=wp.repetition_penalty, no_repeat_ngram_size=wp.no_repeat_ngram_size,
+            no_speech_threshold=wp.no_speech_threshold,
+            compression_ratio_threshold=wp.compression_ratio_threshold,
+            log_prob_threshold=wp.log_prob_threshold)
+        norm = normalizer or self.normalizer
+        parts = []
+        for r in result:
+            if _key(r.text) in self._drop or (prompt and _key(r.text) == _key(prompt)):
+                continue  # uydurma kalıp ya da istemin aynen tekrarı
+            text = norm.normalize(r.text)
+            if text:
+                parts.append(text)
+        words = [Word(text=w, start=0.0, end=0.0) for w in " ".join(parts).split()]
+        return " ".join(w.text for w in drop_repeats(words, wp.max_repeat))
 
     def _batched(self, segments: list[VadSegment], fast: bool = False, opts: dict | None = None):
         """Parçalar asıl zamanlarıyla tek bir diziye yerleştirilir; clip_timestamps ile

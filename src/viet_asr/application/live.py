@@ -1,0 +1,402 @@
+"""Canlı altyazı: sürekli gelen ses -> cümleler -> metin.
+
+Toplu iş (transcribe.py) bütün sesi görür ve kesin sonuç verir. Canlı oturum sesi geldikçe
+işler; her cümle iki kez çözülür:
+  * PartialJob : konuşma sürerken o ana kadarki ses (hızlı: beam 1) -> ekranda gri ara metin
+  * FinalJob   : duraklama (ya da azami süre) ile biten cümle (doğru: beam 5 + önceki cümleler)
+
+Bu modül yalnızca numpy ve portları bilir; konuşma algılayıcı (Silero), ASR (faster-whisper)
+ve kayıtçı (soundfile) dışarıdan verilir. Tugbacevikk/Live-stream'den taşındı (16 Ekim);
+fark: Vietnamca (Zipformer) için ContiguousSegmenter.
+
+İki bölücü:
+  * Segmenter           : konuşma algılayıcının "konuşma" dediği yerler, 700 ms duraklamada cümle
+                          biter. Whisper için doğru (sessizlik/müzikte metin uyduruyor).
+  * ContiguousSegmenter : sesin TAMAMI, bitişik parçalar (en az 5, en fazla 8 sn), kesim
+                          duraklamada ya da en sessiz yerde. Zipformer uydurmadığı için hiçbir ses
+                          atılmaz. 4 VietMed kaydı, aynı Zipformer: Segmenter WER %17,1 (sesin
+                          %85-98'i çözülüyor, çoğu hata silinen kelime), bitişik %10,8.
+"""
+from __future__ import annotations
+
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
+
+import numpy as np
+
+from .ports import LiveRecorder, SpeechDetector
+
+SAMPLE_RATE = 16000
+FRAME_SAMPLES = 512                      # Silero VAD 16 kHz'de tam 512 örnek (32 ms) bekler
+FRAME_SEC = FRAME_SAMPLES / SAMPLE_RATE  # 0.032 sn
+
+# (ses, hızlı mı, istem) -> metin
+TranscribeText = Callable[[np.ndarray, bool, "str | None"], str]
+
+
+@dataclass
+class SegmenterConfig:
+    end_silence_ms: int = 700          # bu kadar sessizlik -> cümle bitti
+    max_utterance_sec: float = 12.0    # durmadan konuşulursa zorla böl
+    partial_interval_sec: float = 1.2  # ara metin sıklığı (0 = kapalı)
+    pre_roll_ms: int = 300             # konuşma başlamadan önceki sesi de al (ilk hece kesilmesin)
+    start_frames: int = 3              # konuşma başladı demek için ardışık konuşma çerçevesi
+    min_voiced_sec: float = 0.3        # toplam sesli süre bundan azsa (öksürük, tık) at
+    tail_keep_ms: int = 200            # cümle sonundaki sessizlikten bırakılacak pay
+
+
+@dataclass
+class PartialJob:
+    audio: np.ndarray
+    start: float
+
+
+@dataclass
+class FinalJob:
+    audio: np.ndarray
+    start: float
+    end: float
+
+
+class Segmenter:
+    """Cümle sonu tespiti (endpointing): sürekli sesi konuşma parçalarına böler."""
+
+    def __init__(self, detector: SpeechDetector, config: SegmenterConfig | None = None):
+        self.detector = detector
+        self.cfg = config or SegmenterConfig()
+        self._leftover = np.zeros(0, dtype=np.float32)
+        self._pre_roll: deque[np.ndarray] = deque(
+            maxlen=max(1, round(self.cfg.pre_roll_ms / 1000 / FRAME_SEC)))
+        self._frames: list[np.ndarray] = []
+        self._in_speech = False
+        self._speech_run = 0
+        self._silence_run = 0
+        self._voiced = 0
+        self._frames_seen = 0
+        self._start_frame = 0
+        self._last_partial_len = 0
+
+    @property
+    def stream_time(self) -> float:
+        return self._frames_seen * FRAME_SEC
+
+    def _audio(self) -> np.ndarray:
+        return np.concatenate(self._frames) if self._frames else np.zeros(0, dtype=np.float32)
+
+    def _close(self, trim: bool) -> FinalJob | None:
+        audio = self._audio()
+        if trim and self._silence_run:
+            cut = self._silence_run * FRAME_SAMPLES - int(self.cfg.tail_keep_ms / 1000 * SAMPLE_RATE)
+            if cut > 0:
+                audio = audio[: len(audio) - cut]
+        voiced_sec = self._voiced * FRAME_SEC
+        start = self._start_frame * FRAME_SEC
+
+        self._frames = []
+        self._in_speech = False
+        self._speech_run = self._silence_run = self._voiced = 0
+
+        if voiced_sec < self.cfg.min_voiced_sec:
+            return None
+        return FinalJob(audio=audio, start=round(start, 2),
+                        end=round(start + len(audio) / SAMPLE_RATE, 2))
+
+    def feed(self, samples: np.ndarray) -> list[PartialJob | FinalJob]:
+        """16 kHz mono float32 örnekleri besler; ortaya çıkan işleri döner."""
+        jobs: list[PartialJob | FinalJob] = []
+        data = np.concatenate([self._leftover, samples.astype(np.float32, copy=False)])
+        n = len(data) // FRAME_SAMPLES
+        self._leftover = data[n * FRAME_SAMPLES:]
+
+        for i in range(n):
+            frame = data[i * FRAME_SAMPLES:(i + 1) * FRAME_SAMPLES]
+            frame_idx = self._frames_seen
+            self._frames_seen += 1
+            speech = self.detector(frame)
+
+            if not self._in_speech:
+                self._pre_roll.append(frame)
+                self._speech_run = self._speech_run + 1 if speech else 0
+                if self._speech_run >= self.cfg.start_frames:
+                    self._in_speech = True
+                    self._frames = list(self._pre_roll)
+                    self._pre_roll.clear()
+                    self._start_frame = frame_idx + 1 - len(self._frames)
+                    self._voiced = self._speech_run
+                    self._silence_run = 0
+                    self._last_partial_len = 0
+                continue
+
+            self._frames.append(frame)
+            self._silence_run = 0 if speech else self._silence_run + 1
+            self._voiced += int(speech)
+            length_sec = len(self._frames) * FRAME_SEC
+
+            if self._silence_run * FRAME_SEC * 1000 >= self.cfg.end_silence_ms:
+                if job := self._close(trim=True):
+                    jobs.append(job)
+            elif length_sec >= self.cfg.max_utterance_sec:
+                if job := self._close(trim=False):
+                    jobs.append(job)
+            elif self.cfg.partial_interval_sec > 0 and (
+                len(self._frames) - self._last_partial_len
+            ) * FRAME_SEC >= self.cfg.partial_interval_sec:
+                self._last_partial_len = len(self._frames)
+                jobs.append(PartialJob(audio=self._audio(), start=round(self._start_frame * FRAME_SEC, 2)))
+        return jobs
+
+    def flush(self) -> list[FinalJob]:
+        """Akış kapanırken yarım kalan konuşmayı kesinleştirir."""
+        if self._in_speech and self._frames:
+            job = self._close(trim=True)
+            return [job] if job else []
+        return []
+
+
+class ContiguousSegmenter:
+    """Segmenter ile aynı arayüz (feed -> işler, flush, stream_time); ses atılmaz.
+
+    Kesim: parça en az min_sec olduktan sonra cut_silence_ms süren ilk duraklamanın ortası;
+    max_sec'e kadar duraklama yoksa parçanın son %40'ındaki en sessiz 100 ms. Ara metin:
+    son kesimden bu yana bütün ses (konuşma algılandıysa)."""
+
+    def __init__(self, detector: SpeechDetector, config: SegmenterConfig | None = None,
+                 min_sec: float = 5.0, max_sec: float = 8.0, cut_silence_ms: int = 500):
+        self.detector = detector
+        self.cfg = config or SegmenterConfig()
+        self.min_sec, self.max_sec = min_sec, max(max_sec, min_sec + 1.0)
+        self.cut_frames = max(1, round(cut_silence_ms / 1000 / FRAME_SEC))
+        self._leftover = np.zeros(0, dtype=np.float32)
+        self._frames: list[np.ndarray] = []
+        self._speech: list[bool] = []
+        self._start_frame = 0
+        self._frames_seen = 0
+        self._silence_run = 0
+        self._last_partial_len = 0
+
+    @property
+    def stream_time(self) -> float:
+        return self._frames_seen * FRAME_SEC
+
+    def _take(self, n: int) -> FinalJob | None:
+        frames, speech = self._frames[:n], self._speech[:n]
+        self._frames, self._speech = self._frames[n:], self._speech[n:]
+        start = self._start_frame * FRAME_SEC
+        self._start_frame += n
+        self._last_partial_len = 0
+        audio = np.concatenate(frames)
+        # Konuşma algılayıcı müzik altındaki konuşmayı kaçırabildiği için ona bakılmaz; yalnızca
+        # gerçekten sessiz parça (ör. mikrofon kapalı) atılır.
+        if not any(speech) and float(np.sqrt(np.mean(audio ** 2))) < 1e-3:
+            return None
+        return FinalJob(audio=audio, start=round(start, 2), end=round(start + len(audio) / SAMPLE_RATE, 2))
+
+    def _quietest(self) -> int:
+        k = len(self._frames)
+        lo = max(1, int(k * 0.6))
+        win = max(1, round(0.1 / FRAME_SEC))
+        rms = [float(np.sqrt(np.mean(np.concatenate(self._frames[i:i + win]) ** 2)))
+               for i in range(lo, max(lo + 1, k - win + 1))]
+        return lo + int(np.argmin(rms)) + win // 2 if rms else k
+
+    def feed(self, samples: np.ndarray) -> list[PartialJob | FinalJob]:
+        jobs: list[PartialJob | FinalJob] = []
+        data = np.concatenate([self._leftover, samples.astype(np.float32, copy=False)])
+        n = len(data) // FRAME_SAMPLES
+        self._leftover = data[n * FRAME_SAMPLES:]
+        for i in range(n):
+            frame = data[i * FRAME_SAMPLES:(i + 1) * FRAME_SAMPLES]
+            self._frames_seen += 1
+            speech = bool(self.detector(frame))
+            self._frames.append(frame)
+            self._speech.append(speech)
+            self._silence_run = 0 if speech else self._silence_run + 1
+            length = len(self._frames) * FRAME_SEC
+            job = None
+            if length >= self.min_sec and self._silence_run >= self.cut_frames:
+                job = self._take(len(self._frames) - self._silence_run // 2)
+                self._silence_run = 0
+            elif length >= self.max_sec:
+                job = self._take(self._quietest())
+            elif self.cfg.partial_interval_sec > 0 and any(self._speech) and (
+                    len(self._frames) - self._last_partial_len) * FRAME_SEC >= self.cfg.partial_interval_sec:
+                self._last_partial_len = len(self._frames)
+                jobs.append(PartialJob(audio=np.concatenate(self._frames),
+                                       start=round(self._start_frame * FRAME_SEC, 2)))
+            if job is not None:
+                jobs.append(job)
+        return jobs
+
+    def flush(self) -> list[FinalJob]:
+        if not self._frames:
+            return []
+        job = self._take(len(self._frames))
+        return [job] if job else []
+
+
+class LiveSession:
+    """Tek bir canlı bağlantının durumu: ses -> parçalar -> metin (+ kayıt)."""
+
+    def __init__(self, segmenter: Segmenter, transcribe: TranscribeText,
+                 recorder: LiveRecorder | None = None, context_sentences: int = 3,
+                 speaker_of: Callable[[np.ndarray], "str | None"] | None = None):
+        """speaker_of(cümle sesi) -> konuşmacı etiketi (SpeakerTracker.assign); yoksa etiket yok."""
+        self.speaker_of = speaker_of
+        self.segmenter = segmenter
+        self.transcribe = transcribe
+        self.recorder = recorder
+        self._context: deque[str] = deque(maxlen=context_sentences)  # Whisper'a bağlam
+        self._next_id = 0
+        self.items: list[dict] = []  # kesinleşen satırlar (oturum sonu bildirimi bunları taşır)
+
+    @staticmethod
+    def pcm16_to_float(chunk: bytes) -> np.ndarray:
+        if len(chunk) % 2:
+            chunk = chunk[:-1]
+        return np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
+
+    def feed_pcm16(self, chunk: bytes) -> list[PartialJob | FinalJob]:
+        samples = self.pcm16_to_float(chunk)
+        if self.recorder:
+            self.recorder.write_audio(samples)
+        return self.segmenter.feed(samples)
+
+    def _prompt(self) -> str | None:
+        return " ".join(self._context)[-220:] or None
+
+    def run_partial(self, job: PartialJob) -> dict | None:
+        text = self.transcribe(job.audio, True, self._prompt())
+        return {"type": "partial", "start": job.start, "text": text} if text else None
+
+    def run_final(self, job: FinalJob) -> dict:
+        text = self.transcribe(job.audio, False, self._prompt())
+        if not text:
+            return {"type": "discard", "start": job.start}
+        self._context.append(text)
+        item = {"type": "final", "id": self._next_id, "start": job.start, "end": job.end, "text": text}
+        if self.speaker_of is not None:
+            try:
+                item["speaker"] = self.speaker_of(job.audio)
+            except Exception:  # imza çıkarılamadı: metin yine gösterilir
+                item["speaker"] = None
+        self._next_id += 1
+        self.items.append({k: v for k, v in item.items() if k != "type"})
+        if self.recorder:
+            self.recorder.write_final(item)
+        return item
+
+    @property
+    def lines(self) -> int:
+        return self._next_id
+
+    def close(self) -> str | None:
+        """Kaydı kapatır; kaydedilen ses dosyasının yolunu döndürür (kayıt yoksa None)."""
+        if self.recorder:
+            self.recorder.close()
+            return self.recorder.audio_path
+        return None
+
+
+class LanguageLock:
+    """Canlı oturumun dili. Seçildiyse baştan bellidir; 'auto' ise ilk yeterince uzun cümleden
+    bulunur ve oturum boyunca kilitlenir (konferansta dil değişmez; her cümlede tespit hem
+    gecikme ekler hem de kısa cümlelerde yanılır).
+
+    detect(ses) -> LanguageDecision; desteklenmeyen dil ya da hata olursa fallback kullanılır."""
+
+    def __init__(self, language: str | None, detect: Callable[[np.ndarray], object] | None,
+                 fallback: str, min_sec: float = 1.5):
+        self.code: str | None = language
+        self.confidence: float | None = 1.0 if language else None
+        self.detected = False
+        self._detect, self.fallback, self.min_sec = detect, fallback, min_sec
+
+    @property
+    def locked(self) -> bool:
+        return self.code is not None
+
+    def decide(self, audio: np.ndarray, final: bool) -> str | None:
+        """Dil belliyse onu döner. Değilse: ses yeterince uzunsa (ya da kesin cümleyse) tespit
+        edip kilitler; kısa ara metinde None (henüz karar yok, ara metin gösterilmez)."""
+        if self.code is not None:
+            return self.code
+        if not final and len(audio) < self.min_sec * SAMPLE_RATE:
+            return None
+        try:
+            d = self._detect(audio) if self._detect else None
+            self.code, self.confidence = (d.code, d.confidence) if d else (self.fallback, None)
+        except Exception:  # desteklenmeyen dil (UnsupportedLanguageError) ya da model hatası
+            self.code, self.confidence = self.fallback, None
+        self.detected = True
+        return self.code
+
+
+def ended_payload(session_id: str, lock: LanguageLock, items: list[dict], *, started_at: str,
+                  ended_at: str, duration: float, reason: str, job_id: str | None,
+                  recording: str | None) -> dict:
+    """Canlı oturum bitti bildiriminin gövdesi ('live.ended').
+
+    reason: "stop" (Durdur'a basıldı) | "disconnect" (bağlantı koptu).
+    job_id: konuşmacı ayrımı için açılan toplu iş; bitince aynı adrese 'job.done' gider
+    (o bildirimde konuşmacılı satırlar vardır). Açılmadıysa None.
+    language.source: "secim" (kullanıcı seçti) | "tespit" (otomatik, ilk cümleden)."""
+    return {
+        "event": "live.ended",
+        "session_id": session_id,
+        "reason": reason,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration": round(duration, 2),
+        "language": {"code": lock.code, "source": "tespit" if lock.detected else "secim",
+                     "confidence": lock.confidence},
+        "lines": items,
+        "text": " ".join(i["text"] for i in items),
+        "recording": recording,
+        "job_id": job_id,
+    }
+
+
+class SpeakerTracker:
+    """Canlı oturumda konuşmacı etiketi: her kesin cümlenin ses imzası, o ana kadarki
+    konuşmacıların ortalama imzasıyla karşılaştırılır; yeterince yakınsa o kişi, değilse yeni kişi.
+
+    Toplu iş bütün sesi görüp kümelediği için daha doğrudur; canlı etiket geçicidir, oturum sonu
+    toplu işin sonucu (job.done) esastır.
+    embed(ses) -> birim uzunlukta imza (CAM++). threshold: kosinüs uzaklığı; 15 Ekim, 33 gerçek
+    kayıt: aynı kişinin iki yarısı en fazla 0,37, farklı kişiler medyan 0,72 -> 0,5.
+    Kısa cümlenin (min_sec altı: "evet", "hı hı") imzası güvenilmez: önceki konuşmacıya verilir."""
+
+    def __init__(self, embed: Callable[[np.ndarray], np.ndarray], threshold: float = 0.5,
+                 min_sec: float = 1.0, max_speakers: int = 8):
+        self.embed, self.threshold, self.min_sec, self.max_speakers = embed, threshold, min_sec, max_speakers
+        self._sums: list[np.ndarray] = []   # konuşmacı başına imza toplamı (ortalama yönü)
+        self.last: str | None = None
+
+    @staticmethod
+    def label(i: int) -> str:
+        return f"speaker_{i:02d}"
+
+    @property
+    def count(self) -> int:
+        return len(self._sums)
+
+    def assign(self, audio: np.ndarray) -> str | None:
+        if len(audio) < self.min_sec * SAMPLE_RATE:
+            return self.last
+        e = np.asarray(self.embed(audio), dtype=np.float64)
+        e = e / (np.linalg.norm(e) + 1e-9)
+        if not self._sums:
+            self._sums.append(e.copy())
+            self.last = self.label(0)
+            return self.last
+        cents = np.stack([s / (np.linalg.norm(s) + 1e-9) for s in self._sums])
+        dist = 1.0 - cents @ e
+        best = int(np.argmin(dist))
+        if dist[best] >= self.threshold and len(self._sums) < self.max_speakers:
+            self._sums.append(e.copy())
+            best = len(self._sums) - 1
+        else:
+            self._sums[best] += e
+        self.last = self.label(best)
+        return self.last

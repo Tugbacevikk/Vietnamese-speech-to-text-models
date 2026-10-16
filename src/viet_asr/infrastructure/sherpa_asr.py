@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import sherpa_onnx
 
 from viet_asr.application.config import AsrParams, LanguageProfile, ModelRef
@@ -133,6 +134,16 @@ class _SherpaAsr:
                 out += self._words(st.result, seg)
             del streams  # grubun belleği bir sonrakinden önce bırakılır
         return out
+
+    device = "cpu"
+
+    def transcribe_text(self, samples, fast: bool = False, prompt: str | None = None,
+                        normalizer: TextNormalizer | None = None) -> str:
+        """Canlı altyazı: tek parça -> metin. Bu modellerde hızlı kip ve istem yok (Zipformer
+        zaten çok hızlı); kelimeler sistemin biçiminde (Vietnamca küçük harf, noktalamasız)."""
+        if len(samples) == 0:
+            return ""
+        return " ".join(w.text for w in self.transcribe([VadSegment(0.0, np.asarray(samples, np.float32))]))
 
     def _words(self, r, seg: VadSegment) -> list[Word]:
         return tokens_to_words(list(r.tokens), list(r.timestamps), seg.start, seg.end,

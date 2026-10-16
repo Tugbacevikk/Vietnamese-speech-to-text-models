@@ -304,3 +304,21 @@ iki akış aynı anda, ara sonuç açık.
 - ffmpeg'in akış başında 5 sn biçim araması SDP'de biçim yazılı olduğu için kapatıldı
   (ilk ses 0,06 sn'de geliyor); paket kesilince ffmpeg kendiliğinden çıkmadığı için okuma
   zaman aşımı eklendi.
+
+### Mikrofon canlı altyazısı: Live-stream bölücüsü mü, bitişik bölücü mü (16 Ekim)
+
+Live-stream reposu taşınırken aynı 4 VietMed kaydı (aynı Zipformer-68M) iki bölücüyle canlı
+hızda çözüldü:
+
+| Bölücü | WER | Çözülen ses |
+|---|---|---|
+| Live-stream (VAD: 700 ms sessizlikte cümle biter, sessizlik atılır) | %17,1 | %85-98 |
+| Bitişik (5-8 sn, duraklamada kes, hiçbir ses atılmaz) | **%10,8** | %100 |
+
+- Fark, VAD'ın cümle sınırında kestiği kısık hece ve sözcüklerden geliyor (Zipformer bağlamı
+  da kaybediyor). Vietnamca canlı altyazı bu yüzden bitişik bölücüyle; Türkçe (Whisper) VAD'la
+  kalıyor, çünkü Whisper sessiz parçalarda cümle uyduruyor.
+- Tarayıcı denemesi (Chromium, sahte mikrofon, 0249 kaydı, 100 sn): ara sonuç ve kesin satırlar
+  aktı, gecikme göstergesi 1,0-1,7 sn, Durdur'dan sonra kayıt toplu işe gitti ve tamamlandı,
+  konsolda hata yok.
+

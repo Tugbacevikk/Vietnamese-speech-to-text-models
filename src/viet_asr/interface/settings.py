@@ -69,6 +69,36 @@ class Settings:
     detect_roles: bool = field(default_factory=lambda: os.environ.get("DETECT_ROLES", "0") == "1")
     # aynı kelimenin art arda tekrarı ve dolgu sesleri temizliği (varsayılan kapalı)
     clean_repeats: bool = field(default_factory=lambda: os.environ.get("CLEAN_REPEATS", "0") == "1")
+    # --- Canlı altyazı (/canli, ws://.../ws/live; Live-stream'den) ---
+    # Canlı sayfanın varsayılan dili: tr | vi | auto (auto: ilk cümleden bulunur ve kilitlenir)
+    live_language: str = field(default_factory=lambda: os.environ.get("LIVE_LANGUAGE", "vi").lower())
+    # Canlı modun Türkçe modeli; boşsa TR_MODEL (model bir kez yüklenir). Vietnamca: hep VI_MODEL.
+    live_model: str | None = field(default_factory=lambda: os.environ.get("LIVE_MODEL") or None)
+    live_vad: str = field(default_factory=lambda: os.environ.get("LIVE_VAD", "silero").lower())
+    live_vad_threshold: float = field(default_factory=lambda: float(os.environ.get(
+        "LIVE_VAD_THRESHOLD", "0.5")))
+    # Türkçe (Whisper): bu kadar duraklama cümleyi bitirir; durmadan konuşulursa en fazla bu kadar sn
+    end_silence_ms: int = field(default_factory=lambda: int(os.environ.get("END_SILENCE_MS", "700")))
+    max_utterance_sec: float = field(default_factory=lambda: float(os.environ.get(
+        "MAX_UTTERANCE_SEC", "12")))
+    partial_interval_sec: float = field(default_factory=lambda: float(os.environ.get(
+        "PARTIAL_INTERVAL_SEC", "1.2")))
+    save_recordings: bool = field(default_factory=lambda: os.environ.get(
+        "SAVE_RECORDINGS", "true").lower() in ("1", "true", "evet"))
+    recordings_dir: str = field(default_factory=lambda: os.environ.get("RECORDINGS_DIR", "recordings"))
+    # oturum bitince 'live.ended' bildirimi (sonra aynı adrese konuşmacılı 'job.done'); boşsa yok
+    live_webhook_url: str = field(default_factory=lambda: os.environ.get("LIVE_WEBHOOK_URL", "").strip())
+    live_speakers: bool = field(default_factory=lambda: os.environ.get(
+        "LIVE_SPEAKERS", "true").lower() in ("1", "true", "evet"))
+    live_speaker_threshold: float = field(default_factory=lambda: float(os.environ.get(
+        "LIVE_SPEAKER_THRESHOLD", "0.5")))
+    # bağlantı koparsa oturum bu kadar sn bekler; sayfa dönerse aynı oturum sürer (0: beklemez)
+    live_resume_sec: float = field(default_factory=lambda: float(os.environ.get("LIVE_RESUME_SEC", "30")))
+    # canlı oturum kayıtları (.wav, .txt, .jsonl) kaç gün sonra silinsin (0 = silme); kişisel veri
+    recordings_retention_days: float = field(default_factory=lambda: float(os.environ.get(
+        "RECORDINGS_RETENTION_DAYS", "30")))
+    live_auto_analyze: bool = field(default_factory=lambda: os.environ.get(
+        "LIVE_AUTO_ANALYZE", "true").lower() in ("1", "true", "evet"))
     # canlı akış (RTP / ffmpeg kaynağı; POST /streams). Varsayılan: geliştirmede açık, üretimde kapalı
     # (istek bir UDP portu açar ya da dış adrese bağlanır).
     enable_streams: bool = field(default_factory=lambda: os.environ.get(

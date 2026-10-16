@@ -132,6 +132,10 @@ class JobStore(ResultRepository, Protocol):
         """Bitmiş işe veri seti onayı (kim, test|egitim) yazar. Bitmemişse False."""
         ...
 
+    def add_event(self, event: str, url: str, payload: dict, job_id: str | None = None) -> None:
+        """İşten bağımsız bildirim (canlı oturum sonu 'live.ended'); outbox'tan imzalı gider."""
+        ...
+
     def delete_job(self, job_id: str) -> str | None:
         """İşi, sonucunu ve bekleyen bildirimlerini siler; ses dosyasının yolunu döndürür
         (silinecekse çağıran siler). İş yoksa None."""
@@ -153,3 +157,26 @@ class JobQueue(Protocol):
 
 class Notifier(Protocol):
     def notify(self, job: AudioJob, transcript: Transcript) -> None: ...
+
+
+class SpeechDetector(Protocol):
+    """512 örneklik (16 kHz'de 32 ms) çerçevede konuşma var mı? (canlı altyazı)"""
+
+    def __call__(self, frame: np.ndarray) -> bool: ...
+
+    def reset(self) -> None: ...
+
+
+class LiveRecorder(Protocol):
+    """Canlı oturumun sesini ve kesinleşen metnini anında diske yazar (çökmeye dayanıklı)."""
+
+    name: str
+
+    @property
+    def audio_path(self) -> str: ...
+
+    def write_audio(self, samples: np.ndarray) -> None: ...
+
+    def write_final(self, item: dict) -> None: ...
+
+    def close(self) -> None: ...

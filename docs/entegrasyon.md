@@ -294,3 +294,50 @@ metnin hazır olmasına kadar geçen süre.
 | `GET /health/ready` | Modeller yüklü ve her dil kuyruğunda çalışan işçi var mı (yük dengeleyici için) |
 | `GET /metrics` | Gecikme, "1 dk ses ≤ 1 dk" hedefine uyum, kuyruk doluluğu (JSON) |
 | `GET /metrics/prometheus` | Aynısı + aşama süreleri, webhook teslim/ölü sayıları |
+
+## 11. Canlı altyazı (mikrofon, `/ws/live`)
+
+Tarayıcı ya da başka bir istemci sesi WebSocket ile gönderir, metin konuşma sırasında gelir.
+Hazır ekran: `GET /canli`. Diller ve model durumu: `GET /live/health`.
+
+```
+WS /ws/live?language=vi            (tr | vi | auto; API_KEY varsa ?key=... ya da X-API-Key)
+  istemci -> ikili mesaj: Int16 little-endian PCM, 16 kHz, mono (her 100-250 ms bir parça)
+  istemci -> {"type": "stop"}       son parçayı işle ve kapat
+  sunucu  -> {"type": "ready", "session_id", "resume_token", "language", "model", "device"}
+             {"type": "partial", "start", "text"}          ara sonuç (konuşma sürerken)
+             {"type": "final", "id", "start", "end", "text", "speaker"}
+             {"type": "discard", "start"}                  ara sonuç geçersiz (gürültüydü)
+             {"type": "language", "code", "confidence"}    yalnızca auto'da, ilk cümleden sonra
+             {"type": "stats", "lag_sec"}                  işleme gecikmesi
+             {"type": "done", "session_id", "job_id", "webhook"}
+```
+
+İsteğe bağlı sorgu parametreleri: `silence_ms` (cümle sonu sessizliği, 700), `partial_sec` (ara
+sonuç sıklığı), `max_sec` (cümle üst sınırı), `save=0` (sesi kaydetme), `analyze=0` (oturum sonu
+toplu iş açma), `callback_url`.
+
+- **Vietnamca (Zipformer):** parçalar bitişik, 5-8 sn, kısa bir duraklamada kesilir; hiçbir ses
+  atılmaz. Live-stream'in VAD bölücüsü cümleler arasını atıyordu; Zipformer'da bu sözcük
+  kaybettirdi (bkz. ölçümler).
+- **Türkçe (Whisper):** VAD ile cümle cümle (700 ms sessizlikte cümle biter, en fazla 12 sn);
+  Whisper'ın uydurduğu kalıp cümleler ("Altyazı M.K.", "Abone olun." …) atılır.
+- **Konuşmacı:** her kesin satıra CAM++ ses izinden canlı etiket (`speaker_00`…; kısa satır
+  önceki kişiye verilir). Kesin konuşmacı ayrımı oturum sonundaki toplu iştedir (`job_id`).
+- **Kopma:** bağlantı koparsa oturum `LIVE_RESUME_SEC` (30 sn) bekler; istemci
+  `?resume=<session_id>&token=<resume_token>&after=<son final id>` ile döner, kaçırdığı satırlar
+  yeniden gelir. `canli.html` bunu kendisi yapar.
+- **Bildirim:** oturum bitince (Durdur ya da kopma) `callback_url`'e ya da `LIVE_WEBHOOK_URL`'e
+  imzalı `live.ended` gider (outbox; aynı imza ve yeniden deneme kuralları, `X-Job-Id` boş):
+
+  ```json
+  {"event": "live.ended", "session_id": "…", "reason": "stop",
+   "started_at": "…", "ended_at": "…", "duration": 94.2,
+   "language": {"code": "vi", "source": "secim", "confidence": null},
+   "lines": [{"id": 0, "start": 0.4, "end": 6.1, "text": "…", "speaker": "speaker_00"}],
+   "text": "…", "recording": "2026-10-16_14-27-55", "job_id": "…"}
+  ```
+
+  `job_id` dolu ise toplu iş bitince aynı adrese `job.done` da gelir (konuşmacılı satırlar).
+- Kayıtlar `RECORDINGS_DIR`'de (wav + txt + jsonl), `RECORDINGS_RETENTION_DAYS` gün sonra silinir.
+

@@ -19,6 +19,7 @@ class MemoryJobStore:
         self.jobs: dict[str, JobRecord] = {}
         self.results: dict[str, Transcript] = {}
         self.events: list[tuple[str, str]] = []  # (job_id, olay) — outbox yerine
+        self.outbox: list[dict] = []  # add_event ile yazılanlar (testler gövdeye bakar)
         self._lock = threading.Lock()
         self._originals: dict = {}
         self._edits: dict = {}
@@ -171,6 +172,10 @@ class MemoryJobStore:
     def recent_timings(self, limit=500):
         done = [self.results[j] for j, r in self.jobs.items() if r.status == JobStatus.DONE and j in self.results]
         return [(t.language.code, t.duration, dict(t.timings)) for t in done if t.timings][:limit]
+
+    def add_event(self, event, url, payload, job_id=None):
+        self.outbox.append({"event": event, "url": url, "payload": payload, "job_id": job_id})
+        self.events.append((job_id, event))
 
     def outbox_stats(self, max_attempts):
         return {"gonderildi": 0, "bekliyor": len(self.events), "olu": 0}
