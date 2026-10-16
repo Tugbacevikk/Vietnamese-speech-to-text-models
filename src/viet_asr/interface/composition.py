@@ -38,7 +38,7 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                    diarizer_window: float = 1.0,
                    diarizer_hop: float = 0.4,
                    diarizer_min_window: float = 0.4,
-                   diarizer_merge_distance: float = 0.28) -> PipelineConfig:
+                   diarizer_merge_distance: float = 0.15) -> PipelineConfig:
     """workers: aynı süreçte aynı anda işlenecek ses sayısı (yerel mod); motorlar buna göre
     paralel çağrıya hazırlanır. whisper_threads/whisper_workers: faster-whisper'a ayrı bütçe
     (bir çözüm kaç iş parçacığı, aynı anda kaç çözüm); verilmezse threads ve workers."""
@@ -187,7 +187,7 @@ def config_from_settings(s, workers: int = 1) -> PipelineConfig:
                           diarizer_window=getattr(s, "diarizer_window", 1.0),
                           diarizer_hop=getattr(s, "diarizer_hop", 0.4),
                           diarizer_min_window=getattr(s, "diarizer_min_window", 0.4),
-                          diarizer_merge_distance=getattr(s, "diarizer_merge_distance", 0.28))
+                          diarizer_merge_distance=getattr(s, "diarizer_merge_distance", 0.15))
 
 
 def verify_models_or_exit(settings) -> None:

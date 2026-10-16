@@ -58,7 +58,7 @@ class Settings:
     diarizer_window: float = field(default_factory=lambda: float(os.environ.get("DIARIZER_WINDOW", "1.0")))
     diarizer_hop: float = field(default_factory=lambda: float(os.environ.get("DIARIZER_HOP", "0.4")))
     diarizer_min_window: float = field(default_factory=lambda: float(os.environ.get("DIARIZER_MIN_WINDOW", "0.4")))
-    diarizer_merge_distance: float = field(default_factory=lambda: float(os.environ.get("DIARIZER_MERGE_DISTANCE", "0.28")))
+    diarizer_merge_distance: float = field(default_factory=lambda: float(os.environ.get("DIARIZER_MERGE_DISTANCE", "0.15")))
     hotwords: str | None = field(default_factory=lambda: os.environ.get("VI_HOTWORDS") or None)
     task_time_limit: int = field(default_factory=lambda: int(os.environ.get("TASK_TIME_LIMIT", "1800")))
     max_audio_minutes: float = field(default_factory=lambda: float(os.environ.get("MAX_AUDIO_MINUTES", "60")))

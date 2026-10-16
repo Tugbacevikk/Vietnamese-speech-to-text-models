@@ -71,21 +71,21 @@ def test_merge_close_threshold():
     c1 = np.zeros(192)
     c1[0] = 1.0
     c2 = np.zeros(192)
-    c2[0] = 0.70
-    c2[1] = np.sqrt(1.0 - 0.70**2)
+    c2[0] = 0.82
+    c2[1] = np.sqrt(1.0 - 0.82**2)
 
     E = np.vstack([np.tile(c1, (10, 1)), np.tile(c2, (10, 1))])
     lab = np.array([0] * 10 + [1] * 10)
 
-    # merge_distance = 0.35 iken (kosinüs uzaklığı 0.30 < 0.35) tek kümeye birleşir
-    d35 = EmbeddingClusterDiarizer.__new__(EmbeddingClusterDiarizer)
-    d35.cfg = DiarizerConfig(merge_distance=0.35)
-    res35 = d35._merge_close(E, lab.copy())
-    assert len(np.unique(res35)) == 1
+    # merge_distance = 0.20 iken (kosinüs uzaklığı 0.18 < 0.20) tek kümeye birleşir
+    d20 = EmbeddingClusterDiarizer.__new__(EmbeddingClusterDiarizer)
+    d20.cfg = DiarizerConfig(merge_distance=0.20)
+    res20 = d20._merge_close(E, lab.copy())
+    assert len(np.unique(res20)) == 1
 
-    # merge_distance = 0.28 iken (0.30 >= 0.28) ayrı kalır
-    d28 = EmbeddingClusterDiarizer.__new__(EmbeddingClusterDiarizer)
-    d28.cfg = DiarizerConfig(merge_distance=0.28)
-    res28 = d28._merge_close(E, lab.copy())
-    assert len(np.unique(res28)) == 2
+    # merge_distance = 0.15 iken (0.18 >= 0.15) ayrı kalır
+    d15 = EmbeddingClusterDiarizer.__new__(EmbeddingClusterDiarizer)
+    d15.cfg = DiarizerConfig(merge_distance=0.15)
+    res15 = d15._merge_close(E, lab.copy())
+    assert len(np.unique(res15)) == 2
 
