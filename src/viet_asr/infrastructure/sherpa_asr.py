@@ -10,6 +10,7 @@ Zaman bilgisi modele göre değişir:
 from __future__ import annotations
 
 import math
+import threading
 
 import numpy as np
 import sherpa_onnx
@@ -116,6 +117,7 @@ class _SherpaAsr:
         self.name = model.name
         self.params = params
         self.normalizer = normalizer
+        self._lock = threading.RLock()
         self.recognizer = self._build(model, params)
 
     def _build(self, model: ModelRef, params: AsrParams):  # pragma: no cover - alt sınıfta
@@ -123,16 +125,17 @@ class _SherpaAsr:
 
     def transcribe(self, segments: list[VadSegment]) -> list[Word]:
         out: list[Word] = []
-        for batch in batches(segments, self.params.batch_seconds):
-            streams = []
-            for seg in batch:
-                st = self.recognizer.create_stream()
-                st.accept_waveform(seg.sample_rate, seg.samples)
-                streams.append(st)
-            self.recognizer.decode_streams(streams)  # grup içinde toplu çözme: tek tek çağırmaktan hızlı
-            for seg, st in zip(batch, streams):
-                out += self._words(st.result, seg)
-            del streams  # grubun belleği bir sonrakinden önce bırakılır
+        with self._lock:
+            for batch in batches(segments, self.params.batch_seconds):
+                streams = []
+                for seg in batch:
+                    st = self.recognizer.create_stream()
+                    st.accept_waveform(seg.sample_rate, seg.samples)
+                    streams.append(st)
+                self.recognizer.decode_streams(streams)  # grup içinde toplu çözme: tek tek çağırmaktan hızlı
+                for seg, st in zip(batch, streams):
+                    out += self._words(st.result, seg)
+                del streams  # grubun belleği bir sonrakinden önce bırakılır
         return out
 
     device = "cpu"
@@ -143,7 +146,8 @@ class _SherpaAsr:
         zaten çok hızlı); kelimeler sistemin biçiminde (Vietnamca küçük harf, noktalamasız)."""
         if len(samples) == 0:
             return ""
-        return " ".join(w.text for w in self.transcribe([VadSegment(0.0, np.asarray(samples, np.float32))]))
+        with self._lock:
+            return " ".join(w.text for w in self.transcribe([VadSegment(0.0, np.asarray(samples, np.float32))]))
 
     def _words(self, r, seg: VadSegment) -> list[Word]:
         return tokens_to_words(list(r.tokens), list(r.timestamps), seg.start, seg.end,
