@@ -34,9 +34,7 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                    whisper_hotwords: str | None = None,
                    whisper_prompt: str | None = None,
                    whisper_beam_size: int = 5,
-                   whisper_batch_size: int = 8,
-                    whisper_rolling_prompt: bool = True,
-                    whisper_rolling_words: int = 50) -> PipelineConfig:
+                   whisper_batch_size: int = 8) -> PipelineConfig:
     """workers: aynı süreçte aynı anda işlenecek ses sayısı (yerel mod); motorlar buna göre
     paralel çağrıya hazırlanır. whisper_threads/whisper_workers: faster-whisper'a ayrı bütçe
     (bir çözüm kaç iş parçacığı, aynı anda kaç çözüm); verilmezse threads ve workers."""
@@ -50,9 +48,7 @@ def default_config(models_dir: str | Path = "models", languages=("vi", "tr"),
                            hotwords=whisper_hotwords or None,
                            initial_prompt=whisper_prompt or None,
                            beam_size=whisper_beam_size,
-                           batch_size=whisper_batch_size,
-                           rolling_prompt=whisper_rolling_prompt,
-                           rolling_prompt_words=whisper_rolling_words)
+                           batch_size=whisper_batch_size)
         extra = {"num_threads": threads, "whisper": wp}
         if code == "vi" and hotwords:
             extra["hotwords_file"] = hotwords
@@ -181,9 +177,7 @@ def config_from_settings(s, workers: int = 1) -> PipelineConfig:
                           whisper_hotwords=getattr(s, "whisper_hotwords", None),
                           whisper_prompt=getattr(s, "whisper_initial_prompt", None),
                           whisper_beam_size=getattr(s, "whisper_beam_size", 5),
-                          whisper_batch_size=getattr(s, "whisper_batch_size", 8),
-                          whisper_rolling_prompt=getattr(s, "whisper_rolling_prompt", True),
-                          whisper_rolling_words=getattr(s, "whisper_rolling_words", 50))
+                          whisper_batch_size=getattr(s, "whisper_batch_size", 8))
 
 
 def verify_models_or_exit(settings) -> None:

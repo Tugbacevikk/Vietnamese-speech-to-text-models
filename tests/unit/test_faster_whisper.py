@@ -127,29 +127,3 @@ def test_guvenlik_agi_tekrar_ayarlari():
     o = e._options(rescue=True, retry=True)
     assert o["temperature"] == (0.2, 0.4) and o["best_of"] == 1 and o["beam_size"] == 1
     assert engine(None)._options(rescue=True)["beam_size"] == 5
-
-
-class PromptTrackingModel:
-    def __init__(self):
-        self.prompts = []
-
-    def transcribe(self, samples, vad_filter, **opt):
-        self.prompts.append(opt.get("initial_prompt"))
-        if len(self.prompts) == 1:
-            return iter([NS(text=" yüz yüze eğitimi seviyorum",
-                            words=[w(" yüz", 0.1, 0.3), w(" yüze", 0.3, 0.5), w(" eğitimi", 0.5, 0.8), w(" seviyorum", 0.8, 1.2)])]), None
-        return iter([NS(text=" daha avantajlı",
-                        words=[w(" daha", 0.1, 0.3), w(" avantajlı", 0.3, 0.6)])]), None
-
-
-def test_kayan_pencere_istemi_rolling_prompt():
-    m = PromptTrackingModel()
-    eng = engine(model=m, rolling_prompt=True, rolling_prompt_words=20)
-    segs = [seg(1.0, 2.5), seg(3.0, 4.5)]
-    words = eng.transcribe(segs)
-    assert len(m.prompts) == 2
-    # 1. parçada henüz geçmiş bağlam yok
-    assert m.prompts[0] is None
-    # 2. parçada 1. parçanın kelimeleri bağlam olarak aktarılmış olmalı
-    assert m.prompts[1] == "yüz yüze eğitimi seviyorum"
-    assert "yüz" in [x.text for x in words]

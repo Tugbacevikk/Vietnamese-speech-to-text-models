@@ -63,9 +63,6 @@ class WhisperParams:
     # Whisper medium 2 iş parçacığıyla tek işte oran ~2,5'e çıkıyordu (Tuğba'nın bilgisayarı,
     # 2 dk ses 296 sn); projede 4'tü. Ayar: WHISPER_THREADS (varsayılan fiziksel çekirdek).
     cpu_threads: int | None = None
-    # Kayan pencere bağlamı: önceki parçanın son kelimelerini sonraki parçaya bağlam olarak aktarır
-    rolling_prompt: bool = False
-    rolling_prompt_words: int = 50
 
 
 @dataclass(frozen=True)
