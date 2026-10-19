@@ -193,6 +193,20 @@ alembic revision --autogenerate -m "aciklama"
 pytest tests/db          # göç unutulursa test_sema_modellerle_ayni kırılır
 ```
 
+### PostgreSQL'e geçiş (yerel mod)
+
+Yerel mod (`baslat.bat`) SQLite yerine PostgreSQL de kullanabilir; Redis gerekmez. Geçmiş işler,
+satırlar, arayüzdeki düzeltmeler, veri seti onayları ve bekleyen bildirimler taşınır.
+
+1. PostgreSQL'i kurun (internetsiz makineye kurulum dosyası önceden indirilir) ya da Docker ile:
+   `docker run -d --name asr-pg -e POSTGRES_USER=asr -e POSTGRES_PASSWORD=asr -e POSTGRES_DB=asr -p 5432:5432 postgres:16-alpine`
+   (kurulum dosyasıyla kurduysanız pgAdmin ya da `psql`'de: `CREATE DATABASE asr;`)
+2. `.env`: `LOCAL_DATABASE_URL=postgresql://asr:asr@localhost:5432/asr`
+3. `postgrese_gec.bat` (sunucuyu durdurur, önce sayar, sonra taşır; tekrar çalıştırmak çoğaltmaz)
+4. `baslat.bat`. Eski `data/uploads/jobs.db` yedek olarak kalır.
+
+Tam moda (`baslat_tam.bat`) geçerken aynı veritabanı `DATABASE_URL` olarak verilir.
+
 ## Vietnamca ince ayar (Faz 2)
 
 Zipformer-68M tıbbi veriyle WSL2 + GPU'da ince ayarlanır; çıkan model Kapı 2'yi geçerse
