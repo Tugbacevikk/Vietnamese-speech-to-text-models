@@ -80,3 +80,21 @@ def test_ses_perdesi_ve_cinsiyet():
     assert got[A][0] == "erkek" and got[B][0] == "kadın" and "BELIRSIZ" not in got
     short = PitchProfiler().profile(voice(115, 1.0), [SpeakerSegment(A, 0, 1)])
     assert short[0].f0 is None and short[0].gender is None              # 2 sn'den az ötümlü ses
+
+
+def test_turkce_soru_eki_ayri_sozcuk_olmali():
+    from viet_asr.application.transcript_view import _is_question
+
+    for soru in ("hasta ateşi var mı", "gelecek misin", "bunu yapabilir miyiz", "evde miydi", "geldi mi"):
+        assert _is_question(soru.split(), "tr") is True, soru
+    # "mi/mu/mü" ile BAŞLAYAN sıradan sözcükler soru değildir (eskiden hepsi "?" alıyordu)
+    for duz in ("ben çok mutlu", "müzik dinliyorum", "bu mimar iyi", "mümkün değil", "misafir geldi",
+                "mutfakta çalışıyor"):
+        assert _is_question(duz.split(), "tr") is False, duz
+
+
+def test_vietnamca_khong_sao_soru_degil():
+    from viet_asr.application.transcript_view import _is_question
+
+    assert _is_question("dạ không sao".split(), "vi") is False
+    assert _is_question("bác sĩ có nhà không".split(), "vi") is True

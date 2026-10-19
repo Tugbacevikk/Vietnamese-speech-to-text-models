@@ -1,66 +1,23 @@
-"""Vietnamca ve Türkçe noktalama ve büyük harf iyileştirmesi (Punctuation & Capitalization).
+"""Vietnamca özel isim büyük harfi (yalnızca görüntü katmanı: transcript_view; veritabanına yazılmaz).
 
-İnternetsiz (çevrimdışı) çalışır; akustik duraklamaları (Word zamanlaması),
-söylem bağlaçlarını (discourse markers), soru kalıplarını ve özel isim / unvan
-büyük harflerini birleştirerek ASR çıktısını yüksek okunabilirlikte biçimlendirir.
+Vietnamca heceler ayrı yazıldığı için tek heceli ülke adları günlük kelimelerle aynıdır:
+"phương pháp", "liệu pháp" (tedavi), "thẩm mỹ" (estetik), "anh" (abi / sen). 626 VietMed
+referansında (211 bin kelime) tek heceli adlar koşulsuz büyütülünce 585 dönüşümün yaklaşık 470'i
+yanlıştı ("pháp" 340, "anh" 92, "mỹ" çoğu "thẩm mỹ"). Bu yüzden:
+
+  - çok heceli adlar ("việt nam", "bộ y tế", "bạch mai"...) her yerde büyütülür (doğruluk %100);
+  - tek heceli ülke adları ("mỹ", "pháp", "đức", "nga", "anh") yalnızca öncesinde yer / dil /
+    uyruk bildiren bir sözcük varsa ve sonrasında bileşik oluşturan bir sözcük yoksa büyütülür:
+    "ở mỹ", "người đức", "tiếng anh" -> evet; "thẩm mỹ", "phương pháp", "bên anh" -> hayır.
+
+Bilerek tutucu: büyütülmeyen bir özel isim okunurluğu azaltır, yanlış büyütülen bir sıradan kelime
+metni bozar. Kapsam dışı kalan örnekler eklenerek genişletilebilir (tests/unit/test_punctuator.py).
 """
 from __future__ import annotations
 
 import re
-from typing import Sequence
 
-from viet_asr.domain import Word
-
-# Soru ekleri ve sözcükleri (Vietnamca)
-VI_QUESTION_END = {
-    "không", "hả", "sao", "chưa", "nhỉ", "thế", "gì", "đâu", "nào", "ai",
-    "chăng", "chứ", "hông"
-}
-VI_QUESTION_PHRASES = (
-    "thế nào", "bao nhiêu", "tại sao", "vì sao", "như thế nào", "làm sao",
-    "phải không", "do đâu", "được không", "có được", "là gì"
-)
-
-# Soru ekleri ve sözcükleri (Türkçe)
-TR_QUESTIONS = {
-    "mi", "mı", "mu", "mü", "misin", "mısın", "musun", "müsün",
-    "misiniz", "mısınız", "musunuz", "müsünüz",
-    "miyim", "mıyım", "muyum", "müyüm",
-    "midir", "mıdır", "mudur", "müdür",
-    "mıyız", "miyiz", "muyuz", "müyüz",
-    "miydi", "mıydı", "muydu", "müydü",
-    "nasıl", "nasılsın", "nasılsınız", "kim", "nerede", "nereden", "nereye", "kaç", "hangi", "hangisi"
-}
-TR_QUESTION_PHRASES = (
-    "ne düşünüyorsun", "ne dersin", "ne yapıyorsun", "ne demek", "neden", "niçin", "niye",
-    "nasıl yani", "sen nasılsın", "siz nasılsınız", "ne olarak"
-)
-
-# Cümle başı veya ara sözcük olarak virgül alan Vietnamca söylem kalıpları
-VI_DISCOURSE_MARKERS = {
-    "thưa bác sĩ": "Thưa bác sĩ,",
-    "thưa bác si": "Thưa bác sĩ,",
-    "thưa cô": "Thưa cô,",
-    "thưa thầy": "Thưa thầy,",
-    "dạ vâng": "Dạ vâng,",
-    "dạ": "Dạ,",
-    "vâng": "Vâng,",
-    "tuy nhiên": "Tuy nhiên,",
-    "ngoài ra": "Ngoài ra,",
-    "hơn nữa": "Hơn nữa,",
-    "do đó": "Do đó,",
-    "vì vậy": "Vì vậy,",
-    "đặc biệt": "Đặc biệt,",
-    "ví dụ": "Ví dụ,",
-    "thực ra": "Thực ra,",
-    "thật ra": "Thật ra,",
-    "nói chung": "Nói chung,",
-    "tóm lại": "Tóm lại,",
-    "trước hết": "Trước hết,",
-    "sau đó": "Sau đó,",
-}
-
-# Vietnamca özel isimler, yer adları ve kurumlar
+# Çok heceli: bağlama bakmadan büyütülür
 VI_PROPER_NOUNS = {
     "việt nam": "Việt Nam",
     "hà nội": "Hà Nội",
@@ -82,161 +39,31 @@ VI_PROPER_NOUNS = {
     "thái lan": "Thái Lan",
     "singapore": "Singapore",
     "hoa kỳ": "Hoa Kỳ",
-    "mỹ": "Mỹ",
-    "pháp": "Pháp",
-    "đức": "Đức",
-    "anh": "Anh",
-    "nga": "Nga",
+    "đức phật": "Đức Phật",
 }
 
-# Cümle içi bölünmemesi ve arasına virgül girmemesi gereken bileşik kelimeler
-VI_COMPOUNDS = {
-    ("bác", "sĩ"), ("có", "thể"), ("chúng", "tôi"), ("chúng", "ta"),
-    ("không", "sao"), ("y", "tế"), ("bệnh", "viện"), ("điều", "trị"),
-    ("sức", "khỏe"), ("phát", "triển"), ("thời", "gian"), ("nguyên", "nhân"),
-    ("rụng", "tóc"), ("phục", "hồi"), ("chăm", "sóc"), ("sử", "dụng"),
-}
+# Tek heceli ülke adları: yalnızca öncesinde bunlardan biri varsa
+VI_COUNTRIES = {"mỹ": "Mỹ", "pháp": "Pháp", "đức": "Đức", "nga": "Nga", "anh": "Anh"}
+_PLACE_BEFORE = ("ở", "tại", "sang", "qua", "từ", "nước", "người", "tiếng", "đến", "tới")
+# "anh" zamir olarak çok yaygın: yalnızca ülke / dil bildiren sözcüklerden sonra
+_ANH_BEFORE = ("nước", "tiếng")
+# Bunlardan biri hemen ardından geliyorsa ülke adı değil, bileşik sözcüktür ("mỹ phẩm", "pháp luật")
+_COMPOUND_AFTER = ("phẩm", "thuật", "nhân", "học", "viện", "luật", "lý", "y", "sư", "đình", "tính", "tin",
+                   "hóa", "quan", "cảm", "ngữ", "danh", "nghệ", "miều", "lệnh", "trị", "định")
+
+_MULTI = [(re.compile(r"(?<!\w)" + re.escape(k) + r"(?!\w)", re.IGNORECASE), v)
+          for k, v in sorted(VI_PROPER_NOUNS.items(), key=lambda kv: -len(kv[0]))]
+_AFTER = r"(?!\s+(?:" + "|".join(_COMPOUND_AFTER) + r")(?!\w))(?!\w)"
+_COUNTRY = re.compile(r"(?<!\w)(" + "|".join(_PLACE_BEFORE) + r")(\s+)(mỹ|pháp|đức|nga)" + _AFTER, re.IGNORECASE)
+_ANH = re.compile(r"(?<!\w)(" + "|".join(_ANH_BEFORE) + r")(\s+)(anh)" + _AFTER, re.IGNORECASE)
 
 
-def capitalize_initial(s: str) -> str:
-    """İlk harfi büyük harf yapar (Türkçe İ/I ve Unicode NFC uyumlu)."""
-    if not s:
-        return s
-    first = s[0]
-    if first == "i":
-        return "İ" + s[1:]
-    if first == "ı":
-        return "I" + s[1:]
-    return first.upper() + s[1:]
-
-
-def capitalize_proper_nouns(text: str, lang: str = "vi") -> str:
-    """Vietnamca veya Türkçe bilinen özel isimleri ve yer adlarını büyük harfe çevirir."""
+def capitalize_proper_nouns(text: str, lang: str | None = "vi") -> str:
+    """Vietnamca metinde bilinen özel isimleri büyütür; başka dillerde metne dokunmaz."""
     if not text or lang not in ("vi", None):
         return text
-
     res = text
-    for lower_name, proper_name in VI_PROPER_NOUNS.items():
-        # Kelime sınırlarına duyarlı değiştirme
-        pattern = r"(?<!\w)" + re.escape(lower_name) + r"(?!\w)"
-        res = re.sub(pattern, proper_name, res, flags=re.IGNORECASE)
-    return res
-
-
-def is_question_sentence(raw_text: str, last_word: str = "", lang: str | None = None) -> bool:
-    """Metnin soru cümlesi olup olmadığını tespit eder."""
-    lower_raw = raw_text.lower().strip()
-    clean_last = last_word.lower().strip(".,?!;:") if last_word else (lower_raw.split()[-1] if lower_raw else "")
-
-    if lang in ("vi", None):
-        if any(p in lower_raw for p in VI_QUESTION_PHRASES):
-            return True
-        if clean_last in VI_QUESTION_END:
-            return True
-        if clean_last == "ạ" and any(qw in lower_raw for qw in (
-            "nguyên nhân do đâu", "như thế nào", "thực phẩm nào", "phục hồi tóc",
-            "thưa bác sĩ", "gì", "nào", "đâu", "sao", "có thể", "làm sao", "do đâu"
-        )):
-            return True
-
-    if lang in ("tr", None):
-        if any(p in lower_raw for p in TR_QUESTION_PHRASES):
-            return True
-        if clean_last in TR_QUESTIONS:
-            return True
-        if (clean_last.startswith(("mı", "mi", "mu", "mü")) and len(clean_last) <= 8 and
-                clean_last not in ("millet", "minik", "minder", "miktar", "milli")):
-            return True
-
-    return False
-
-
-def punctuate_words(ws: Sequence[Word], lang: str | None = None,
-                    min_pause_comma: float = 0.30,
-                    max_pause_comma: float = 0.60) -> str:
-    """Word nesnelerindeki ses duraklama süreleri ve dil kurallarıyla noktalanmış metin üretir.
-
-    - 0.30s - 0.60s arası duraklamalar doğal nefes / cümle içi parça arası virgül (,) üretir.
-    - Söylem bağlaçları ("Thưa bác sĩ,", "Dạ,", "Vâng,") otomatik virgüllenir.
-    - Özel isimler ve yer adları ("Việt Nam", "Hà Nội") büyük harfe çevrilir.
-    - Soru cümleleri '?', bildirim cümleleri '.' ile biter.
-    """
-    if not ws:
-        return ""
-
-    tokens: list[str] = [w.text for w in ws]
-    n = len(ws)
-
-    # 1. Akustik duraklamalara göre virgül ekleme
-    for i in range(1, n):
-        pause = ws[i].start - ws[i - 1].end
-        if min_pause_comma <= pause < max_pause_comma:
-            w_prev = ws[i - 1].text.lower().strip(".,?!;:")
-            w_curr = ws[i].text.lower().strip(".,?!;:")
-            if (w_prev, w_curr) not in VI_COMPOUNDS and not tokens[i - 1].endswith((",", ".", "?", "!")):
-                tokens[i - 1] += ","
-
-    raw = " ".join(tokens).strip()
-    if not raw:
-        return ""
-
-    # 2. Cümle başı söylem bağlaçlarına virgül ekleme (henüz virgülü yoksa)
-    lower_raw = raw.lower()
-    for marker, formatted in VI_DISCOURSE_MARKERS.items():
-        if lower_raw.startswith(marker):
-            marker_len = len(marker)
-            # Kelime sınırını kontrol et
-            if len(raw) == marker_len or raw[marker_len] in (" ", ","):
-                rem = raw[marker_len:].lstrip(" ,")
-                raw = formatted + (" " + rem if rem else "")
-                break
-
-    # 3. Cümle başı büyük harf
-    res = capitalize_initial(raw)
-
-    # 4. Özel isimler ve yer adları
-    res = capitalize_proper_nouns(res, lang=lang)
-
-    # 5. Cümle sonu noktalama
-    last_w = ws[-1].text.lower().strip(".,?!;:")
-    if res[-1] not in ".?!,":
-        res += "?" if is_question_sentence(res, last_w, lang=lang) else "."
-    elif res[-1] == ",":
-        res = res[:-1] + ("?" if is_question_sentence(res, last_w, lang=lang) else ".")
-
-    return res
-
-
-def punctuate_text(text: str, lang: str | None = None) -> str:
-    """Yalnızca metin verildiğinde (zaman damgası olmadan) çevrimdışı noktalama ve büyük harf uygular."""
-    raw = text.strip()
-    if not raw:
-        return ""
-
-    # Varsa sonundaki fazla boşluk ve noktalama işaretlerini ayıkla
-    lower_raw = raw.lower()
-
-    # 1. Söylem bağlaçları
-    for marker, formatted in VI_DISCOURSE_MARKERS.items():
-        if lower_raw.startswith(marker):
-            marker_len = len(marker)
-            if len(raw) == marker_len or raw[marker_len] in (" ", ","):
-                rem = raw[marker_len:].lstrip(" ,")
-                raw = formatted + (" " + rem if rem else "")
-                break
-
-    # 2. Cümle başı büyük harf
-    res = capitalize_initial(raw)
-
-    # 3. Özel isimler
-    res = capitalize_proper_nouns(res, lang=lang)
-
-    # 4. Cümle sonu noktalama
-    words = res.split()
-    last_w = words[-1].lower().strip(".,?!;:") if words else ""
-    if res[-1] not in ".?!,":
-        res += "?" if is_question_sentence(res, last_w, lang=lang) else "."
-    elif res[-1] == ",":
-        res = res[:-1] + ("?" if is_question_sentence(res, last_w, lang=lang) else ".")
-
-    return res
+    for pat, proper in _MULTI:
+        res = pat.sub(proper, res)
+    res = _COUNTRY.sub(lambda m: m.group(1) + m.group(2) + VI_COUNTRIES[m.group(3).lower()], res)
+    return _ANH.sub(lambda m: m.group(1) + m.group(2) + VI_COUNTRIES[m.group(3).lower()], res)

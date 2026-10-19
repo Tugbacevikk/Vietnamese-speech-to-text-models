@@ -5,7 +5,7 @@ nasıl bir işlemci/bellek tüketimiyle ve hangi hata oranıyla tamamlayacağın
 
 Kullanım:
     # 1. Canlı çalışan yerel sunucuya karşı (HTTP API ile):
-    python benchmarks/yuk_testi.py --api http://127.0.0.1:8001 --ornek 20 --hedef-toplam 4000
+    python benchmarks/yuk_testi.py --api http://127.0.0.1:8001 --anahtar GIZLI --ses-dosyasi kayit.wav --ornek 30
 
     # 2. Doğrudan yerel hat üzerinde (API olmadan, çekirdek performansını ölçmek için):
     python benchmarks/yuk_testi.py --yerel --ornek 20 --hedef-toplam 4000 --es-zamanli 4
@@ -14,12 +14,15 @@ Kullanım:
     python benchmarks/yuk_testi.py --klasor data/uploads --ornek 30 --hedef-toplam 4000
 
 Ölçülen Değerler:
-    - İstek alma ve kuyruk kapasitesi (istek/saniye)
-    - Gerçek Zaman Faktörü (RTF = işlem süresi / ses süresi)
-    - İşlem hızı (mesaj/dakika ve ses saati/duvar saati)
-    - 4000 mesajın tahmini toplam bitiş süresi (saat:dakika)
-    - Başarı/Hata oranı ve tepe bellek (RAM) kullanımı
+    - Uçtan uca gecikme (gönderimden sonuca; API modunda kuyrukta bekleme DAHİL): ortalama, p50, p95
+    - RTF = uçtan uca süre / ses süresi (API'de eşzamanlılık arttıkça kuyruk yüzünden büyür)
+    - İşlem hızı (mesaj/dakika) ve 4000 mesajın tahmini bitiş süresi: yalnızca örnek sayısı yeterliyse
+      (>= 30) güvenilir sayılır; az örnekte açıkça uyarılır
+    - Başarı/hata oranı ve testin sonundaki RAM kullanımı (tepe değil)
 
+Gerçek ses şarttır: sentetik ton ASR'da neredeyse hiç iş çıkarmaz, hızı abartır. Ton ile deneme yalnızca
+--sentetik verilirse yapılır. Ortalama mesaj süresi gerçek mesajlarınıza yakın olmalı (varsayılan
+sentetik havuz 3-25 sn karışık).
 Sonuçlar 'yuk_testi_raporu.json' dosyasına yazılır ve konsola özet tablo basılır.
 """
 from __future__ import annotations
@@ -73,16 +76,17 @@ def find_sample_audios(folder: Path, limit: int = 10) -> list[Path]:
 
 
 def run_api_load_test(api_url: str, samples: list[tuple[str, bytes, float]], total_target: int,
-                      concurrency: int = 4, language: str = "vi", is_synthetic: bool = False) -> dict:
+                      concurrency: int = 4, language: str = "vi", is_synthetic: bool = False,
+                      api_key: str = "", timeout_s: float = 900.0) -> dict:
     import urllib.error
     import urllib.request
     import uuid
 
     api_url = api_url.rstrip("/")
+    auth = {"X-API-Key": api_key} if api_key else {}
     # Health kontrolü
     try:
-        req = urllib.request.urlopen(f"{api_url}/health", timeout=5)
-        req.read()
+        urllib.request.urlopen(urllib.request.Request(f"{api_url}/health"), timeout=5).read()
     except Exception as e:
         raise RuntimeError(f"Sunucuya bağlanılamadı ({api_url}/health): {e}")
 
@@ -109,7 +113,7 @@ def run_api_load_test(api_url: str, samples: list[tuple[str, bytes, float]], tot
         req = urllib.request.Request(
             f"{api_url}/jobs",
             data=body,
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}", **auth},
             method="POST",
         )
         t0 = time.perf_counter()
@@ -122,10 +126,10 @@ def run_api_load_test(api_url: str, samples: list[tuple[str, bytes, float]], tot
 
         # İşi tamamlanana kadar bekle (polling)
         poll_url = f"{api_url}/jobs/{jid}"
-        while True:
+        while time.perf_counter() - t0 < timeout_s:
             time.sleep(0.5)
             try:
-                with urllib.request.urlopen(poll_url, timeout=10) as res:
+                with urllib.request.urlopen(urllib.request.Request(poll_url, headers=auth), timeout=10) as res:
                     st = json.loads(res.read().decode("utf-8"))
                     if st.get("status") in ("done", "failed"):
                         dt = time.perf_counter() - t0
@@ -133,6 +137,7 @@ def run_api_load_test(api_url: str, samples: list[tuple[str, bytes, float]], tot
                         return JobMetric(jid, audio_sec, dt, rtf, st.get("status"), st.get("error"))
             except Exception as e:
                 return JobMetric(jid, audio_sec, time.perf_counter() - t0, 0.0, "error", str(e))
+        return JobMetric(jid, audio_sec, time.perf_counter() - t0, 0.0, "timeout", f"{timeout_s:.0f} sn içinde bitmedi")
 
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = []
@@ -148,7 +153,7 @@ def run_api_load_test(api_url: str, samples: list[tuple[str, bytes, float]], tot
             print(f"  [{done_count}/{len(samples)}] Ses: {m.duration_sec:.1f}s | Süre: {m.elapsed_sec:.1f}s | RTF: {m.rtf:.3f} | {durumu}")
 
     total_wall_sec = time.perf_counter() - t_start
-    return evaluate_metrics(metrics, total_wall_sec, total_target)
+    return evaluate_metrics(metrics, total_wall_sec, total_target, is_synthetic=is_synthetic, language=language)
 
 
 def run_local_load_test(samples: list[tuple[str, bytes, float]], total_target: int,
@@ -225,6 +230,10 @@ def evaluate_metrics(metrics: list[JobMetric], total_wall_sec: float, total_targ
     ort_ses_sn = toplam_ses_sn / len(successes)
     ort_islem_sn = sum(m.elapsed_sec for m in successes) / len(successes)
     ort_rtf = sum(m.rtf for m in successes) / len(successes)
+    gecikmeler = sorted(m.elapsed_sec for m in successes)
+    p50 = float(np.percentile(gecikmeler, 50))
+    p95 = float(np.percentile(gecikmeler, 95))
+    guvenilir = len(successes) >= 30
 
     # Duvar saatine göre verim (throughput)
     mesaj_basi_duvar_sn = total_wall_sec / len(successes)
@@ -252,13 +261,16 @@ def evaluate_metrics(metrics: list[JobMetric], total_wall_sec: float, total_targ
         "cekirdek": os.cpu_count(),
         "dil": language,
         "sentetik_ses_kullanildi": is_synthetic,
-        "ram_kullanimi": ram_gb,
+        "ram_testin_sonunda": ram_gb,
         "test_edilen_mesaj_sayisi": len(metrics),
         "basarili": len(successes),
         "hatali": len(failures),
         "hedef_toplam_mesaj": total_target,
         "ort_mesaj_suresi_sn": round(ort_ses_sn, 2),
         "ort_islem_suresi_sn": round(ort_islem_sn, 2),
+        "gecikme_p50_sn": round(p50, 2),
+        "gecikme_p95_sn": round(p95, 2),
+        "projeksiyon_guvenilir": guvenilir,
         "ort_rtf": round(ort_rtf, 3),
         "dakikada_islenen_mesaj": dakikada_mesaj,
         "saatte_islenen_mesaj": saatte_mesaj,
@@ -276,9 +288,13 @@ def evaluate_metrics(metrics: list[JobMetric], total_wall_sec: float, total_targ
     print(f"  Başarılı / Hatalı        : {len(successes)} / {len(failures)}")
     print(f"  Ortalama Mesaj Süresi    : {ort_ses_sn:.1f} saniye")
     print(f"  Ortalama RTF             : {ort_rtf:.3f} (1 sn ses = {ort_rtf:.2f} sn işlem)")
+    print(f"  Gecikme (uçtan uca)      : ort {ort_islem_sn:.1f} sn | p50 {p50:.1f} | p95 {p95:.1f}")
     print(f"  İşlem Hızı (Throughput)  : {dakikada_mesaj} mesaj/dk  ({saatte_mesaj} mesaj/saat)")
     print("-" * 65)
     print(f"  [HEDEF] {total_target} MESAJ ICIN TAHMINI SURE: {saat} SAAT {dakika} DAKIKA")
+    if not guvenilir:
+        print(f"\n  [UYARI] Yalnızca {len(successes)} örnek: projeksiyon güvenilir değil (>= 30 örnek kullanın;")
+        print("  ilk işlerde model yükleme/ısınma ölçümü de bozar).")
     if is_synthetic:
         print("\n  [ONEMLI UYARI] Testte gercek konusma yerine yapay ton kullanilmistir.")
         print("  ASR sessizlik/ton algiladiginda cozumlemeyi hizla gecebilir.")
@@ -298,6 +314,9 @@ def main() -> int:
     p.add_argument("--hedef-toplam", type=int, default=4000, help="Kapasite hesabı yapılacak toplam iş (varsayılan: 4000)")
     p.add_argument("--es-zamanli", type=int, default=4, help="Aynı anda koşan işçi sayısı (varsayılan: 4)")
     p.add_argument("--klasor", type=str, default="data/uploads", help="Gerçek seslerin okunacağı klasör")
+    p.add_argument("--anahtar", default=os.environ.get("API_KEY", ""), help="API anahtarı (X-API-Key); varsayılan API_KEY ortam değişkeni")
+    p.add_argument("--zaman-asimi", type=float, default=900.0, help="tek iş için en çok bekleme (sn)")
+    p.add_argument("--sentetik", action="store_true", help="gerçek ses yoksa yapay tonla dene (SONUÇ ABARTILIDIR)")
     a = p.parse_args()
 
     samples: list[tuple[str, bytes, float]] = []
@@ -325,9 +344,14 @@ def main() -> int:
                 except Exception:
                     pass
 
-    # 3. Yeterli ses yoksa sentetik seslerle tamamla ve uyar
+    # 3. Yeterli gerçek ses yoksa: yalnızca açıkça istenirse sentetik; gerçek ve yapay karıştırılmaz
+    if len(samples) < a.ornek and not a.sentetik:
+        print(f"Hata: {len(samples)} gerçek ses bulundu, {a.ornek} gerekli. --ses-dosyasi kayit.wav ile bir "
+              "kaydı tekrarlatın ya da --klasor verin. (Yapay tonla denemek için --sentetik; sonuç abartılı olur.)")
+        return 2
     if len(samples) < a.ornek:
         is_synthetic = True
+        samples = []
         durations = [3.0, 7.5, 12.0, 18.0, 25.0]
         while len(samples) < a.ornek:
             d = durations[len(samples) % len(durations)]
@@ -341,7 +365,8 @@ def main() -> int:
     else:
         api_url = a.api or "http://127.0.0.1:8001"
         try:
-            rapor = run_api_load_test(api_url, samples, a.hedef_toplam, a.es_zamanli, language=a.dil, is_synthetic=is_synthetic)
+            rapor = run_api_load_test(api_url, samples, a.hedef_toplam, a.es_zamanli, language=a.dil,
+                                      is_synthetic=is_synthetic, api_key=a.anahtar, timeout_s=a.zaman_asimi)
         except Exception as e:
             print(f"API testi çalıştırılamadı: {e}\nİpucu: Sunucu açık değilse --yerel parametresiyle deneyebilirsiniz.")
             return 1

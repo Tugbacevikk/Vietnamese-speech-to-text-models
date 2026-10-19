@@ -233,6 +233,9 @@ diskle birlikte gider.
 
 Zipformer-68M tıbbi veriyle WSL2 + GPU'da ince ayarlanır; çıkan model Kapı 2'yi geçerse
 `VI_MODEL=models/<klasör>` ile kullanılır. Adımlar: [finetune/README.md](finetune/README.md).
+Veri eşiğini izlemek ve eğitim verisini hazırlamak için: `python scripts/ince_ayar_dongusu.py durum`
+(varsayılan eşik 500 onaylı satır ve 1 saat, sezgiseldir) ve `hazirla`. Eğitim ve model kararı bu betikte
+değil: eğitim `finetune/egit.py`, karar gerçek ölçüm olan `finetune/kapi2.py`.
 
 ## Rust'a geçiş
 
@@ -253,6 +256,11 @@ python benchmarks/kabul_testi.py a.wav b.wav --es-zamanli 4   # 1 dk ses <= 1 dk
 
 Diğer ölçümler: `benchmarks/diyalog_testi.py` (DER, cpWER), `yerel_dogruluk_testi.py` (WER/CER),
 `dil_tespiti_testi.py`, `konusmaci_testi.py`, `turkce_dogruluk_testi.py`.
+Kendi Türkçe kayıtlarınızla doğruluk: TSV'ye `dosya` ve `metin` (doğru metin) yazın,
+`python benchmarks/yerel_dogruluk_testi.py kayitlar.tsv --dil tr` (üretimdeki hattan geçer).
+HTTP API ve kuyruğa karşı yük (4000 mesaj projeksiyonu): `python benchmarks/yuk_testi.py --api http://127.0.0.1:8001
+--ses-dosyasi kayit.wav --ornek 30 [--anahtar ...]`; gerçek konuşma şarttır (sentetik ton hızı abartır), ortalama
+mesaj süresi gerçek mesajlarınıza yakın olmalı, 30'dan az örnekte projeksiyon güvenilir sayılmaz.
 VietMed'den bölüm bazında test seti: `scripts/vietmed_hazirla.py`.
 
 ```

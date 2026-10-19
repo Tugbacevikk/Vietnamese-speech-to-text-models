@@ -22,3 +22,9 @@ recordings/
 # test kapsam ölçümü
 .coverage
 htmlcov/
+
+# ölçüm çıktıları
+yuk_testi_raporu.json
+kapi2_sonuc.json
+data/ft_dongu/
+data/yuk_testi_tmp/

@@ -22,6 +22,8 @@ Bağlama göre düzeltme dil modeli ister; kurala dökülünce başka kayıtlard
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 
 from viet_asr.domain import BELIRSIZ, SpeakerInfo, Transcript, Utterance
@@ -42,7 +44,9 @@ VI_QUESTION_PHRASES = ("thế nào", "bao nhiêu", "tại sao", "vì sao", "làm
                        "được không", "có được", "là gì")
 TR_QUESTION_WORDS = {"nasıl", "neden", "niçin", "niye", "kim", "nerede", "nereden", "nereye", "kaç",
                      "hangi", "hangisi"}
-_TR_Q = ("mı", "mi", "mu", "mü")
+# Türkçe soru eki AYRI bir sözcüktür: mı/mi/mu/mü ve kişi ekli biçimleri (misin, mıyız, muydu...).
+# Başı "mi/mu/mü" ile başlayan her sözcük değil ("mutlu", "müzik", "mimar", "mümkün", "misafir" soru değil).
+_TR_Q_RE = re.compile(r"^m[ıiuü](?:y[ıiuü]m|s[ıiuü]n(?:[ıiuü]z)?|y[ıiuü]z|d[ıiuü]r|yd[ıiuü])?$")
 
 
 @dataclass(frozen=True)
@@ -84,13 +88,15 @@ def _is_question(words: list[str], lang: str | None) -> bool:
         return False
     text, last = " ".join(low[-6:]), low[-1]   # soru kalıbı cümlenin SONUNDA aranır
     if lang in (None, "vi"):
+        if low[-2:] == ["không", "sao"]:   # "không sao" = sorun değil (bildirim)
+            return False
         if last in VI_QUESTION_END or any(p in text for p in VI_QUESTION_PHRASES):
             return True
         if last == "ạ" and len(low) > 1 and (low[-2] in VI_QUESTION_END or "do đâu" in text):
             return True
     if lang in (None, "tr"):
         tail = low[-2:] if len(low) > 1 else low
-        if any(w.startswith(_TR_Q) and len(w) <= 7 for w in tail):
+        if any(_TR_Q_RE.match(w) for w in tail):
             return True
         if any(w in TR_QUESTION_WORDS for w in low[:3]) and not low[-1].endswith(("dır", "dir", "dur", "dür")):
             return True
