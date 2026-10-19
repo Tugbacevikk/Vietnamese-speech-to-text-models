@@ -18,3 +18,7 @@ models/tts-test/
 kabul_sonucu.json
 output_transcript.txt
 recordings/
+
+# test kapsam ölçümü
+.coverage
+htmlcov/
