@@ -14,19 +14,36 @@ import ipaddress
 import socket
 import urllib.parse
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request
 
 from viet_asr.interface.settings import Settings
 
 
-def api_key_dependency(settings: Settings):
-    expected = settings.api_key
-    if settings.is_production and not expected:
-        raise RuntimeError("APP_ENV=production iken API_KEY tanımlanmalı (.env)")
+def identify(settings: Settings, provided: str | None) -> str | None:
+    """Anahtarın sahibi (kişi adı); anahtar tanımlı değilse "anahtarsız"; yanlışsa None.
+    Her anahtar sabit süreyle karşılaştırılır (hangi anahtarın yakın olduğu süreden anlaşılmasın)."""
+    keys = settings.api_keys
+    if not keys:
+        return "anahtarsız"
+    found = None
+    for key, name in keys.items():
+        if hmac.compare_digest((provided or "").encode(), key.encode()):
+            found = name
+    return found
 
-    def verify(x_api_key: str | None = Header(default=None)):
-        if expected and not hmac.compare_digest(x_api_key or "", expected):
+
+def api_key_dependency(settings: Settings):
+    """İsteği yapan kişinin adını döndüren bağımlılık (erişim kaydı için); anahtar yanlışsa 401."""
+    if settings.is_production and not settings.auth_enabled:
+        raise RuntimeError("APP_ENV=production iken API_KEY ya da API_KEYS tanımlanmalı (.env)")
+
+    def verify(request: Request, x_api_key: str | None = Header(default=None)) -> str:
+        who = identify(settings, x_api_key)
+        if who is None:
             raise HTTPException(401, "geçersiz ya da eksik X-API-Key")
+        if who == "anahtarsız" and request.client:
+            who = f"anahtarsız ({request.client.host})"
+        return who
 
     return verify
 
@@ -62,10 +79,6 @@ def callback_problem(url: str | None, settings: Settings) -> str | None:
 
 
 def key_ok(settings: Settings, provided: str | None) -> bool:
-    """API_KEY tanımlı değilse herkes; tanımlıysa yalnızca doğru anahtar (sabit süreli karşılaştırma).
+    """Anahtar tanımlı değilse herkes; tanımlıysa yalnızca geçerli bir anahtar (API_KEY ya da API_KEYS).
     Canlı altyazı WebSocket'i için: tarayıcı WebSocket'e başlık ekleyemez, anahtar ?key= ile gelir."""
-    import hmac
-
-    if not settings.api_key:
-        return True
-    return hmac.compare_digest(provided or "", settings.api_key)
+    return identify(settings, provided) is not None

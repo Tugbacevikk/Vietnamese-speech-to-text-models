@@ -333,3 +333,55 @@ def test_konusmaci_profili_ve_cumle_sinirlari_saklanir(store):
     assert got.speakers == t.speakers and got.utterances[0].breaks == (1,)
     store.update_utterance("sp", 0, text="x y")
     assert store.get_transcript("sp").utterances[0].breaks == ()     # düzeltilen satırda geçersiz
+
+
+def test_kalite_satirlari(store):
+    """Yalnızca elden geçirilen işlerin satırları; modelin ilk hali, son hal, silinen, konuşmacı."""
+    from datetime import datetime, timezone
+
+    for j in ("dokunuldu", "dokunulmadi"):
+        store.create(AudioJob(j, "/a.wav", "vi"))
+        store.save(transcript(j))
+    store.update_utterance("dokunuldu", 0, text="xin chào ạ")
+    store.update_utterance("dokunuldu", 0, speaker="speaker_01")   # ikinci düzeltme: ilk hal korunur
+    store.delete_utterance("dokunuldu", 1)
+    lines = store.review_lines(datetime(2000, 1, 1, tzinfo=timezone.utc))
+    assert [(x.job_id, x.original, x.final, x.speaker_changed) for x in lines] == [
+        ("dokunuldu", "xin chào", "xin chào ạ", True), ("dokunuldu", "chào bác sĩ", "", False)]
+    assert lines[0].model == "zipformer-68m" and lines[0].language == "vi"
+    assert store.review_lines(datetime(2999, 1, 1, tzinfo=timezone.utc)) == []
+
+
+def test_ilerleme_ve_kuyruk_sirasi(store):
+    import time
+
+    for j in ("a", "b", "c"):
+        store.create(AudioJob(j, "/a.wav", "vi"))
+        time.sleep(0.01)
+    assert [store.queue_position(j) for j in ("a", "b", "c")] == [0, 1, 2]
+    store.set_status("a", JobStatus.RUNNING)
+    before = store.get("a").updated_at
+    time.sleep(0.01)
+    store.set_progress("a", "konusmacilar_ayriliyor", 0.6)
+    r = store.get("a")
+    assert (r.stage, r.progress) == ("konusmacilar_ayriliyor", 0.6) and r.updated_at > before  # askıda sayılmaz
+    assert store.queue_position("a") is None and store.queue_position("c") == 1               # a artık kuyrukta değil
+    store.save(transcript("a"))
+    r = store.get("a")
+    assert (r.stage, r.progress) == (None, 1.0)
+    store.reopen("a", None)
+    assert (store.get("a").stage, store.get("a").progress) == (None, None)
+
+
+def test_erisim_kaydi(store):
+    from datetime import datetime, timedelta, timezone
+
+    store.audit("Ayşe", "ses_dinlendi", "j1", None, "10.0.0.5")
+    store.audit("Tuğba", "satir_duzeltildi", "j1", "satır 2")
+    store.audit("Tuğba", "is_olusturuldu", "j2")
+    rows = store.audit_rows()
+    assert [(r["kim"], r["eylem"]) for r in rows] == [("Tuğba", "is_olusturuldu"), ("Tuğba", "satir_duzeltildi"),
+                                                      ("Ayşe", "ses_dinlendi")]
+    assert [r["eylem"] for r in store.audit_rows(job_id="j1", actor="Tuğba")] == ["satir_duzeltildi"]
+    assert rows[2]["ip"] == "10.0.0.5" and rows[1]["ayrinti"] == "satır 2"
+    assert store.delete_audit_before(datetime.now(timezone.utc) + timedelta(seconds=1)) == 3

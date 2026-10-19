@@ -77,6 +77,13 @@ audio { width: 100%; margin-bottom: 12px; }
 .editor input { font: inherit; background: var(--input); color: var(--text); border: 1px solid var(--line);
                 border-radius: 8px; padding: 6px 8px; max-width: 220px; }
 .editor .row { justify-content: flex-start; }
+.alerts { background: #fdecea; color: #8a1c12; border: 1px solid #f5c2bd; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 14px; }
+.alerts p { margin: 2px 0; }
+@media (prefers-color-scheme: dark) { .alerts { background: #3a1714; color: #ffb4ab; border-color: #6b2620; } }
+.qtable { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+.qtable th, .qtable td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--line); }
+.qtable td:nth-child(n+4) { font-variant-numeric: tabular-nums; }
+details#qualityBox summary { cursor: pointer; }
 .live { margin-top: 10px; max-height: 50vh; overflow: auto; }
 .live p { margin: 0; padding: 6px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 64px 1fr; gap: 10px; }
 .live p small { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -108,6 +115,8 @@ audio { width: 100%; margin-bottom: 12px; }
       <input type="password" id="apiKey" placeholder="gerekmiyorsa boş" autocomplete="off">
     </div>
   </header>
+
+  <div id="alerts" class="alerts hidden" role="alert"></div>
 
   <section class="card">
     <div class="drop" id="drop" tabindex="0" role="button" aria-label="Ses dosyası seç">
@@ -185,6 +194,10 @@ audio { width: 100%; margin-bottom: 12px; }
     <div class="meta" id="meta"></div>
     <audio id="player" controls preload="none"></audio>
     <div id="utts"></div>
+    <details id="auditBox" class="sub" style="margin-top:12px">
+      <summary style="cursor:pointer">Erişim kaydı (bu işi kim açtı, dinledi, düzeltti)</summary>
+      <div id="auditList">Yükleniyor…</div>
+    </details>
   </section>
 
   <section class="card">
@@ -193,6 +206,16 @@ audio { width: 100%; margin-bottom: 12px; }
       <button class="btn ghost" id="refresh">Yenile</button>
     </div>
     <div class="hist" id="hist"></div>
+  </section>
+
+  <section class="card">
+    <details id="qualityBox">
+      <summary><h2 style="display:inline">Kalite</h2> <span class="sub">arayüzdeki düzeltmelerden, son 90 gün</span></summary>
+      <p class="sub">Yalnızca elden geçirilmiş işler (en az bir satırı düzeltilen ya da silinen) sayılır.
+        Düzeltme oranı = düzeltilen kelime / modelin yazdığı kelime (yaklaşık kelime hata oranı;
+        gözden kaçan hatalar sayılmadığı için gerçek oran biraz daha yüksektir).</p>
+      <div id="quality" class="sub">Yükleniyor…</div>
+    </details>
   </section>
 </div>
 
@@ -318,11 +341,18 @@ function poll(jobId, t0) {
         setStatus(`${STATUS[j.status]}: ${j.error || "bilinmeyen hata"}`, true); $("send").disabled = !file; loadHistory(); return;
       }
       const lang = j.language ? ` — dil: ${LANG[j.language.code] || j.language.code}` : "";
-      setStatus(`${STATUS[j.status] || j.status} (${sec} sn)${lang}…`);
+      let detail = "";
+      if (j.status === "queued" && j.sira) detail = ` — önünde ${j.sira} iş var`;
+      if (j.status === "running" && j.asama) detail = ` — ${ASAMA[j.asama] || j.asama}, yaklaşık %${j.ilerleme}`;
+      setStatus(`${STATUS[j.status] || j.status} (${sec} sn)${lang}${detail}…`);
       poll(jobId, t0);
     } catch (e) { setStatus("Durum alınamadı: " + e.message, true); $("send").disabled = !file; }
   }, 1000);
 }
+
+const ASAMA = { ses_okunuyor: "ses okunuyor", konusma_bulunuyor: "konuşma bulunuyor", dil_belirleniyor: "dil belirleniyor",
+  metne_cevriliyor: "metne çevriliyor", eksikler_kurtariliyor: "atlanan yerler yeniden çözülüyor",
+  konusmacilar_ayriliyor: "konuşmacılar ayrılıyor", birlestiriliyor: "birleştiriliyor" };
 
 // --- sonuç ---
 const STAGE = { yukleme: "yükleme", vad: "konuşma bulma", dil: "dil", asr: "metin",
@@ -333,6 +363,7 @@ const rest = (took, t) => took - (t.toplam ?? Object.values(t).reduce((a, b) => 
 
 function show(job) {
   current = job;
+  $("auditBox").open = false;
   const r = job.result;
   $("result").classList.remove("hidden");
   const meta = $("meta");
@@ -536,6 +567,38 @@ $("del").addEventListener("click", async () => {
 });
 
 // --- geçmiş ---
+const EYLEM = { is_olusturuldu: "iş oluşturdu", sonuc_goruntulendi: "sonucu açtı", ses_dinlendi: "sesi dinledi",
+  transkript_alindi: "transkripti aldı", satir_duzeltildi: "satırı düzeltti", satir_silindi: "satırı sildi",
+  is_silindi: "işi sildi", yeniden_analiz: "yeniden analiz etti", veri_setine_aktarildi: "veri setine aktardı",
+  erisim_kaydi_okundu: "erişim kaydını okudu", duzeltmeler_alindi: "düzeltmeleri dışa aldı" };
+async function loadAudit() {
+  const box = $("auditList");
+  if (!current) return;
+  try {
+    const r = await api(`/audit?is_id=${encodeURIComponent(current.job_id)}&limit=100`);
+    const rows = await r.json();
+    box.replaceChildren(...rows.map((x) => el("div", {},
+      `${new Date(x.zaman).toLocaleString("tr-TR")} · ${x.kim} · ${EYLEM[x.eylem] || x.eylem}${x.ayrinti ? " (" + x.ayrinti + ")" : ""}`)));
+    if (!rows.length) box.textContent = "Kayıt yok.";
+  } catch (e) { box.textContent = "Alınamadı: " + e.message; }
+}
+$("auditBox").addEventListener("toggle", () => { if ($("auditBox").open) loadAudit(); });
+
+async function loadQuality() {
+  const box = $("quality");
+  try {
+    const q = await (await api("/quality?gun=90")).json();
+    if (!q.satirlar.length) { box.textContent = "Henüz elden geçirilmiş iş yok."; return; }
+    const head = ["Hafta", "Dil", "Model", "İş", "Kelime", "Düzeltme oranı", "Düzeltilen satır", "Silinen satır", "Konuşmacı düzeltmesi"];
+    const rows = q.satirlar.map((r) => [r.hafta, LANG[r.dil] || r.dil, r.model, r.is_sayisi, r.kelime,
+      r.duzeltme_orani == null ? "-" : `%${r.duzeltme_orani}`, r.duzeltilen_satir, r.silinen_satir, r.konusmaci_duzeltme]);
+    box.replaceChildren(el("table", { class: "qtable" },
+      el("thead", {}, el("tr", {}, ...head.map((x) => el("th", {}, x)))),
+      el("tbody", {}, ...rows.map((r) => el("tr", {}, ...r.map((x) => el("td", {}, String(x))))))));
+  } catch (e) { box.textContent = "Kalite alınamadı: " + e.message; }
+}
+$("qualityBox").addEventListener("toggle", () => { if ($("qualityBox").open) loadQuality(); });
+
 async function loadHistory() {
   const box = $("hist");
   try {
@@ -665,6 +728,9 @@ async function health() {
       $("liveKind").value = (saved === "net" && net) || !mic ? "net" : "mic";
       liveKindChanged();
     }
+    const al = h.uyarilar || [];
+    $("alerts").classList.toggle("hidden", !al.length);
+    $("alerts").replaceChildren(...al.map((a) => el("p", {}, "⚠ " + a.mesaj)));
     $("health").title = r.ok ? `çalışıyor · diller: ${h.languages.join(", ")}` : "sorun: " + JSON.stringify(h.checks);
   } catch { $("health").className = "dot bad"; $("health").title = "sunucuya ulaşılamıyor"; }
 }
@@ -674,6 +740,8 @@ $("apiKey").addEventListener("change", () => { store.set("asr_api_key", $("apiKe
 $("refresh").addEventListener("click", loadHistory);
 health(); setInterval(health, 30000);
 loadHistory();
+// /?job=<id>: canlı altyazının "Konuşmacılı transkript" bağlantısı ve paylaşılan adresler işi açar
+{ const jid = new URLSearchParams(location.search).get("job"); if (jid) openJob(jid); }
 </script>
 </body>
 </html>

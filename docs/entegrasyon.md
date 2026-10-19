@@ -186,6 +186,14 @@ app.MapPost("/asr-callback", async (HttpRequest req) => {
 `GET /jobs/{id}`'yi 2–5 sn aralıkla sorgulayın; `status` `done`, `failed` ya da `rejected` olunca
 durun. Çok sayıda iş için callback daha verimlidir.
 
+Beklerken yanıtta ek alanlar:
+
+| Durum | Alan | Anlamı |
+|---|---|---|
+| `queued` | `sira` | Önündeki bekleyen iş sayısı (0 = sıradaki) |
+| `running` | `asama` | `ses_okunuyor`, `konusma_bulunuyor`, `dil_belirleniyor`, `metne_cevriliyor`, `eksikler_kurtariliyor`, `konusmacilar_ayriliyor`, `birlestiriliyor` |
+| `running` | `ilerleme` | Yaklaşık yüzde (aşamaya göre; dile ve donanıma göre sapar) |
+
 ## 6. Sonucu düzeltme ve yeniden analiz
 
 | İstek | Ne yapar |
@@ -294,6 +302,20 @@ metnin hazır olmasına kadar geçen süre.
 | `GET /health/ready` | Modeller yüklü ve her dil kuyruğunda çalışan işçi var mı (yük dengeleyici için) |
 | `GET /metrics` | Gecikme, "1 dk ses ≤ 1 dk" hedefine uyum, kuyruk doluluğu (JSON) |
 | `GET /metrics/prometheus` | Aynısı + aşama süreleri, webhook teslim/ölü sayıları |
+| `GET /quality?gun=90` | Kişilerin düzeltmelerinden hafta / dil / model başına düzeltme oranı (yaklaşık WER) |
+| `GET /audit?is_id=&kim=&limit=` | Erişim kaydı: kim, ne zaman, hangi işte ne yaptı (`AUDIT_READERS` doluysa yalnızca onlar) |
+
+`GET /health` yanıtındaki `uyarilar` listesi sorun olunca dolar (arayüzde kırmızı şerit):
+teslim edilemeyen bildirim, `ALERT_QUEUE_WAIT_MIN`'den uzun bekleyen iş, son 24 saatte başarısız
+iş, gecikmiş ya da hiç alınmamış yedek, `ALERT_DISK_GB`'tan az boş disk. Her uyarı ne yapılacağını
+söyler; sorun çözülünce kendiliğinden kalkar.
+
+**Anahtarlar ve erişim kaydı.** `API_KEY` entegre olan sistemin anahtarıdır (kayıtta "sistem").
+Arayüzü kullanan her kişiye `API_KEYS=Ad:anahtar,...` ile ayrı anahtar verilir; böylece şu eylemler
+kişi adıyla kaydedilir: iş oluşturma, sonucu açma, sesi dinleme, transkript alma, satır düzeltme ve
+silme, işi silme, yeniden analiz, veri setine aktarma, düzeltmeleri dışa alma, erişim kaydını okuma.
+Aynı kişinin aynı işteki aynı eylemi 60 sn'de bir yazılır (arayüzün sorgulaması kaydı şişirmesin).
+Kayıt işe bağlı değildir: iş silinse de kalır, `AUDIT_RETENTION_DAYS` (730) gün sonra silinir.
 
 ## 11. Canlı altyazı (mikrofon, `/ws/live`)
 

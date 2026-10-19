@@ -218,7 +218,7 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
             "default": default,
             "auto": len(languages) > 1 and detect_language is not None,
             "webhook": bool(settings.live_webhook_url and notify_ended),
-            "auth": bool(settings.api_key),
+            "auth": settings.auth_enabled,
             "speakers": speaker_factory is not None,
             "webrtc": webrtc_available(),
             "ready": all(e.asr is not None for e in engines.values()),
@@ -334,7 +334,7 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
         except ValueError:
             raise _Reject("Geçersiz ayar değeri.") from None
         asked = (q.get("callback_url") or "").strip() or None
-        if asked and asked != settings.live_webhook_url and not settings.api_key:
+        if asked and asked != settings.live_webhook_url and not settings.auth_enabled:
             # anahtarsız biri sunucuya istediği adrese istek attıramasın
             raise _Reject("Oturum başına callback_url için sunucuda API_KEY tanımlı olmalı "
                           "(ya da adresi LIVE_WEBHOOK_URL ile verin).")

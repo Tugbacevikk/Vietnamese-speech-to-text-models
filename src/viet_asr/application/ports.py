@@ -7,12 +7,14 @@ sadece altyapıdaki bir sınıf değişir.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from datetime import datetime
 from typing import Protocol
 
 import numpy as np
 
 from viet_asr.domain import (
-    AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, SpeakerInfo, SpeakerSegment, Transcript,
+    AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, ReviewLine, SpeakerInfo, SpeakerSegment,
+    Transcript,
     Utterance, VadSegment, Word,
 )
 
@@ -86,6 +88,10 @@ class AudioLoader(Protocol):
 class ResultRepository(Protocol):
     def set_status(self, job_id: str, status: JobStatus, error: str | None = None) -> None: ...
 
+    def set_progress(self, job_id: str, stage: str, progress: float) -> None:
+        """İşlenirken aşama ve yaklaşık ilerleme (0..1)."""
+        ...
+
     def save(self, transcript: Transcript) -> None:
         """Sonucu yazar ve işi DONE yapar; ikisi birlikte olur ya da hiçbiri olmaz."""
         ...
@@ -126,6 +132,19 @@ class JobStore(ResultRepository, Protocol):
     def corrections(self, limit: int = 10_000, consented_only: bool = False) -> list[Correction]:
         """Düzeltilmiş satırlar (en yenisi önce): ince ayar verisi.
         consented_only: yalnızca veri setine aktarma onayı verilmiş işlerden."""
+        ...
+
+    def audit(self, actor: str, action: str, job_id: str | None = None, detail: str | None = None,
+              ip: str | None = None) -> None:
+        """Erişim kaydı: kim, hangi işte, ne yaptı."""
+        ...
+
+    def queue_position(self, job_id: str) -> int | None:
+        """Kuyruktaki işin önünde bekleyen iş sayısı; kuyrukta değilse None."""
+        ...
+
+    def review_lines(self, since: datetime) -> list[ReviewLine]:
+        """since'ten sonra açılmış ve kişinin elden geçirdiği işlerin tüm satırları (kalite takibi)."""
         ...
 
     def set_consent(self, job_id: str, by: str, use: str) -> bool:

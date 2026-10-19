@@ -37,6 +37,14 @@ class Settings:
         "ENABLE_LIVE", "1").lower() in ("1", "true", "evet"))
     port: int = field(default_factory=lambda: int(os.environ.get("PORT", "8001")))
     api_key: str = field(default_factory=lambda: os.environ.get("API_KEY", "").strip())
+    # Kişi başına anahtar (erişim kaydında "kim" yazsın): "Tuğba:anahtar1,Ayşe:anahtar2".
+    # API_KEY de geçerli kalır (adı "sistem": entegre olan sistem). Anahtarda ':' ve ',' olmasın.
+    api_keys_setting: str = field(default_factory=lambda: os.environ.get("API_KEYS", "").strip())
+    # Erişim kaydını (GET /audit) yalnızca bu kişiler okuyabilir ("Tuğba,Ayşe"); boşsa anahtarı olan herkes
+    audit_readers: list[str] = field(default_factory=lambda: _list(os.environ.get("AUDIT_READERS", "")))
+    # Erişim kaydı kaç gün saklansın (iş silinse de kayıt kalır; KVKK denetimi için uzun)
+    audit_retention_days: float = field(default_factory=lambda: float(os.environ.get(
+        "AUDIT_RETENTION_DAYS", "730")))
     webhook_secret: str = field(default_factory=lambda: os.environ.get("WEBHOOK_SECRET", "").strip())
     # boş değilse callback yalnızca bu adreslere gidebilir (iç ağ adresleri de yazılabilir)
     webhook_allowed_hosts: list[str] = field(default_factory=lambda: _list(
@@ -106,6 +114,10 @@ class Settings:
     # canlı oturum kayıtları (.wav, .txt, .jsonl) kaç gün sonra silinsin (0 = silme); kişisel veri
     recordings_retention_days: float = field(default_factory=lambda: float(os.environ.get(
         "RECORDINGS_RETENTION_DAYS", "30")))
+    # Uyarılar (/health "uyarilar" ve arayüzdeki şerit): kuyrukta bu kadar dk'dan uzun bekleyen iş,
+    # diskte bu kadar GB'tan az boş yer
+    alert_queue_wait_min: float = field(default_factory=lambda: float(os.environ.get("ALERT_QUEUE_WAIT_MIN", "30")))
+    alert_disk_gb: float = field(default_factory=lambda: float(os.environ.get("ALERT_DISK_GB", "5")))
     # Veritabanı yedeği (işler, satırlar, düzeltmeler): bakım her turda son yedeğin yaşına bakar,
     # BACKUP_EVERY_HOURS'u geçtiyse yeni yedek alır (bilgisayar gece kapalı olsa da açılınca alınır).
     backup_every_hours: float = field(default_factory=lambda: float(os.environ.get("BACKUP_EVERY_HOURS", "24")))
@@ -178,6 +190,20 @@ class Settings:
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def api_keys(self) -> dict[str, str]:
+        """anahtar -> kişi adı (API_KEY "sistem" adıyla dahil)."""
+        out = {self.api_key: "sistem"} if self.api_key else {}
+        for item in self.api_keys_setting.split(","):
+            name, sep, key = item.strip().rpartition(":")
+            if sep and name.strip() and key.strip():
+                out[key.strip()] = name.strip()
+        return out
+
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.api_keys)
 
     @property
     def backup_dir(self) -> str:

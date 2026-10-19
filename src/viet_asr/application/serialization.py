@@ -1,7 +1,7 @@
 """Sonucun dışarıya giden JSON biçimi (API yanıtı ve webhook gövdesi aynı)."""
 from __future__ import annotations
 
-from viet_asr.domain import JobRecord, LanguageDecision, Transcript
+from viet_asr.domain import JobRecord, JobStatus, LanguageDecision, Transcript
 
 from .transcript_view import speaker_labels
 
@@ -53,6 +53,9 @@ def record_to_dict(r: JobRecord, transcript: Transcript | None = None) -> dict:
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
     }
+    if r.status == JobStatus.RUNNING and r.stage:
+        out["asama"] = r.stage                      # ör. "konusmacilar_ayriliyor"
+        out["ilerleme"] = round(100 * (r.progress or 0))  # yaklaşık yüzde
     if transcript is not None:
         out["result"] = transcript_to_dict(transcript)
     return out

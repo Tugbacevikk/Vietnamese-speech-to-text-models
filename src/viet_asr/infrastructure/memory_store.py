@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 from viet_asr.domain import (
-    NOTIFY_DEFAULT, AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, Transcript,
+    NOTIFY_DEFAULT, AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, ReviewLine, Transcript,
 )
 
 
@@ -24,6 +24,7 @@ class MemoryJobStore:
         self._originals: dict = {}
         self._edits: dict = {}
         self._deleted: set = set()
+        self.audit_log: list[dict] = []
         self.consents: dict[str, tuple[str, str, datetime]] = {}
 
     def create(self, job: AudioJob) -> str:
@@ -47,6 +48,15 @@ class MemoryJobStore:
             self.jobs[job_id] = r
             return r
 
+    def set_progress(self, job_id, stage, progress):
+        self._update(job_id, stage=stage, progress=round(progress, 3))
+
+    def queue_position(self, job_id):
+        r = self.jobs.get(job_id)
+        if r is None or r.status != JobStatus.QUEUED:
+            return None
+        return sum(1 for x in self.jobs.values() if x.status == JobStatus.QUEUED and x.created_at < r.created_at)
+
     def get(self, job_id: str) -> JobRecord | None:
         return self.jobs.get(job_id)
 
@@ -69,7 +79,8 @@ class MemoryJobStore:
     def save(self, t: Transcript) -> None:
         t = replace(t, utterances=[replace(u, index=i) for i, u in enumerate(t.utterances)])
         self.results[t.job_id] = t
-        self._event(self._update(t.job_id, status=JobStatus.DONE, decision=t.language, error=None), "done")
+        self._event(self._update(t.job_id, status=JobStatus.DONE, decision=t.language, error=None,
+                                 stage=None, progress=1.0), "done")
 
     def get_transcript(self, job_id: str) -> Transcript | None:
         t = self.results.get(job_id)
@@ -81,7 +92,7 @@ class MemoryJobStore:
         r = self.jobs.get(job_id)
         if r is None or r.status not in (JobStatus.DONE, JobStatus.FAILED) or not r.job.audio_path:
             return None
-        return self._update(job_id, status=JobStatus.QUEUED, error=None,
+        return self._update(job_id, status=JobStatus.QUEUED, error=None, stage=None, progress=None,
                             job=replace(r.job, num_speakers=num_speakers))
 
     def delete_utterance(self, job_id, idx):
@@ -126,6 +137,33 @@ class MemoryJobStore:
             out.append(Correction(jid, r.job.audio_path, r.decision.code if r.decision else None, idx,
                                   u.start, u.end, u.speaker, u.text, osp, otx, at))
         return sorted(out, key=lambda c: c.edited_at, reverse=True)[:limit]
+
+    def review_lines(self, since):
+        out = []
+        touched = {j for j, _ in self._edits} | {j for j, _ in self._deleted}
+        for jid in sorted(touched):
+            r, t = self.jobs.get(jid), self.results.get(jid)
+            if r is None or t is None or r.created_at < since:
+                continue
+            for i, u in enumerate(t.utterances):
+                osp, otx = self._originals.get((jid, i), (u.speaker, u.text))
+                out.append(ReviewLine(jid, r.decision.code if r.decision else None, t.model, r.created_at,
+                                      otx, "" if (jid, i) in self._deleted else u.text, osp != u.speaker))
+        return out
+
+    def audit(self, actor, action, job_id=None, detail=None, ip=None):
+        self.audit_log.append({"at": _now(), "kim": actor, "eylem": action, "job_id": job_id,
+                               "ayrinti": detail, "ip": ip})
+
+    def audit_rows(self, job_id=None, actor=None, limit=200):
+        rows = [r for r in reversed(self.audit_log) if (not job_id or r["job_id"] == job_id)
+                and (not actor or r["kim"] == actor)][:limit]
+        return [{"zaman": r["at"].isoformat(), **{k: v for k, v in r.items() if k != "at"}} for r in rows]
+
+    def delete_audit_before(self, before):
+        n = len(self.audit_log)
+        self.audit_log = [r for r in self.audit_log if r["at"] >= before]
+        return n - len(self.audit_log)
 
     def recent_jobs(self, limit: int = 20) -> list[JobRecord]:
         return sorted(self.jobs.values(), key=lambda r: r.created_at, reverse=True)[:limit]
@@ -176,6 +214,9 @@ class MemoryJobStore:
     def add_event(self, event, url, payload, job_id=None):
         self.outbox.append({"event": event, "url": url, "payload": payload, "job_id": job_id})
         self.events.append((job_id, event))
+
+    def failed_since(self, since):
+        return sum(1 for r in self.jobs.values() if r.status == JobStatus.FAILED and r.updated_at >= since)
 
     def outbox_stats(self, max_attempts):
         return {"gonderildi": 0, "bekliyor": len(self.events), "olu": 0}

@@ -50,8 +50,22 @@ class TranscribeAndDiarize:
             self.notifier.notify(job, transcript)
         return transcript
 
+    # Aşamalar ve başladıkları yaklaşık ilerleme (2 dk Vietnamca sesin aşama sürelerinden; dile ve
+    # donanıma göre değişir, arayüzde "yaklaşık" diye gösterilir)
+    STAGES = {"ses_okunuyor": 0.0, "konusma_bulunuyor": 0.02, "dil_belirleniyor": 0.08,
+              "metne_cevriliyor": 0.12, "eksikler_kurtariliyor": 0.55, "konusmacilar_ayriliyor": 0.6,
+              "birlestiriliyor": 0.93}
+
+    def _stage(self, job_id: str, stage: str) -> None:
+        """İlerleme yazılamazsa (veritabanı anlık yoksa) iş durmasın."""
+        try:
+            self.repo.set_progress(job_id, stage, self.STAGES[stage])
+        except Exception as e:  # pragma: no cover - yalnızca günlük
+            log.warning("ilerleme yazılamadı job=%s: %s", job_id, e)
+
     def _process(self, job: AudioJob, decision: LanguageDecision | None) -> Transcript:
         t0 = time.perf_counter()
+        self._stage(job.job_id, "ses_okunuyor")
         timings: dict[str, float] = {}
         mark = [t0]
 
@@ -65,8 +79,11 @@ class TranscribeAndDiarize:
         duration = len(audio) / 16000
         lap("yukleme")
 
+        self._stage(job.job_id, "konusma_bulunuyor")
         segments = self.vad.split(audio)
         lap("vad")
+        if decision is None:
+            self._stage(job.job_id, "dil_belirleniyor")
         lang = decision or self.language.resolve(job.language, segments)
         asr = self.engines[lang.code]
         lap("dil")
@@ -76,6 +93,7 @@ class TranscribeAndDiarize:
         # 13 Ekim, 1 sn'lik test sesleri: Zipformer "ừ", Whisper "Altyazı M.K." uyduruyordu.
         asr_segments = (self.chunker.split(audio) if full else segments) if segments else []
         fast = profile == "feedback"
+        self._stage(job.job_id, "metne_cevriliyor")
         if not asr_segments:
             words = []
         elif fast and getattr(asr, "supports_fast", False):
@@ -87,6 +105,7 @@ class TranscribeAndDiarize:
         if segments and self.safety.enabled:
             gaps, quality = coverage(segments, words, self.safety.min_gap)
             if gaps and not fast and getattr(asr, "supports_rescue", False):
+                self._stage(job.job_id, "eksikler_kurtariliyor")
                 m, sr = self.safety.margin, 16000
                 clips = []
                 for a, b in gaps:
@@ -102,13 +121,16 @@ class TranscribeAndDiarize:
             # tek kişi biliniyor ya da kısa geri bildirim mesajı: konuşmacı ayırma atlanır
             speakers = [SpeakerSegment("speaker_00", 0.0, duration)]
         else:
-            diarize_segs = self.chunker.split(audio) if (full and self.chunker) else segments
+            self._stage(job.job_id, "konusmacilar_ayriliyor")
+            # bitişik parçalar metne çevirme için zaten bölündü (aynı ses, aynı bölücü): yeniden bölme
+            diarize_segs = asr_segments if full else segments
             speakers = self.diarizer.diarize(audio, diarize_segs, job.num_speakers)
         lap("konusmaci")
         # cümle sınırı için gerçek sessizlikler: VAD parçaları iki yandan pad (0,2 sn) genişletildiği
         # için aralarında boşluk kalması ~0,4 sn'den uzun sessizlik demek (daha kısası ve uzun
         # konuşmanın zorla bölündüğü yer bitişik kalır). 4,6 dk'lık iki diyalogda 29 ve 14 sınır.
         pauses = [(a.end + b.start) / 2 for a, b in zip(segments, segments[1:]) if b.start - a.end > 0.01]
+        self._stage(job.job_id, "birlestiriliyor")
         utterances = self.fusion.fuse(words, speakers, pauses=pauses)
         lap("birlestirme")
         infos: tuple = ()

@@ -359,3 +359,27 @@ sürerken canlı oturum (Vietnamca, 60 sn, 2 çekirdek):
   BatchedInferencePipeline'ı kelime zamanı için ortak durum tutuyor). Bedeli: Türkçe canlı altyazı
   Türkçe toplu iş sürerken bekler.
 
+### Konuşmacı ayırma hızı ve verilen konuşmacı sayısı (19 Ekim)
+
+2 dk Vietnamca seste (2 çekirdek) aşamalar: konuşma bulma 1,3 sn, metne çevirme 6,8 sn, konuşmacı
+ayırma 7,5 sn. Konuşmacı ayırmanın neredeyse tamamı 283 pencerenin (1 sn, 0,4 sn kayma; bitişik
+parçalarda sessizlik yok denecek kadar az) ses imzası. Kümeleme 0,01-0,2 sn.
+
+| Ses imzası hesabı | Süre |
+|---|---|
+| Önceki: her pencere 2 iş parçacığıyla, sırayla | 7,3 sn |
+| Her pencere 1 iş parçacığıyla, 2 pencere aynı anda | 4,1 sn |
+| 9 gerçek diyalog (toplam): önceki -> yeni | 136 -> 77 sn (1,76 kat) |
+| Aynı anda 2 iş (2 dk ses): önceki -> yeni | 13,3 -> 9,0 sn |
+
+- İmzalar birebir aynı (benzerlik 1,000000), 9/9 diyalogda konuşmacı çıktısı aynı, DER %8,39.
+  Küçük CAM++ modelinde bir pencereyi iki iş parçacığına bölmek verimsiz; aynı çekirdeklerle iki
+  pencere aynı anda daha çok iş çıkarıyor (yalnızca tek iş değil, ani yükte toplam hız da artar).
+- Denenip bırakılan: pencereleri tek çağrıda toplu çözmek (kaldi-native-fbank + onnxruntime).
+  sherpa-onnx ile aynı ayarlara rağmen imzalar tutmadı (benzerlik 0,53-0,87); doğruluğu riske
+  atmamak için alınmadı.
+- Sayı verildiğinde (num_speakers) önce otomatik kümeleme denenir, o da aynı sayıyı bulduysa
+  onun kümeleri kullanılır. Önbellekteki imzalarla: gerçek diyalog DER %12,3 -> %12,3, kesit
+  diyalog yanlış cümle %11,7 -> %11,7, sentetik %10,9 -> %6,3. fine-tuning projesindeki "küme
+  çökmesi" koruması burada gereksiz: 65 çok konuşmacılı kayıtta hiç çökme yok.
+

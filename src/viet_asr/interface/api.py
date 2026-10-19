@@ -54,7 +54,7 @@ from viet_asr.application.serialization import record_to_dict
 from viet_asr.domain import AudioJob, JobStatus, UnsupportedLanguageError
 from viet_asr.infrastructure.audio import FFMPEG_ONLY, AudioDecodeError, ffmpeg_bin, probe_duration
 from viet_asr.interface.composition import audio_roots, safe_file_remover
-from viet_asr.interface.security import api_key_dependency, callback_problem
+from viet_asr.interface.security import api_key_dependency, callback_problem, key_ok
 from viet_asr.interface.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -108,6 +108,26 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
     max_bytes = settings.max_upload_mb * 1024 * 1024
     remove_upload = safe_file_remover(data_dir)
 
+    _recent: dict[tuple, float] = {}
+
+    def log_access(who: str, action: str, job_id: str | None, request: Request,
+                   detail: str | None = None, dedupe: bool = False) -> None:
+        """Erişim kaydı. dedupe: aynı kişinin aynı işteki aynı eylemi 60 sn'de bir yazılır
+        (arayüz çalışan işi saniyede bir sorar, ses oynatıcı parça parça ister)."""
+        import time as _t
+
+        if dedupe:
+            key, now = (who, action, job_id), _t.monotonic()
+            if now - _recent.get(key, -1e9) < 60:
+                return
+            if len(_recent) > 10_000:
+                _recent.clear()
+            _recent[key] = now
+        try:
+            store.audit(who, action, job_id, detail, request.client.host if request.client else None)
+        except Exception:  # kayıt yazılamadı: istek yine de yanıtlansın, hata günlükte
+            log.exception("erişim kaydı yazılamadı: %s %s %s", who, action, job_id)
+
     if rate_limiter is None and settings.rate_limit_per_minute > 0:
         from viet_asr.infrastructure.rate_limit import MemoryRateLimiter
 
@@ -128,8 +148,9 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
                 raise HTTPException(503, f"sistem dolu: {pending} iş bekliyor; biraz sonra tekrar deneyin",
                                     headers={"Retry-After": "60"})
 
-    @api.post("/jobs", status_code=202, dependencies=[auth, Depends(admit)])
-    def create_job(file: UploadFile | None = File(None), language: str = Form("auto"),
+    @api.post("/jobs", status_code=202, dependencies=[Depends(admit)])
+    def create_job(request: Request, who: str = auth, file: UploadFile | None = File(None),
+                   language: str = Form("auto"),
                    callback_url: str | None = Form(None), audio_path: str | None = Form(None),
                    num_speakers: int | None = Form(None), external_id: str | None = Form(None),
                    profile: str | None = Form(None), notify: str | None = Form(None)):
@@ -178,6 +199,7 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             rec = store.get(got)
             return JSONResponse({"job_id": got, "status": rec.status.value if rec else None,
                                  "tekrar": True}, status_code=200)
+        log_access(who, "is_olusturuldu", job_id, request, f"{duration:.0f} sn, dil={language}")
         return {"job_id": job_id, "status": JobStatus.QUEUED.value,
                 "duration": round(duration, 3), "language": language}
 
@@ -236,10 +258,9 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         """Canlı olaylar: {"tur": "parca", final, text, start, end...} ve sonda {"tur": "bitti"}.
         API anahtarı tarayıcıdan başlık gönderilemediği için ?key= ile."""
         import asyncio
-        import hmac
         import queue as queue_mod
 
-        if settings.api_key and not hmac.compare_digest(key or ws.headers.get("x-api-key", ""), settings.api_key):
+        if not key_ok(settings, key or ws.headers.get("x-api-key")):
             await ws.close(code=4401)
             return
         mgr = streams if (streams is not None and settings.enable_streams) else None
@@ -269,9 +290,9 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         except RuntimeError:
             pass
 
-    @api.get("/jobs/{job_id}/transcript", dependencies=[auth])
-    def get_transcript_view(job_id: str, etiket: str | None = None, temizle: bool = True,
-                            noktalama: bool = True, bicim: str = "txt"):
+    @api.get("/jobs/{job_id}/transcript")
+    def get_transcript_view(job_id: str, request: Request, who: str = auth, etiket: str | None = None,
+                            temizle: bool = True, noktalama: bool = True, bicim: str = "txt"):
         """Temiz transkript: konuşmacı değişiminde yeni satır, [dd:ss - dd:ss] [Etiket]: metin.
         etiket: genel | studyo | yok (varsayılan TRANSCRIPT_LABELS). Kayıttaki satırlar değişmez."""
         from viet_asr.application.transcript_view import LABEL_MODES, as_text, blocks
@@ -286,13 +307,14 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         if t is None:
             raise HTTPException(409, "iş henüz bitmedi")
         bs = blocks(t, mode, clean=temizle, punctuate=noktalama)
+        log_access(who, "transkript_alindi", job_id, request, dedupe=True)
         if bicim == "json":
             return [{"speaker": b.speaker, "label": b.label, "start": round(b.start, 2),
                      "end": round(b.end, 2), "text": b.text} for b in bs]
         return PlainTextResponse(as_text(bs), media_type="text/plain; charset=utf-8")
 
-    @api.get("/jobs/{job_id}/audio", dependencies=[auth])
-    def get_audio(job_id: str):
+    @api.get("/jobs/{job_id}/audio")
+    def get_audio(job_id: str, request: Request, who: str = auth):
         rec = store.get(job_id)
         if rec is None:
             raise HTTPException(404, "iş bulunamadı")
@@ -302,39 +324,44 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         roots = audio_roots(settings)  # yüklemeler + canlı oturum kayıtları
         if not any(r in p.resolve().parents for r in roots) and not settings.allow_local_paths:
             raise HTTPException(403, "bu ses dosyası sunulamaz")
+        log_access(who, "ses_dinlendi", job_id, request, dedupe=True)
         return FileResponse(p)
 
-    @api.delete("/jobs/{job_id}", dependencies=[auth])
-    def delete_job(job_id: str):
+    @api.delete("/jobs/{job_id}")
+    def delete_job(job_id: str, request: Request, who: str = auth):
         rec = store.get(job_id)
         if rec is None:
             raise HTTPException(404, "iş bulunamadı")
         if rec.status in (JobStatus.QUEUED, JobStatus.RUNNING):
             raise HTTPException(409, "iş henüz bitmedi; bitince silinebilir")
         path = store.delete_job(job_id)
+        log_access(who, "is_silindi", job_id, request)
         if path:
             remove_upload(path)  # yalnızca yükleme klasöründekiler; kullanıcının kendi dosyası kalır
         return {"job_id": job_id, "silindi": True}
 
-    @api.patch("/jobs/{job_id}/utterances/{idx}", dependencies=[auth])
-    def edit_utterance(job_id: str, idx: int, body: UtteranceEdit):
+    @api.patch("/jobs/{job_id}/utterances/{idx}")
+    def edit_utterance(job_id: str, idx: int, body: UtteranceEdit, request: Request, who: str = auth):
         if body.speaker is None and body.text is None:
             raise HTTPException(422, "text ya da speaker verilmeli")
         u = store.update_utterance(job_id, idx, body.speaker,
                                    " ".join(body.text.split()) if body.text is not None else None)
         if u is None:
             raise HTTPException(404, "bitmiş iş ya da satır bulunamadı")
+        log_access(who, "satir_duzeltildi", job_id, request,
+                   f"satır {idx}" + (" metin" if body.text is not None else "") + (" konuşmacı" if body.speaker else ""))
         return {"index": idx, "speaker": u.speaker, "start": round(u.start, 3), "end": round(u.end, 3),
                 "text": u.text, "edited": True}
 
-    @api.post("/jobs/{job_id}/reanalyze", status_code=202, dependencies=[auth])
-    def reanalyze(job_id: str, body: Reanalyze):
+    @api.post("/jobs/{job_id}/reanalyze", status_code=202)
+    def reanalyze(job_id: str, body: Reanalyze, request: Request, who: str = auth):
         """Aynı ses, yeni konuşmacı sayısıyla yeniden analiz (dosya tekrar yüklenmez; sunucudaki
         ses kullanılır). Aynı iş kimliği kalır; elle yapılan düzeltmeler yeni sonuçla değişir.
         num_speakers=0: sesten bul."""
         rec = store.reopen(job_id, body.num_speakers or None)
         if rec is None:
             raise HTTPException(409, "yalnızca bitmiş ve sesi silinmemiş iş yeniden analiz edilebilir")
+        log_access(who, "yeniden_analiz", job_id, request, f"konuşmacı sayısı {body.num_speakers or 'otomatik'}")
         code = rec.decision.code if rec.decision else rec.job.language
         if code:
             queue.enqueue_transcription(job_id, code)
@@ -342,8 +369,8 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             queue.enqueue_detection(job_id)
         return {"job_id": job_id, "status": JobStatus.QUEUED.value, "num_speakers": rec.job.num_speakers}
 
-    @api.post("/jobs/{job_id}/dataset", dependencies=[auth])
-    def to_dataset(job_id: str, body: DatasetExport):
+    @api.post("/jobs/{job_id}/dataset")
+    def to_dataset(job_id: str, body: DatasetExport, request: Request, who: str = auth):
         """Kontrol edilmiş sonucu veri setinin onay kuyruğuna koyar (scripts/veri_seti.py onaylar).
         ENABLE_DATASET_EXPORT açık olmalı; kontrol eden kişinin adı ve açık onay zorunlu."""
         if not settings.enable_dataset_export:
@@ -370,13 +397,15 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         d = write_pending(Path(settings.dataset_dir), job_id, SoundfileLoader().load(str(p)),
                           res["utterances"], meta)
         store.set_consent(job_id, body.reviewer.strip(), body.use)
+        log_access(who, "veri_setine_aktarildi", job_id, request, f"{body.use}, kontrol eden: {body.reviewer.strip()}")
         return {"job_id": job_id, "durum": "onay bekliyor", "klasor": str(d)}
 
-    @api.delete("/jobs/{job_id}/utterances/{idx}", dependencies=[auth])
-    def delete_utterance(job_id: str, idx: int):
+    @api.delete("/jobs/{job_id}/utterances/{idx}")
+    def delete_utterance(job_id: str, idx: int, request: Request, who: str = auth):
         """Uydurma/yanlış satırı sonuçtan kaldırır; kayıtta kalır (model hatası olarak incelenir)."""
         if not store.delete_utterance(job_id, idx):
             raise HTTPException(404, "bitmiş iş ya da satır bulunamadı")
+        log_access(who, "satir_silindi", job_id, request, f"satır {idx}")
         return {"index": idx, "silindi": True}
 
     @api.post("/webhooks/test", dependencies=[auth])
@@ -402,8 +431,9 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             raise HTTPException(404, "gönderilmemiş teslim bulunamadı")
         return {"id": delivery_id, "yeniden_denenecek": True}
 
-    @api.get("/corrections", dependencies=[auth])
-    def list_corrections(limit: int = 1000):
+    @api.get("/corrections")
+    def list_corrections(request: Request, who: str = auth, limit: int = 1000):
+        log_access(who, "duzeltmeler_alindi", None, request, f"en fazla {limit}", dedupe=True)
         return [{"job_id": c.job_id, "index": c.idx, "language": c.language,
                  "start": round(c.start, 3), "end": round(c.end, 3), "speaker": c.speaker,
                  "text": c.text, "original_speaker": c.original_speaker,
@@ -411,13 +441,18 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
                  "audio_available": bool(c.audio_path)}
                 for c in store.corrections(max(1, min(limit, 10_000)))]
 
-    @api.get("/jobs/{job_id}", dependencies=[auth])
-    def get_job(job_id: str):
+    @api.get("/jobs/{job_id}")
+    def get_job(job_id: str, request: Request, who: str = auth):
         rec = store.get(job_id)
         if rec is None:
             raise HTTPException(404, "iş bulunamadı")
         tr = store.get_transcript(job_id) if rec.status == JobStatus.DONE else None
-        return record_to_dict(rec, tr)
+        if tr is not None:  # içerik (konuşma metni) gösterildi
+            log_access(who, "sonuc_goruntulendi", job_id, request, dedupe=True)
+        out = record_to_dict(rec, tr)
+        if rec.status == JobStatus.QUEUED:
+            out["sira"] = store.queue_position(job_id)  # önündeki bekleyen iş sayısı
+        return out
 
     @api.get("/health")
     def health():
@@ -435,6 +470,9 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             body["jobs"] = store.counts()
         except Exception:
             pass
+        from viet_asr.interface.alerts import collect
+
+        body["uyarilar"] = collect(store, settings)  # yalnızca sayı ve süre, kişisel veri yok
         return JSONResponse(body, status_code=200 if ok else 503)
 
     @api.get("/health/ready")
@@ -456,6 +494,26 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             checks[name] = detail
             ok = ok and good
         return JSONResponse({"ready": ok, "checks": checks}, status_code=200 if ok else 503)
+
+    @api.get("/audit")
+    def audit_log(request: Request, who: str = auth, is_id: str | None = None, kim: str | None = None,
+                  limit: int = 200):
+        """Erişim kaydı (en yenisi önce). AUDIT_READERS doluysa yalnızca o kişiler okuyabilir."""
+        if settings.audit_readers and who.lower() not in settings.audit_readers:
+            raise HTTPException(403, "erişim kaydını okuma yetkiniz yok (AUDIT_READERS)")
+        log_access(who, "erisim_kaydi_okundu", is_id, request, dedupe=True)
+        return store.audit_rows(is_id, kim, max(1, min(limit, 5000)))
+
+    @api.get("/quality", dependencies=[auth])
+    def quality(gun: int = 90):
+        """Düzeltmelerden kalite: hafta / dil / model başına düzeltme oranı (yaklaşık WER).
+        Yalnızca elden geçirilmiş (en az bir satırı düzeltilmiş ya da silinmiş) işler sayılır."""
+        from datetime import datetime, timedelta, timezone
+
+        from viet_asr.application.quality import quality_report
+
+        since = datetime.now(timezone.utc) - timedelta(days=max(1, min(gun, 3650)))
+        return {"gun": gun, "satirlar": quality_report(store.review_lines(since))}
 
     @api.get("/metrics/prometheus", dependencies=[auth], response_class=PlainTextResponse)
     def metrics_prometheus():

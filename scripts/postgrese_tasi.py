@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from viet_asr.infrastructure.db.transfer import transfer  # noqa: E402
 from viet_asr.interface.settings import Settings  # noqa: E402
 
-NAMES = {"jobs": "iş", "utterances": "konuşma satırı", "outbox": "bildirim"}
+NAMES = {"jobs": "iş", "utterances": "konuşma satırı", "outbox": "bildirim", "audit_log": "erişim kaydı"}
 
 
 def main(argv: list[str] | None = None) -> int:

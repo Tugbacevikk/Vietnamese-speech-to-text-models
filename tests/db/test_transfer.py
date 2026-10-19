@@ -47,6 +47,7 @@ def fill(src: SqlAlchemyJobStore):
     src.add_event("live.ended", "http://alici/canli", {"event": "live.ended", "text": "merhaba"})
     rows = src.claim_outbox(10, 8, __import__("datetime").timedelta(seconds=30))
     src.mark_sent(rows[0]["id"])  # biri gönderilmiş, biri bekliyor
+    src.audit("Tuğba", "satir_duzeltildi", "bitti", "satır 1", "10.0.0.5")
 
 
 def test_sqlite_verisi_postgresqle_eksiksiz_tasinir(tmp_path, pg_url):
@@ -57,10 +58,10 @@ def test_sqlite_verisi_postgresqle_eksiksiz_tasinir(tmp_path, pg_url):
     before = (src.get_transcript("bitti"), src.get("bitti"), src.corrections(), src.outbox_rows())
 
     dry = transfer(src_url, pg_url, dry_run=True)
-    assert dry.source == {"jobs": 2, "utterances": 3, "outbox": 2} and dry.copied == {}
+    assert dry.source == {"jobs": 2, "utterances": 3, "outbox": 2, "audit_log": 1} and dry.copied == {}
 
     rep = transfer(src_url, pg_url)
-    assert rep.copied == {"jobs": 2, "utterances": 3, "outbox": 2} and rep.complete
+    assert rep.copied == {"jobs": 2, "utterances": 3, "outbox": 2, "audit_log": 1} and rep.complete
     dst = SqlAlchemyJobStore(pg_url)
     t, rec = dst.get_transcript("bitti"), dst.get("bitti")
     assert t == before[0]                                   # metin, düzeltme, silinen satır, JSON
@@ -76,7 +77,8 @@ def test_sqlite_verisi_postgresqle_eksiksiz_tasinir(tmp_path, pg_url):
     assert out[1]["payload"]["text"] == "merhaba"
 
     again = transfer(src_url, pg_url)                       # tekrar çalıştırmak çoğaltmaz
-    assert again.copied == {"jobs": 0, "utterances": 0, "outbox": 0} and again.target == rep.target
+    assert again.copied == {"jobs": 0, "utterances": 0, "outbox": 0, "audit_log": 0} and again.target == rep.target
+    assert dst.audit_rows()[0]["kim"] == "Tuğba" and dst.audit_rows()[0]["ip"] == "10.0.0.5"
     dst.add_event("live.ended", "http://x/y", {"k": 1})     # hedefin sayacı çakışmadan devam eder
     assert len(dst.outbox_rows()) == 3
 

@@ -1,4 +1,5 @@
-"""Veritabanından veritabanına taşıma (SQLite -> PostgreSQL): işler, satırlar, bildirim kuyruğu.
+"""Veritabanından veritabanına taşıma (SQLite -> PostgreSQL): işler, satırlar, bildirim kuyruğu,
+erişim kaydı.
 
 İki tarafın şeması önce Alembic ile en son sürüme getirilir; sonra satırlar SQLAlchemy
 tablolarıyla kopyalanır. Böylece tür dönüşümleri (JSON -> JSONB, saat dilimli zaman, mantıksal
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import create_engine, func, select
 
-from viet_asr.infrastructure.db.models import JobRow, OutboxRow, UtteranceRow
+from viet_asr.infrastructure.db.models import AuditRow, JobRow, OutboxRow, UtteranceRow
 from viet_asr.infrastructure.db.store import SqlAlchemyJobStore
 
 log = logging.getLogger(__name__)
@@ -53,9 +54,9 @@ def transfer(source_url: str, target_url: str, dry_run: bool = False) -> Transfe
     SqlAlchemyJobStore(source_url).migrate()  # eski sürüm SQLite'ı da yeni şemaya getirir
     src = create_engine(source_url)
     rep = TransferReport()
-    jobs, utts, outbox = JobRow.__table__, UtteranceRow.__table__, OutboxRow.__table__
+    jobs, utts, outbox, audit = JobRow.__table__, UtteranceRow.__table__, OutboxRow.__table__, AuditRow.__table__
     with src.connect() as s:
-        for t in (jobs, utts, outbox):
+        for t in (jobs, utts, outbox, audit):
             rep.source[t.name] = _count(s, t)
     if dry_run:
         return rep
@@ -109,8 +110,18 @@ def transfer(source_url: str, target_url: str, dry_run: bool = False) -> Transfe
         n_out = len(rows)
         rep.copied["outbox"], rep.skipped["outbox"] = n_out, rep.source["outbox"] - n_out
 
+        # erişim kaydı: (zaman, kim, eylem, iş) ile eşlenir; kimlik hedefin sayacından
+        seen = {tuple(k) for k in d.execute(select(audit.c.at, audit.c.actor, audit.c.action, audit.c.job_id))}
+        cols = [c for c in audit.c if c.name != "id"]
+        rows = [dict(r) for r in s.execute(select(*cols).order_by(audit.c.id)).mappings()
+                if (r["at"], r["actor"], r["action"], r["job_id"]) not in seen]
+        for i in range(0, len(rows), BATCH):
+            d.execute(audit.insert(), rows[i:i + BATCH])
+        rep.copied["audit_log"] = len(rows)
+        rep.skipped["audit_log"] = rep.source["audit_log"] - len(rows)
+
     with dst.connect() as d:
-        for t in (jobs, utts, outbox):
+        for t in (jobs, utts, outbox, audit):
             rep.target[t.name] = _count(d, t)
     src.dispose()
     dst.dispose()

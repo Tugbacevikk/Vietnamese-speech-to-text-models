@@ -240,7 +240,8 @@ def build_maintenance(store, settings, queue=None, queue_idle=None):
     return Maintenance(store, safe_file_remover(*audio_roots(settings)), settings.audio_retention_hours,
                        settings.result_retention_days, settings.processing_stale_sec,
                        queue=queue, queue_idle=queue_idle, queued_stale_sec=settings.queued_stale_sec,
-                       cleanup_recordings=old_recordings, backup=build_backup(store, settings))
+                       cleanup_recordings=old_recordings, backup=build_backup(store, settings),
+                       audit_days=settings.audit_retention_days)
 
 
 def build_backup(store, settings):

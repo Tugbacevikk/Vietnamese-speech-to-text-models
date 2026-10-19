@@ -58,6 +58,9 @@ gürültü) en yakın kişiye katılır. `num_speakers` verilirse tam o sayı. �
 
 ## API
 
+Kişi başına anahtar (`API_KEYS`), erişim kaydı, kalite takibi (`GET /quality`), iş ilerlemesi ve
+uyarılar: [docs/entegrasyon.md](docs/entegrasyon.md#10-i̇zleme).
+
 API anahtarı tanımlıysa (`API_KEY`, üretimde zorunlu) istekler `X-API-Key` başlığı ister.
 Bağlanacak sistem için ayrıntılı rehber (alanlar, durumlar, bildirim başlıkları, imza doğrulama
 örnekleri Python/Node/C#, tekrar kuralları): [docs/entegrasyon.md](docs/entegrasyon.md).

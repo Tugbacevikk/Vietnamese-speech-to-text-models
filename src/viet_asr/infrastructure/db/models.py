@@ -91,6 +91,9 @@ class JobRow(Base):
     model: Mapped[str | None] = mapped_column(Text)
     duration: Mapped[float | None] = mapped_column(Float)
     error: Mapped[str | None] = mapped_column(Text)
+    # işlenirken: aşama adı ve yaklaşık ilerleme (0..1); bitince aşama boşalır, ilerleme 1
+    stage: Mapped[str | None] = mapped_column(Text)
+    progress: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
@@ -146,3 +149,25 @@ class OutboxRow(Base):
         Index("ix_outbox_pending", "next_attempt_at",
               postgresql_where=text("sent_at IS NULL"), sqlite_where=text("sent_at IS NULL")),
     )
+
+
+class AuditRow(Base):
+    """Erişim kaydı: kim, ne zaman, hangi işte ne yaptı (görüntüleme, dinleme, düzeltme, silme...).
+    İşe bağlı değil (yabancı anahtar yok): iş silinse de kayıt kalır."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True,
+                                    autoincrement=True)
+    at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    actor: Mapped[str] = mapped_column(Text)            # anahtarın sahibi (API_KEYS) ya da "anahtarsız (ip)"
+    action: Mapped[str] = mapped_column(Text)           # sonuc_goruntulendi, ses_dinlendi, satir_duzeltildi...
+    job_id: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[str | None] = mapped_column(Text)
+    ip: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index("ix_audit_log_at", "at"),
+        Index("ix_audit_log_job_id", "job_id"),
+    )
+

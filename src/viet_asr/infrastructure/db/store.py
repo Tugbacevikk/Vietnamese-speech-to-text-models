@@ -28,10 +28,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from viet_asr.application.serialization import transcript_to_dict
 from viet_asr.domain import (
-    NOTIFY_DEFAULT, AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, LanguageSource, SpeakerInfo,
+    NOTIFY_DEFAULT, AudioJob, Correction, JobRecord, JobStatus, LanguageDecision, LanguageSource, ReviewLine,
+    SpeakerInfo,
     Transcript, Utterance,
 )
-from viet_asr.infrastructure.db.models import JobRow, OutboxRow, UtteranceRow, utcnow
+from viet_asr.infrastructure.db.models import AuditRow, JobRow, OutboxRow, UtteranceRow, utcnow
 from viet_asr.infrastructure.db.url import normalize_url
 
 MIGRATIONS = Path(__file__).parent / "migrations"
@@ -169,6 +170,21 @@ class SqlAlchemyJobStore:
                 self._outbox(s, job_id, f"job.{event}", cb,
                              {"job_id": job_id, "status": status.value, "error": error})
 
+    def set_progress(self, job_id: str, stage: str, progress: float) -> None:
+        """İşlenirken aşama ve yaklaşık ilerleme. updated_at da yenilenir: ilerleyen uzun iş
+        bakımda askıda (PROCESSING_STALE_SEC) sayılmaz."""
+        with self._tx() as s:
+            self._update_job(s, job_id, stage=stage, progress=round(progress, 3))
+
+    def queue_position(self, job_id: str) -> int | None:
+        """Kuyrukta bekleyen işin önündeki iş sayısı (önce gelen ve hâlâ bekleyen); değilse None."""
+        with self._session() as s:
+            j = s.get(JobRow, job_id)
+            if j is None or j.status != JobStatus.QUEUED.value:
+                return None
+            return s.scalar(select(func.count()).select_from(JobRow).where(
+                JobRow.status == JobStatus.QUEUED.value, JobRow.created_at < j.created_at))
+
     def fail(self, job_id: str, error: str) -> None:
         with self._tx() as s:
             cb, events = self._update_job(s, job_id, status=JobStatus.FAILED.value, error=error)
@@ -185,7 +201,7 @@ class SqlAlchemyJobStore:
         d = t.language
         with self._tx() as s:
             cb, events = self._update_job(
-                s, t.job_id, must=True, status=JobStatus.DONE.value, model=t.model,
+                s, t.job_id, must=True, status=JobStatus.DONE.value, model=t.model, stage=None, progress=1.0,
                 duration=t.duration, lang_code=d.code, lang_confidence=d.confidence,
                 lang_source=d.source.value, lang_uncertain=d.uncertain, error=None,
                 profile=t.profile, timings=t.timings or None, quality=t.quality or None,
@@ -254,6 +270,7 @@ class SqlAlchemyJobStore:
                     or not j.audio_path:
                 return None
             j.status, j.num_speakers, j.error, j.updated_at = JobStatus.QUEUED.value, num_speakers, None, utcnow()
+            j.stage, j.progress = None, None
             s.flush()
             return _record(j)
 
@@ -296,6 +313,45 @@ class SqlAlchemyJobStore:
             return [Correction(u.job_id, path, lang, u.idx, u.start_s, u.end_s, u.speaker, u.text,
                                u.original_speaker or u.speaker, u.original_text or u.text, u.edited_at)
                     for u, path, lang in rows]
+
+    def review_lines(self, since: datetime) -> list[ReviewLine]:
+        with self._session() as s:
+            touched = (select(UtteranceRow.job_id)
+                       .where((UtteranceRow.edited_at.is_not(None)) | (UtteranceRow.deleted_at.is_not(None)))
+                       .distinct())
+            q = (select(UtteranceRow, JobRow.lang_code, JobRow.model, JobRow.created_at)
+                 .join(JobRow, JobRow.id == UtteranceRow.job_id)
+                 .where(JobRow.created_at >= since, UtteranceRow.job_id.in_(touched))
+                 .order_by(UtteranceRow.job_id, UtteranceRow.idx))
+            return [ReviewLine(u.job_id, lang, model, created,
+                               u.original_text if u.edited_at is not None and u.original_text is not None else u.text,
+                               "" if u.deleted_at is not None else u.text,
+                               u.edited_at is not None and u.original_speaker is not None
+                               and u.original_speaker != u.speaker)
+                    for u, lang, model, created in s.execute(q).all()]
+
+    # --- erişim kaydı ---
+    def audit(self, actor: str, action: str, job_id: str | None = None, detail: str | None = None,
+              ip: str | None = None) -> None:
+        with self._tx() as s:
+            s.add(AuditRow(at=utcnow(), actor=actor[:200], action=action, job_id=job_id,
+                           detail=(detail or None) and detail[:500], ip=ip))
+
+    def audit_rows(self, job_id: str | None = None, actor: str | None = None,
+                   limit: int = 200) -> list[dict]:
+        with self._session() as s:
+            q = select(AuditRow)
+            if job_id:
+                q = q.where(AuditRow.job_id == job_id)
+            if actor:
+                q = q.where(AuditRow.actor == actor)
+            rows = s.scalars(q.order_by(AuditRow.at.desc(), AuditRow.id.desc()).limit(limit)).all()
+            return [{"zaman": r.at.isoformat(), "kim": r.actor, "eylem": r.action, "job_id": r.job_id,
+                     "ayrinti": r.detail, "ip": r.ip} for r in rows]
+
+    def delete_audit_before(self, before: datetime) -> int:
+        with self._tx() as s:
+            return s.execute(delete(AuditRow).where(AuditRow.at < before)).rowcount or 0
 
     def recent_jobs(self, limit: int = 20) -> list[JobRecord]:
         with self._session() as s:
@@ -369,6 +425,11 @@ class SqlAlchemyJobStore:
                              .where(JobRow.status == JobStatus.DONE.value, JobRow.timings.is_not(None))
                              .order_by(JobRow.updated_at.desc()).limit(limit)).all()
         return [(lang or "?", float(d or 0), dict(t or {})) for lang, d, t in rows]
+
+    def failed_since(self, since: datetime) -> int:
+        with self._session() as s:
+            return s.scalar(select(func.count()).select_from(JobRow).where(
+                JobRow.status == JobStatus.FAILED.value, JobRow.updated_at >= since)) or 0
 
     def outbox_stats(self, max_attempts: int) -> dict[str, int]:
         """Webhook teslimleri: gönderilen, bekleyen (tekrar denenecek), ölü (deneme hakkı bitti)."""
@@ -461,7 +522,7 @@ def _record(r: JobRow) -> JobRecord:
     job = AudioJob(r.id, r.audio_path, r.requested_lang, r.callback_url, r.num_speakers, r.external_id,
                    r.profile, tuple(r.notify.split(",")) if r.notify is not None else None)
     return JobRecord(job=job, status=JobStatus(r.status), decision=_decision(r), error=r.error,
-                     created_at=r.created_at, updated_at=r.updated_at)
+                     created_at=r.created_at, updated_at=r.updated_at, stage=r.stage, progress=r.progress)
 
 
 def _info_dict(i: SpeakerInfo) -> dict:

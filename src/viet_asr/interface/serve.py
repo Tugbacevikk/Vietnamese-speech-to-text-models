@@ -40,7 +40,7 @@ def announce(settings, host: str, port: int) -> None:
     elif not settings.https:
         log.warning("HOST=%s ama HTTPS kapalı: başka cihazda sayfa açılır, mikrofon açılmaz "
                     "(tarayıcılar mikrofonu yalnızca https'de verir). .env: HTTPS=1", host)
-    if host not in ("127.0.0.1", "localhost") and not settings.api_key:
+    if host not in ("127.0.0.1", "localhost") and not settings.auth_enabled:
         log.warning("Sunucu ağa açık ve API_KEY yok: aynı ağdaki herkes işleri görebilir, silebilir, "
                     "canlı altyazı açabilir. .env: API_KEY=<uzun rastgele bir değer> (sayfada Ayarlar > "
                     "API anahtarı alanına da girilir)")

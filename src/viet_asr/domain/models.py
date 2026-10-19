@@ -141,6 +141,20 @@ class SpeakerInfo:
 
 
 @dataclass(frozen=True)
+class ReviewLine:
+    """Bir kişinin elden geçirdiği (en az bir satırı düzeltilmiş ya da silinmiş) işteki bir satır:
+    modelin yazdığı ve son hali. Kalite takibi (düzeltme oranı) bunlardan hesaplanır."""
+
+    job_id: str
+    language: str | None
+    model: str | None
+    created_at: datetime
+    original: str          # modelin yazdığı
+    final: str             # kişinin bıraktığı ("" = satır silindi: uydurma)
+    speaker_changed: bool
+
+
+@dataclass(frozen=True)
 class Correction:
     """Bir kişinin düzelttiği satır: ince ayar verisi (ses aralığı + doğru metin)."""
 
@@ -175,6 +189,8 @@ class JobRecord:
     error: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    stage: str | None = None        # işlenirken hangi aşamada (ör. "konusmacilar_ayriliyor")
+    progress: float | None = None   # yaklaşık ilerleme 0..1 (aşamaya göre)
 
 
 @dataclass(frozen=True)

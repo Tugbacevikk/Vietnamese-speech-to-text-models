@@ -24,6 +24,8 @@ bilinmiyorsa uzaklık eşiğiyle kendisi bulur.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import sherpa_onnx
 from scipy.cluster.hierarchy import fcluster, linkage
@@ -93,10 +95,14 @@ def nme_spectral(E: np.ndarray, max_k: int = 8, k: int | None = None,
 
 class EmbeddingClusterDiarizer:
     def __init__(self, cfg: DiarizerConfig):
+        """İş parçacığı bütçesi (num_threads) pencereler arasında paylaşılır: her pencere tek
+        iş parçacığıyla, num_threads pencere aynı anda. Küçük CAM++ modelinde bir pencereyi iki
+        iş parçacığına bölmek verimsiz: 2 çekirdekte 2 dk ses (283 pencere) 7,3 -> 4,1 sn,
+        imzalar aynı (olcumler.md). Çıkarıcı aynı anda birden çok akışla çağrılabilir."""
         self.cfg = cfg
+        self.workers = max(1, cfg.num_threads)
         self.extractor = sherpa_onnx.SpeakerEmbeddingExtractor(
-            sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-                model=cfg.embedding_model, num_threads=cfg.num_threads))
+            sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=cfg.embedding_model, num_threads=1))
 
     # --- adımlar ---
     def _windows(self, segments: list[VadSegment]) -> list[tuple[float, float, np.ndarray]]:
@@ -165,7 +171,14 @@ class EmbeddingClusterDiarizer:
     def embed(self, segments: list[VadSegment]):
         """Pencereler ve imzaları (ayarlama betikleri bunu bir kez hesaplayıp tekrar kullanır)."""
         wins = self._windows(segments)
-        E = np.stack([self._embed(x) for _, _, x in wins]) if wins else np.zeros((0, 1))
+        if not wins:
+            return [], np.zeros((0, 1))
+        xs = [x for _, _, x in wins]
+        if self.workers == 1 or len(xs) < 4:
+            E = np.stack([self._embed(x) for x in xs])
+        else:  # iş başına havuz: eşzamanlı işler birbirinin iş parçacığını beklemesin
+            with ThreadPoolExecutor(self.workers, thread_name_prefix="imza") as pool:
+                E = np.stack(list(pool.map(self._embed, xs)))
         return [(a, b) for a, b, _ in wins], E
 
     def label(self, spans: list[tuple[float, float]], E: np.ndarray,
@@ -176,6 +189,13 @@ class EmbeddingClusterDiarizer:
         k = num_speakers if num_speakers and num_speakers > 0 else (
             self.cfg.num_speakers if self.cfg.num_speakers > 0 else None)
         lab = self._cluster(E, dur, k)
+        if k and k > 1:
+            # Sayı verildiyse önce otomatik dene: o da aynı sayıyı bulduysa onun kümeleri (sayıya
+            # zorlanmış kümeleme bazen bir kişiyi böler, başkasını birleştirir). Sentetik
+            # diyaloglarda yanlış cümle %10,9 -> %6,3; gerçek ve kesit diyaloglarda değişmedi.
+            auto = self._cluster(E, dur, None)
+            if len(np.unique(auto)) == k:
+                lab = auto
         # komşu aynı etiketli pencereleri birleştir, etiketleri konuşma sırasına göre adlandır
         names: dict[int, str] = {}
         out: list[SpeakerSegment] = []
