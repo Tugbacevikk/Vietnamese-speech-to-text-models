@@ -102,7 +102,9 @@ def _sentences(words: list[str], lang: str | None) -> str:
         return ""
     if words[-1][-1:] in ".?!":  # elle düzeltilmiş ve noktalanmış metin: dokunma
         return _cap(" ".join(words))
-    return _cap(" ".join(words)) + ("?" if _is_question(words, lang) else ".")
+    from viet_asr.application.punctuator import capitalize_proper_nouns
+    text = capitalize_proper_nouns(_cap(" ".join(words)), lang=lang or "vi")
+    return text + ("?" if _is_question(words, lang) else ".")
 
 
 def speaker_labels(utterances: list[Utterance], infos: tuple[SpeakerInfo, ...] | list[SpeakerInfo],
