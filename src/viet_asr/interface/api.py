@@ -54,7 +54,7 @@ from viet_asr.application.serialization import record_to_dict
 from viet_asr.domain import AudioJob, JobStatus, UnsupportedLanguageError
 from viet_asr.infrastructure.audio import FFMPEG_ONLY, AudioDecodeError, ffmpeg_bin, probe_duration
 from viet_asr.interface.composition import audio_roots, safe_file_remover
-from viet_asr.interface.security import api_key_dependency, callback_problem, key_ok
+from viet_asr.interface.security import api_key_dependency, callback_problem, key_ok, stream_source_problem
 from viet_asr.interface.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -224,7 +224,8 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         """Canlı akışı dinlemeye başlar; metin GET /streams/{id} ve WS /streams/{id}/ws ile gelir."""
         from viet_asr.interface.streams import StreamError, StreamSpec
 
-        problem = callback_problem(body.callback_url, settings) or callback_problem(body.canli_url, settings)
+        problem = (callback_problem(body.callback_url, settings) or callback_problem(body.canli_url, settings)
+                   or stream_source_problem(body.kaynak, settings))
         if problem:
             raise HTTPException(422, problem)
         if not body.sdp and len(body.kaynak.strip()) < 3:

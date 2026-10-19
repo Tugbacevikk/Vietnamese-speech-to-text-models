@@ -69,7 +69,7 @@ def source_from_sdp(text: str, spec: StreamSpec, work_dir: Path | None = None):
     except sdp_mod.SdpError as e:
         raise StreamError(f"SDP: {e}") from e
     u = urlparse(spec.kaynak.strip()) if spec.kaynak and spec.kaynak.startswith("rtp://") else None
-    host = (u.hostname if u else None) or "0.0.0.0"
+    host = (u.hostname if u else None) or "0.0.0.0"  # nosec B104 (RTP dinleme adresi varsayılanı)
     port = u.port if (u and u.port is not None) else media.port
     native = {f.pt: (f.native, f.clock_rate, f.channels) for f in media.formats if f.native}
     if native:
@@ -103,20 +103,20 @@ def bind_rtp(host: str, port: int, spec: StreamSpec, rtp_ports: tuple[int, int] 
 
 
 def parse_source(spec: StreamSpec, allow_files: bool, work_dir: Path | None = None,
-                 rtp_ports: tuple[int, int] | None = None):
+                 rtp_ports: tuple[int, int] | None = None, max_backlog: float = 30.0):
     """Kaynak yazımından AudioStream nesnesi."""
     if spec.sdp:
         return source_from_sdp(spec.sdp, spec, work_dir)
     k = spec.kaynak.strip()
     if k.lower() == "push":
-        return PushSource(spec.ses_hizi, idle_timeout=max(spec.idle_timeout, 5.0))
+        return PushSource(spec.ses_hizi, idle_timeout=max(spec.idle_timeout, 5.0), max_backlog=max_backlog)
     u = urlparse(k)
     if u.scheme == "rtp" and not k.lower().endswith(".sdp"):
         if u.port is None:
             raise StreamError("rtp://adres:port biçiminde olmalı (port 0 = boş port seç)")
         if spec.codec not in ("auto", "pcmu", "pcma", "l16"):
             raise StreamError("codec: auto | pcmu | pcma | l16 (Opus vb. için SDP dosyası verin)")
-        return bind_rtp(u.hostname or "0.0.0.0", u.port, spec, rtp_ports)
+        return bind_rtp(u.hostname or "0.0.0.0", u.port, spec, rtp_ports)  # nosec B104 (RTP dinleme adresi varsayılanı)
     if u.scheme in URL_SCHEMES:
         return FfmpegSource(k)
     p = Path(k)
@@ -235,13 +235,13 @@ class StreamManager:
     def __init__(self, engines, vad_cfg: VadConfig, data_dir: str | Path, submit=None,
                  languages: list[str] | None = None, max_sessions: int = 8, allow_files: bool = False,
                  max_speech: float = 10.0, vad_factory=None, rtp_ports: tuple[int, int] | None = None,
-                 public_host: str = "", notify_secret: str = "", notify_post=None):
+                 public_host: str = "", notify_secret: str = "", notify_post=None, max_backlog: float = 30.0):
         self.engines, self.vad_cfg, self.submit = engines, vad_cfg, submit
         self.dir = Path(data_dir) / "akislar"
         self.dir.mkdir(parents=True, exist_ok=True)
         self.languages = languages or list(engines)
         self.max_sessions, self.allow_files, self.max_speech = max_sessions, allow_files, max_speech
-        self.rtp_ports, self.public_host = rtp_ports, public_host
+        self.rtp_ports, self.public_host, self.max_backlog = rtp_ports, public_host, max_backlog
         self.notify_secret, self.notify_post = notify_secret, notify_post
         self.vad_factory = vad_factory or (lambda max_speech=None: SileroStreamingVad(
             self.vad_cfg, max_speech=max_speech or self.max_speech))
@@ -254,7 +254,8 @@ class StreamManager:
         return cls(engines, vad_cfg, s.data_dir, submit=submit, languages=list(s.languages),
                    max_sessions=s.stream_max_sessions, allow_files=s.allow_local_paths,
                    max_speech=s.stream_max_speech, rtp_ports=port_range(s.stream_rtp_ports),
-                   public_host=s.stream_public_host, notify_secret=s.webhook_secret)
+                   public_host=s.stream_public_host, notify_secret=s.webhook_secret,
+                   max_backlog=s.stream_max_backlog)
 
     def active(self) -> int:
         return sum(1 for s in self.sessions.values() if s.durum == "dinleniyor")
@@ -265,7 +266,7 @@ class StreamManager:
         with self._lock:
             if self.active() >= self.max_sessions:
                 raise StreamError(f"en fazla {self.max_sessions} canlı akış (STREAM_MAX_SESSIONS)")
-            source = parse_source(spec, self.allow_files, self.dir, self.rtp_ports)
+            source = parse_source(spec, self.allow_files, self.dir, self.rtp_ports, self.max_backlog)
             self._prune()
             sid = uuid.uuid4().hex
             s = StreamSession(sid, spec, datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -360,7 +361,8 @@ class StreamManager:
             s.ozet = {"sure_sn": round(sm.duration, 1), "parca": sm.segments, "kelime": sm.words,
                       "gecikme_p95_sn": round(sm.p95_latency, 2), "gecikme_max_sn": round(sm.max_latency, 2),
                       "duvar_sn": round(time.monotonic() - t0, 1),
-                      **({"rtp": dict(s.source.stats)} if hasattr(s.source, "stats") else {})}
+                      **({("push" if isinstance(s.source, PushSource) else "rtp"): dict(s.source.stats)}
+                         if hasattr(s.source, "stats") else {})}
             s.durum = "durduruldu" if s.stop.is_set() else "bitti"
         except Exception as e:  # kaynak açılamadı, ffmpeg hatası, model yok...
             log.exception("akış %s hata", s.id)

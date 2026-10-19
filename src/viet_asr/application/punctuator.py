@@ -14,7 +14,7 @@ from viet_asr.domain import Word
 # Soru ekleri ve sözcükleri (Vietnamca)
 VI_QUESTION_END = {
     "không", "hả", "sao", "chưa", "nhỉ", "thế", "gì", "đâu", "nào", "ai",
-    "chăng", "chứ", "hông", "sao"
+    "chăng", "chứ", "hông"
 }
 VI_QUESTION_PHRASES = (
     "thế nào", "bao nhiêu", "tại sao", "vì sao", "như thế nào", "làm sao",

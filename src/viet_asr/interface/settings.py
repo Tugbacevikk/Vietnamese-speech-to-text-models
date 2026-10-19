@@ -138,6 +138,11 @@ class Settings:
     # karşı servise söylenecek bu sunucunun adresi (yanıttaki "rtp_adres"). Docker/güvenlik duvarında
     # yalnızca bu aralık UDP için açılır.
     stream_rtp_ports: str = field(default_factory=lambda: os.environ.get("STREAM_RTP_PORTS", "").strip())
+    # dışarıdan çekilen akış kaynakları (http, rtsp, rtmp, srt) yalnızca bu adreslere (iç ağ olabilir);
+    # boşsa production'da iç ağ adresleri reddedilir (SSRF)
+    stream_allowed_hosts: list[str] = field(default_factory=lambda: _list(os.environ.get("STREAM_ALLOWED_HOSTS", "")))
+    # push akışında işlenmeyi bekleyebilecek en çok ses (sn); aşılınca 429 (gönderen yavaşlar)
+    stream_max_backlog: float = field(default_factory=lambda: float(os.environ.get("STREAM_MAX_BACKLOG", "30")))
     stream_public_host: str = field(default_factory=lambda: os.environ.get("STREAM_PUBLIC_HOST", "").strip())
     # canlı akışta bir parça en fazla bu kadar sürer (sn): uzun konuşmada gecikmenin üst sınırı
     stream_max_speech: float = field(default_factory=lambda: float(os.environ.get("STREAM_MAX_SPEECH", "10")))

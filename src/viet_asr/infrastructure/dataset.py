@@ -58,7 +58,8 @@ def write_pending(root: Path, job_id: str, audio: np.ndarray, utterances: list[d
 
 
 def audio_hash(audio: np.ndarray) -> str:
-    return hashlib.sha1(np.round(np.asarray(audio, dtype=np.float32), 4).tobytes()).hexdigest()
+    return hashlib.sha1(np.round(np.asarray(audio, dtype=np.float32), 4).tobytes(),
+                        usedforsecurity=False).hexdigest()  # yalnızca tekrar tespiti
 
 
 def pending(root: Path) -> list[dict]:

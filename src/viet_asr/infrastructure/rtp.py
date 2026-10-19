@@ -138,7 +138,7 @@ class RtpSource:
     formats: SDP'den yük türü -> (biçim, hız, kanal); ör. {96: ("l16", 16000, 1)} (sdp.py).
     """
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 5004, codec: str = "auto",
+    def __init__(self, host: str = "0.0.0.0", port: int = 5004, codec: str = "auto",  # nosec B104 (RTP alıcısı bilerek tüm arayüzleri dinler; port aralığı güvenlik duvarında)
                  clock_rate: int | None = None, idle_timeout: float = 5.0, first_timeout: float = 60.0,
                  jitter_depth: int = 8, formats: dict[int, tuple[str, int, int]] | None = None):
         self.host, self.port, self.codec, self.clock_rate = host, port, codec, clock_rate

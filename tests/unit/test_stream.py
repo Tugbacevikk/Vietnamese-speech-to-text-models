@@ -376,3 +376,44 @@ def test_rtp_port_araligi_ve_adres(tmp_path):
     assert c.post("/streams", json={"kaynak": "rtp://0.0.0.0:0", "dil": "vi"}).status_code == 409   # aralık dolu
     for x in (a, b):
         c.delete(f"/streams/{x['id']}")
+
+
+def test_akis_kaynagi_dis_adres_denetimi(tmp_path):
+    from viet_asr.interface.security import stream_source_problem
+    from viet_asr.interface.settings import Settings
+
+    dev = Settings(data_dir=str(tmp_path))
+    assert stream_source_problem("http://10.0.0.5/akim.ogg", dev) is None            # geliştirmede serbest
+    lst = Settings(data_dir=str(tmp_path), stream_allowed_hosts=["medya.lan"])
+    assert stream_source_problem("rtsp://medya.lan/kanal1", lst) is None
+    assert "izin listesinde değil" in stream_source_problem("rtsp://baska.lan/x", lst)
+    for ok in ("push", "rtp://0.0.0.0:0", "udp://0.0.0.0:5004", "/yol/kayit.wav", ""):   # dışarı bağlanmaz
+        assert stream_source_problem(ok, lst) is None
+    prod = Settings(data_dir=str(tmp_path), app_env="production", api_key="k")
+    assert "iç ağ" in stream_source_problem("http://127.0.0.1/x.ogg", prod)
+
+
+def test_akis_ucu_dis_adresi_reddeder_ve_backlog_ayari(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from viet_asr.infrastructure.memory_store import MemoryJobStore
+    from viet_asr.interface.api import create_app
+    from viet_asr.interface.settings import Settings
+    from viet_asr.interface.streams import StreamManager
+
+    s = Settings(data_dir=str(tmp_path), languages=["vi"], enable_streams=True,
+                 stream_allowed_hosts=["medya.lan"], stream_max_backlog=0.5)
+    mgr = StreamManager.from_settings(s, {"vi": FakeAsr()}, None)
+    mgr.vad_factory = FakeVad
+
+    class Q:
+        def enqueue_detection(self, j): pass
+        def enqueue_transcription(self, j, lang): pass
+
+    c = TestClient(create_app(MemoryJobStore(), Q(), s, streams=mgr))
+    r = c.post("/streams", json={"kaynak": "http://baska.lan/akim.ogg", "dil": "vi"})
+    assert r.status_code == 422 and "STREAM_ALLOWED_HOSTS" in r.text
+    sid = c.post("/streams", json={"kaynak": "push", "dil": "vi"}).json()["id"]
+    assert c.post(f"/streams/{sid}/audio", content=_pcm16(1.0)).status_code == 202
+    assert mgr.get(sid).source.max_backlog == 0.5                 # STREAM_MAX_BACKLOG kaynağa ulaştı
+    c.delete(f"/streams/{sid}")

@@ -48,6 +48,26 @@ def api_key_dependency(settings: Settings):
     return verify
 
 
+def _host_problem(host: str, settings: Settings, allowed: list[str], label: str, env: str) -> str | None:
+    """Adres izin listesinde mi / production'da iç ağa mı gidiyor. Sorun yoksa None."""
+    if allowed:
+        if host not in allowed:
+            return f"{label} izin listesinde değil ({host}); {env}"
+        return None
+    if not settings.is_production:
+        return None
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return f"{label} çözülemedi: {host}"
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+                or ip.is_reserved or ip.is_unspecified):
+            return f"{label} iç ağ adresine gidiyor ({ip}); iç ağdaysa {env}'a ekleyin"
+    return None
+
+
 def callback_problem(url: str | None, settings: Settings) -> str | None:
     """Sorun yoksa None, varsa açıklama."""
     if not url:
@@ -58,24 +78,27 @@ def callback_problem(url: str | None, settings: Settings) -> str | None:
         return "callback_url ayrıştırılamadı"
     if p.scheme not in ("http", "https") or not p.hostname:
         return "callback_url http:// ya da https:// ile başlamalı"
-    host = p.hostname.lower()
-    if settings.webhook_allowed_hosts:
-        if host not in settings.webhook_allowed_hosts:
-            return f"callback adresi izin listesinde değil ({host}); WEBHOOK_ALLOWED_HOSTS"
-        return None
-    if not settings.is_production:
+    return _host_problem(p.hostname.lower(), settings, settings.webhook_allowed_hosts,
+                         "callback adresi", "WEBHOOK_ALLOWED_HOSTS")
+
+
+OUTBOUND_SCHEMES = ("http", "https", "rtsp", "rtmp", "srt")
+
+
+def stream_source_problem(kaynak: str | None, settings: Settings) -> str | None:
+    """Canlı akış kaynağı sunucudan DIŞARI bağlanıyorsa (http, rtsp, rtmp, srt) aynı SSRF kuralı:
+    STREAM_ALLOWED_HOSTS doluysa yalnızca onlar; boşsa production'da iç ağ adresi reddedilir.
+    rtp://, udp:// (sunucu dinler), push ve dosya yolu dışarı bağlanmaz: denetlenmez."""
+    if not kaynak:
         return None
     try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror:
-        return f"callback adresi çözülemedi: {host}"
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
-                or ip.is_reserved or ip.is_unspecified):
-            return (f"callback iç ağ adresine gidiyor ({ip}); iç ağ alıcısıysa "
-                    "WEBHOOK_ALLOWED_HOSTS'a ekleyin")
-    return None
+        p = urllib.parse.urlparse(kaynak.strip())
+    except ValueError:
+        return "kaynak ayrıştırılamadı"
+    if p.scheme.lower() not in OUTBOUND_SCHEMES or not p.hostname:
+        return None
+    return _host_problem(p.hostname.lower(), settings, settings.stream_allowed_hosts,
+                         "akış kaynağı", "STREAM_ALLOWED_HOSTS")
 
 
 def key_ok(settings: Settings, provided: str | None) -> bool:

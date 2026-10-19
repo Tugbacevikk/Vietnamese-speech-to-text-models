@@ -11,7 +11,7 @@ import logging
 import uvicorn
 
 log = logging.getLogger(__name__)
-_ANY = ("0.0.0.0", "::", "")
+_ANY = ("0.0.0.0", "::", "")  # nosec B104 (adres karşılaştırma listesi, bağlama değil)
 
 
 def tls_files(settings) -> tuple[str, str] | None:

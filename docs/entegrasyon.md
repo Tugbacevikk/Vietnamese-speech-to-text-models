@@ -324,6 +324,10 @@ Sunucu yetişemezse `429` + `Retry-After`: **aynı parçayı** bekleyip yeniden 
 
 - `STREAM_RTP_PORTS=40000-40100`: port 0 istenince bu aralıktan boş port verilir; Docker/güvenlik
   duvarında yalnızca bu UDP aralığı açılır. `STREAM_PUBLIC_HOST`: karşı servise söylenecek adres.
+- `STREAM_ALLOWED_HOSTS`: sunucunun dışarı bağlanacağı kaynaklar (`http`, `rtsp`, `rtmp`, `srt`) yalnızca bu adreslere;
+  boşsa production'da iç ağ adresi `422`. `rtp://`, `push` ve `udp://` sunucu dinlediği için denetlenmez.
+  `STREAM_MAX_BACKLOG` (varsayılan 30 sn): push'ta bekleyen ses bunu aşınca `429`.
+- Özet (`ozet`) sayaçları kaynağa göre `rtp` ya da `push` anahtarı altında gelir.
 - `STREAM_MAX_SESSIONS` aşılırsa `422`. Canlı oturumlar bu sürecin belleğindedir: birden çok API
   kopyası arkasında aynı akışın istekleri aynı kopyaya gitmeli (yapışkan oturum).
 - API anahtarı: HTTP'de `X-API-Key`; tarayıcı dışı istemcide WebSocket için de başlık olur,

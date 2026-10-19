@@ -97,7 +97,7 @@ class SqlAlchemyJobStore:
                     f"replace(substr({c}, 1, 23), 'T', ' ') || '000' ELSE {c} END")
 
         conn.exec_driver_sql(
-            "INSERT INTO jobs (id, status, audio_path, requested_lang, callback_url, num_speakers, "
+            "INSERT INTO jobs (id, status, audio_path, requested_lang, callback_url, num_speakers, "  # nosec B608 (yalnızca sabit metin ve ts() ile üretilen CASE; kullanıcı girdisi yok)
             "lang_code, lang_confidence, lang_source, lang_uncertain, model, duration, error, "
             "created_at, updated_at) SELECT id, status, audio_path, requested_lang, callback_url, "
             "num_speakers, lang_code, lang_confidence, lang_source, lang_uncertain, model, duration, "
@@ -106,7 +106,7 @@ class SqlAlchemyJobStore:
             "INSERT INTO utterances (job_id, idx, speaker, start_s, end_s, text) "
             "SELECT job_id, idx, speaker, start_s, end_s, text FROM legacy_utterances")
         conn.exec_driver_sql(
-            "INSERT INTO outbox (id, job_id, event, url, payload, attempts, next_attempt_at, sent_at, "
+            "INSERT INTO outbox (id, job_id, event, url, payload, attempts, next_attempt_at, sent_at, "  # nosec B608 (sabit metin; kullanıcı girdisi yok)
             f"last_error, created_at) SELECT id, job_id, event, url, payload, attempts, "
             f"{ts('next_attempt_at')}, {ts('sent_at')}, last_error, {ts('created_at')} FROM legacy_outbox")
         if self.dialect == "postgresql":  # kopyalanan id'lerden sonra sayaç devam etsin
