@@ -106,6 +106,15 @@ class Settings:
     # canlı oturum kayıtları (.wav, .txt, .jsonl) kaç gün sonra silinsin (0 = silme); kişisel veri
     recordings_retention_days: float = field(default_factory=lambda: float(os.environ.get(
         "RECORDINGS_RETENTION_DAYS", "30")))
+    # Veritabanı yedeği (işler, satırlar, düzeltmeler): bakım her turda son yedeğin yaşına bakar,
+    # BACKUP_EVERY_HOURS'u geçtiyse yeni yedek alır (bilgisayar gece kapalı olsa da açılınca alınır).
+    backup_every_hours: float = field(default_factory=lambda: float(os.environ.get("BACKUP_EVERY_HOURS", "24")))
+    backup_keep_days: float = field(default_factory=lambda: float(os.environ.get("BACKUP_KEEP_DAYS", "14")))
+    backup_dir_setting: str = field(default_factory=lambda: os.environ.get("BACKUP_DIR", ""))
+    # PostgreSQL Docker'daysa pg_dump konteynerin içinden çalışır (Windows'a kurulum gerekmez)
+    backup_docker_container: str = field(default_factory=lambda: os.environ.get(
+        "BACKUP_DOCKER_CONTAINER", "asr-pg"))
+    pg_dump: str = field(default_factory=lambda: os.environ.get("PG_DUMP", ""))
     live_auto_analyze: bool = field(default_factory=lambda: os.environ.get(
         "LIVE_AUTO_ANALYZE", "true").lower() in ("1", "true", "evet"))
     # canlı akış (RTP / ffmpeg kaynağı; POST /streams). Varsayılan: geliştirmede açık, üretimde kapalı
@@ -169,6 +178,11 @@ class Settings:
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def backup_dir(self) -> str:
+        """Boşsa yükleme klasörünün yanında: data/uploads -> data/yedek."""
+        return self.backup_dir_setting or str(Path(self.data_dir).parent / "yedek")
 
     @property
     def local_db(self) -> str:

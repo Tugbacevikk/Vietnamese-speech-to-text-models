@@ -207,6 +207,25 @@ satırlar, arayüzdeki düzeltmeler, veri seti onayları ve bekleyen bildirimler
 
 Tam moda (`baslat_tam.bat`) geçerken aynı veritabanı `DATABASE_URL` olarak verilir.
 
+### Yedek
+
+Sunucu açıkken bakım günde bir veritabanı yedeği alır (`data/yedek`, 14 günden eskiler silinir,
+en yeni 3 yedek her zaman kalır). Bilgisayar gece kapalıysa yedek açılınca alınır. Her yedek
+alındıktan sonra okunarak doğrulanır. PostgreSQL Docker'daysa `pg_dump` konteynerin içinden
+çalışır (Windows'a ayrıca kurulum gerekmez; konteyner adı `BACKUP_DOCKER_CONTAINER`, varsayılan
+`asr-pg`). Kurulum dosyasıyla kurulduysa `C:\Program Files\PostgreSQL\<sürüm>\bin` kendiliğinden bulunur.
+
+```
+yedekle.bat                         # şimdi yedek al
+yedekle.bat listele
+durdur.bat
+yedekle.bat geri-yukle data\yedek\yedek_2026-10-19_030000.dump   # önce o anki hâlin yedeğini alır
+```
+
+Yedek yalnızca veritabanıdır (işler, satırlar, düzeltmeler); ses dosyaları içinde değildir. Disk
+arızasına karşı `data\yedek` klasörünü ara ara başka bir diske kopyalayın: aynı diskteki yedek
+diskle birlikte gider.
+
 ## Vietnamca ince ayar (Faz 2)
 
 Zipformer-68M tıbbi veriyle WSL2 + GPU'da ince ayarlanır; çıkan model Kapı 2'yi geçerse

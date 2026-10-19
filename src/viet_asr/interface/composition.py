@@ -240,7 +240,32 @@ def build_maintenance(store, settings, queue=None, queue_idle=None):
     return Maintenance(store, safe_file_remover(*audio_roots(settings)), settings.audio_retention_hours,
                        settings.result_retention_days, settings.processing_stale_sec,
                        queue=queue, queue_idle=queue_idle, queued_stale_sec=settings.queued_stale_sec,
-                       cleanup_recordings=old_recordings)
+                       cleanup_recordings=old_recordings, backup=build_backup(store, settings))
+
+
+def build_backup(store, settings):
+    """Bakımın çağırdığı yedek: süresi geldiyse alır (kullanılan veritabanı: yerel ya da tam mod)."""
+    from viet_asr.infrastructure.backup import DatabaseBackup
+
+    if settings.backup_every_hours <= 0:
+        return None
+    b = DatabaseBackup(store.url, settings.backup_dir, keep_days=settings.backup_keep_days,
+                       docker_container=settings.backup_docker_container, pg_dump=settings.pg_dump)
+
+    last_fail = [0.0]
+
+    def backup_if_due():
+        import time
+
+        if not b.due(settings.backup_every_hours) or time.time() - last_fail[0] < 3600:
+            return None  # başarısız denemeden sonra 1 saat bekle (her dakika pg_dump denenmesin)
+        try:
+            return b.run()
+        except Exception:
+            last_fail[0] = time.time()
+            raise
+
+    return backup_if_due
 
 
 def build_live(settings, cfg: PipelineConfig, engines: LazyAsrEngines, resolver: LanguageResolver):

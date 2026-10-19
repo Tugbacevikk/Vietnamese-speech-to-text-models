@@ -24,9 +24,11 @@ class Maintenance:
                  result_days: int, stale_sec: int,
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  queue=None, queue_idle: Callable[[str], bool] | None = None,
-                 queued_stale_sec: int = 300, cleanup_recordings: Callable[[], int] | None = None):
+                 queued_stale_sec: int = 300, cleanup_recordings: Callable[[], int] | None = None,
+                 backup: Callable[[], object] | None = None):
         self.store, self.remove_file, self.now = store, remove_file, now
         self.cleanup_recordings = cleanup_recordings  # eski canlı oturum dosyaları
+        self.backup = backup  # süresi geldiyse veritabanı yedeği alır (yedek yolu ya da None)
         self.audio_hours, self.result_days, self.stale_sec = audio_hours, result_days, stale_sec
         self.queue, self.queue_idle, self.queued_stale_sec = queue, queue_idle, queued_stale_sec
 
@@ -62,6 +64,12 @@ class Maintenance:
                 log.warning("kuyruğa girmemiş iş yeniden kuyrukta: %s (%s)", rec.job.job_id, q)
         if self.cleanup_recordings is not None:
             out["canli_kayit_silindi"] = self.cleanup_recordings()
+        if self.backup is not None:
+            try:  # yedek alınamasa da bakımın geri kalanı çalışsın; sonraki turda yeniden denenir
+                out["yedek"] = 1 if self.backup() else 0
+            except Exception as e:
+                out["yedek"] = 0
+                log.error("veritabanı yedeği alınamadı: %s", e)
         if any(out.values()):
             log.info("bakım: %s", out)
         return out
