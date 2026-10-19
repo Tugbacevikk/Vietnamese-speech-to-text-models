@@ -53,7 +53,7 @@ from viet_asr.application.ports import JobQueue, JobStore
 from viet_asr.application.serialization import record_to_dict
 from viet_asr.domain import AudioJob, JobStatus, UnsupportedLanguageError
 from viet_asr.infrastructure.audio import FFMPEG_ONLY, AudioDecodeError, ffmpeg_bin, probe_duration
-from viet_asr.interface.composition import safe_file_remover
+from viet_asr.interface.composition import audio_roots, safe_file_remover
 from viet_asr.interface.security import api_key_dependency, callback_problem
 from viet_asr.interface.settings import Settings
 
@@ -299,7 +299,8 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         p = Path(rec.job.audio_path) if rec.job.audio_path else None
         if p is None or not p.is_file():
             raise HTTPException(410, "ses dosyası saklama süresi dolduğu için silinmiş")
-        if data_dir.resolve() not in p.resolve().parents and not settings.allow_local_paths:
+        roots = audio_roots(settings)  # yüklemeler + canlı oturum kayıtları
+        if not any(r in p.resolve().parents for r in roots) and not settings.allow_local_paths:
             raise HTTPException(403, "bu ses dosyası sunulamaz")
         return FileResponse(p)
 

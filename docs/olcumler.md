@@ -207,7 +207,8 @@ model 0,94. Kodda bulunan iki neden:
    ayar ani yükte 6 işi paralel çalıştırmak için; tek iş gelince 10 iş parçacığı boş kalıyordu.
    Projede 4'tü. Artık ayrı: `WHISPER_THREADS` (varsayılan fiziksel çekirdek = 6), aynı anda
    12 / 6 = 2 Whisper çözümü. Ani yükte toplam iş hızı aynı kalır (işlemci yine dolu), tek
-   mesajın süresi kısalır.
+   mesajın süresi kısalır. (19 Ekim: Windows'taki CTranslate2 çökmesi için model kilitlendi,
+   çözümler artık sırayla; tek çözüm yine 6 iş parçacığıyla.)
 2. **Güvenlik ağı:** kelime çıkmayan her boşluk tek tek, 4 sıcaklıkla ve her sıcaklıkta 5
    örnekle (best_of) çözülüyordu; Whisper her çağrıda 30 sn'lik pencere işlediği için 2 sn'lik
    boşluk bile 30 sn'lik ses kadar sürüyordu. Kapsama %83 olduğu için (birçok boşluk) en
@@ -338,4 +339,23 @@ Aynı Zipformer, "Dosyayla test" (kayıt gerçek zaman hızında, tarayıcıdan)
   oturum sonunda kayıt toplu işe gitti, konsolda hata yok.
 - İki sunucu ve iki tarayıcı aynı anda çalışırken (2 çekirdek) gecikme 5 sn'ye çıktı: gecikme
   işlemci yüküne bağlı, iletim yoluna değil.
+
+### Model kilidi ve canlı altyazı (19 Ekim)
+
+Zipformer'a ve Whisper'a eklenen kilit (Windows'ta CTranslate2 0xc0000005 çökmesi için) canlı
+altyazıyı, aynı modeli kullanan toplu iş bitene kadar bekletiyordu. 4,6 dk Vietnamca toplu iş
+sürerken canlı oturum (Vietnamca, 60 sn, 2 çekirdek):
+
+| | Ortalama gecikme | En kötü |
+|---|---|---|
+| Toplu iş yok | 1,9 sn | 3,3 sn |
+| Toplu iş sürerken, kilitli | 5,4 sn | 17,5 sn |
+| Toplu iş sürerken, Zipformer kilitsiz | 2,6 sn | 3,8 sn |
+
+- Zipformer (sherpa-onnx) eşzamanlı çağrıda güvenli: 4 iş parçacığı x 40 çağrı, çökme yok,
+  sonuçlar tek tek çözümle birebir aynı. Çökme CTranslate2'deydi (Whisper); Zipformer kilidi
+  kaldırıldı.
+- Whisper kilidi duruyor (çökme Windows'ta, burada yeniden üretilemedi; ayrıca faster-whisper'ın
+  BatchedInferencePipeline'ı kelime zamanı için ortak durum tutuyor). Bedeli: Türkçe canlı altyazı
+  Türkçe toplu iş sürerken bekler.
 

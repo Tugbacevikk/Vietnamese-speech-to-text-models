@@ -107,12 +107,7 @@ def main(argv=None):
     def bakim():
         while True:
             try:
-                app.state.maintenance.run_once()
-                from viet_asr.infrastructure.recorder import delete_old_recordings
-
-                n_old = delete_old_recordings(s.recordings_dir, s.recordings_retention_days)
-                if n_old:
-                    log.info("bakım: %d eski canlı oturum dosyası silindi", n_old)
+                app.state.maintenance.run_once()  # eski canlı oturum dosyaları da
             except Exception:
                 log.exception("bakım turu başarısız")
             time.sleep(60)

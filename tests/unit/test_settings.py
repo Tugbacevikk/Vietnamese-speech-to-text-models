@@ -50,14 +50,14 @@ def test_whisper_is_parcacigi_butcesi(monkeypatch):
     monkeypatch.delenv("WHISPER_THREADS", raising=False)
     s = st.Settings()
     assert s.whisper_threads == 6                      # tek iş de 6 çekirdeği kullanır (önce 2)
-    assert s.whisper_workers(6) == 2 and s.whisper_workers(1) == 1
+    assert s.whisper_workers(6) == 1 and s.whisper_workers(1) == 1   # model kilidi: sırayla
     monkeypatch.setenv("WHISPER_THREADS", "4")
     s = st.Settings()
-    assert s.whisper_threads == 4 and s.whisper_workers(6) == 3
+    assert s.whisper_threads == 4 and s.whisper_workers(6) == 1
     monkeypatch.setattr(st, "physical_cpus", lambda: 1)
     monkeypatch.setenv("WHISPER_THREADS", "auto")
     assert st.Settings().whisper_threads == 2          # alt sınır
     cfg = __import__("viet_asr.interface.composition", fromlist=["x"]).config_from_settings(
         st.Settings(languages=["tr"]), workers=6)
     wp = cfg.languages["tr"].asr.whisper
-    assert (wp.cpu_threads, wp.num_workers) == (2, 6)
+    assert (wp.cpu_threads, wp.num_workers) == (2, 1)   # model kilidi: tek kopya yeter

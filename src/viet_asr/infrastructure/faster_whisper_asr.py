@@ -20,16 +20,15 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 import sys
+import threading
+from pathlib import Path
 
 import numpy as np
 
 from viet_asr.application.config import AsrParams, ModelRef
 from viet_asr.application.ports import TextNormalizer
 from viet_asr.domain import VadSegment, Word
-
-import threading
 
 log = logging.getLogger(__name__)
 SR = 16000
@@ -148,6 +147,10 @@ class FasterWhisperAsr:
         self.batched = batched
         # canlı ekranda gösterilir ("medium · GPU"): CTranslate2 modelinin gerçekten açıldığı cihaz
         self.device = str(getattr(getattr(whisper_model, "model", None), "device", "cpu"))
+        # Tek model nesnesi aynı anda tek çözüm: Windows'ta eşzamanlı çağrıda CTranslate2 0xc0000005
+        # ile çöküyordu; ayrıca BatchedInferencePipeline kelime zamanı için ortak durum tutuyor
+        # (last_speech_timestamp), eşzamanlı işlerde zamanlar karışır. Bedeli: canlı Türkçe altyazı
+        # ve paralel Türkçe işler aynı modeli sırayla kullanır.
         self._lock = threading.RLock()
 
     # sıcaklık denemesine kalan en fazla parça (en uzunlar): her deneme ayrı 30 sn'lik çözüm

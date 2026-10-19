@@ -417,7 +417,7 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
                 r.finals.put_nowait(job)
             elif not r.partial_busy:  # yetişemiyorsak ara metni atla, gecikme birikmesin
                 r.partial_busy = True
-                asyncio.create_task(partial_task(r, job))
+                background(partial_task(r, job))
 
     async def on_text(r: _Run, text: str) -> bool:
         """İstemcinin metin mesajı; oturum bittiyse True."""
@@ -552,9 +552,9 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
                 await lost()
 
             if channel.readyState == "open":
-                asyncio.ensure_future(opened())
+                background(opened())
             else:
-                channel.on("open", lambda: asyncio.ensure_future(opened()))
+                channel.on("open", lambda: background(opened()))
 
         @pc.on("track")
         def on_track(track):

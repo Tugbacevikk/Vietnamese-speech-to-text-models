@@ -24,14 +24,16 @@ class Maintenance:
                  result_days: int, stale_sec: int,
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  queue=None, queue_idle: Callable[[str], bool] | None = None,
-                 queued_stale_sec: int = 300):
+                 queued_stale_sec: int = 300, cleanup_recordings: Callable[[], int] | None = None):
         self.store, self.remove_file, self.now = store, remove_file, now
+        self.cleanup_recordings = cleanup_recordings  # eski canlı oturum dosyaları
         self.audio_hours, self.result_days, self.stale_sec = audio_hours, result_days, stale_sec
         self.queue, self.queue_idle, self.queued_stale_sec = queue, queue_idle, queued_stale_sec
 
     def run_once(self) -> dict[str, int]:
         now = self.now()
-        out = {"ses_silindi": 0, "kayit_silindi": 0, "askida_kaldi": 0, "yeniden_kuyrukta": 0}
+        out = {"ses_silindi": 0, "kayit_silindi": 0, "askida_kaldi": 0, "yeniden_kuyrukta": 0,
+               "canli_kayit_silindi": 0}
         if self.audio_hours > 0:
             for job_id, path in self.store.finished_with_audio_before(now - timedelta(hours=self.audio_hours)):
                 if self.remove_file(path):
@@ -58,6 +60,8 @@ class Maintenance:
                 self.store.touch(rec.job.job_id)  # bir sonraki turda tekrar koyulmasın
                 out["yeniden_kuyrukta"] += 1
                 log.warning("kuyruğa girmemiş iş yeniden kuyrukta: %s (%s)", rec.job.job_id, q)
+        if self.cleanup_recordings is not None:
+            out["canli_kayit_silindi"] = self.cleanup_recordings()
         if any(out.values()):
             log.info("bakım: %s", out)
         return out

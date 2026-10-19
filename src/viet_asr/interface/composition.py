@@ -204,15 +204,21 @@ def verify_models_or_exit(settings) -> None:
     logging.getLogger(__name__).info("modeller doğrulandı (sha256)")
 
 
-def safe_file_remover(data_dir: str | Path):
-    """Yalnızca yükleme klasörü içindeki dosyaları siler (ALLOW_LOCAL_PATHS ile verilen
+def audio_roots(settings) -> list[Path]:
+    """Sistemin kendi yazdığı sesler: yüklemeler (DATA_DIR) ve canlı oturum kayıtları
+    (RECORDINGS_DIR). Sunulabilir ve süresi dolunca silinebilir olanlar yalnızca bunlar."""
+    return [Path(settings.data_dir).resolve(), Path(settings.recordings_dir).resolve()]
+
+
+def safe_file_remover(*roots: str | Path):
+    """Yalnızca verilen klasörlerin içindeki dosyaları siler (ALLOW_LOCAL_PATHS ile verilen
     kullanıcı dosyalarına asla dokunmaz)."""
-    root = Path(data_dir).resolve()
+    bases = [Path(r).resolve() for r in roots]
 
     def remove(path: str) -> bool:
         try:
             p = Path(path).resolve()
-            if root not in p.parents:
+            if not any(b in p.parents for b in bases):
                 return False
             p.unlink(missing_ok=True)
             return True
@@ -226,9 +232,15 @@ def build_maintenance(store, settings, queue=None, queue_idle=None):
     """queue/queue_idle verilirse (tam mod) kuyruğa girememiş işler de yeniden kuyruğa konur."""
     from viet_asr.application.maintenance import Maintenance
 
-    return Maintenance(store, safe_file_remover(settings.data_dir), settings.audio_retention_hours,
+    from viet_asr.infrastructure.recorder import delete_old_recordings
+
+    def old_recordings() -> int:  # canlı oturumların wav/txt/jsonl dosyaları (iki modda da)
+        return delete_old_recordings(settings.recordings_dir, settings.recordings_retention_days)
+
+    return Maintenance(store, safe_file_remover(*audio_roots(settings)), settings.audio_retention_hours,
                        settings.result_retention_days, settings.processing_stale_sec,
-                       queue=queue, queue_idle=queue_idle, queued_stale_sec=settings.queued_stale_sec)
+                       queue=queue, queue_idle=queue_idle, queued_stale_sec=settings.queued_stale_sec,
+                       cleanup_recordings=old_recordings)
 
 
 def build_live(settings, cfg: PipelineConfig, engines: LazyAsrEngines, resolver: LanguageResolver):

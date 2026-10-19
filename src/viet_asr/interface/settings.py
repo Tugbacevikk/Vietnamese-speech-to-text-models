@@ -188,9 +188,11 @@ class Settings:
         return max(2, min(8, physical_cpus()))
 
     def whisper_workers(self, jobs: int) -> int:
-        """Aynı anda kaç Whisper çözümü: iş sayısını ve işlemcinin taşıyabileceğini aşmaz
-        (12 mantıksal / 6 iş parçacığı = 2). Fazla işler sırada bekler, işlemci aşırı bölünmez."""
-        return max(1, min(jobs, available_cpus() // self.whisper_threads))
+        """Aynı anda kaç Whisper çözümü: 1. FasterWhisperAsr modeli kilitle korur (Windows'ta
+        eşzamanlı çağrıda CTranslate2 çökmesi), yani çözümler zaten sırayla; CTranslate2'ye 2 işçi
+        vermek yalnızca modelin ikinci kopyasına bellek harcardı. Tek çözüm WHISPER_THREADS
+        (fiziksel çekirdek) iş parçacığıyla çalışır; fazla Türkçe işler sırada bekler."""
+        return 1
 
     def model_for(self, lang: str) -> str:
         from viet_asr.infrastructure.catalog import DEFAULT_MODELS

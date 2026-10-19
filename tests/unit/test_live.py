@@ -668,3 +668,28 @@ def test_vietnamca_oturumu_bitisik_bolucuyle(tmp_path, monkeypatch):
     finals = [m for m in msgs if m["type"] == "final"]
     assert sum(float(m["end"]) - float(m["start"]) for m in finals) == pytest.approx(10.0, abs=0.1)
     assert done["job_id"]
+
+
+def test_canli_isin_sesi_arayuzde_calinabilir_ve_bakim_kayitlari_temizler(local):
+    """Canlı oturum kaydı RECORDINGS_DIR'de (yüklemeler klasörünün dışında): ses oynatıcı 403
+    almamalı; bakım iki modda da eski kayıtları silmeli, süresi dolan sesi gerçekten silmeli."""
+    import os
+    import time
+
+    from viet_asr.interface.composition import build_maintenance
+
+    app, store, sent, tmp = local
+    with TestClient(app) as client:
+        _, _, done = session(client, "/ws/live", TWO)
+        r = client.get(f"/jobs/{done['job_id']}/audio")
+    assert r.status_code == 200 and r.content[:4] == b"RIFF"
+
+    from viet_asr.interface.settings import Settings
+
+    s = Settings(data_dir=str(tmp / "up"), recordings_dir=str(tmp / "rec"))
+    old = tmp / "rec" / "eski.txt"
+    old.write_text("x")
+    os.utime(old, (time.time() - 40 * 86400,) * 2)
+    m = build_maintenance(store, s)
+    assert m.run_once()["canli_kayit_silindi"] == 1 and not old.exists()
+    assert len(list((tmp / "rec").glob("*.wav"))) == 1   # yeni kayıt duruyor
