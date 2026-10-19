@@ -220,6 +220,7 @@ def make_local(tmp_path, monkeypatch, languages=("tr", "vi"), engines=None, dete
     if trackers is None:  # gerçek imza modeli (models/ varsa) testte yüklenmesin
         settings.setdefault("live_speakers", False)
     s = Settings(data_dir=str(tmp_path / "up"), recordings_dir=str(tmp_path / "rec"),
+                 local_database_url="",
                  languages=list(languages), live_language="tr", **settings)
     engines = engines or {k: v for k, v in fake_engines().items() if k in languages}
     app, store, queue, _ = local_server.build_local(s, workers=1, warm_up=False, live_engines=engines,
