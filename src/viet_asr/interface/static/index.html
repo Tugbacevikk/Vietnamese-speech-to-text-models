@@ -160,7 +160,7 @@ details#qualityBox summary { cursor: pointer; }
         </select>
       </label>
       <label style="flex:2" id="liveSrcRow">Kaynak
-        <input type="text" id="liveSrc" value="rtp://0.0.0.0:5004" aria-label="kaynak" title="rtp://ip:port (G.711/L16), http(s) yayın adresi ya da .sdp dosyası">
+        <input type="text" id="liveSrc" value="rtp://0.0.0.0:5004" aria-label="kaynak" title="rtp://ip:port (G.711/L16), http(s) yayın adresi, .sdp dosyası ya da push (dışarıdan parça parça ses: POST /streams/{id}/audio)">
       </label>
       <label>Dil
         <select id="liveLang"><option value="vi">Vietnamca</option><option value="tr">Türkçe</option></select>
@@ -697,7 +697,9 @@ $("liveStart").addEventListener("click", async () => {
                              ...($("liveSdp").value.trim() ? { sdp: $("liveSdp").value } : {}) }) });
     const s = await r.json(); liveId = s.id;
     $("liveLines").replaceChildren();
-    $("liveInfo").textContent = s.port ? `UDP ${s.port} dinleniyor…` : "Bağlanıyor…";
+    $("liveInfo").textContent = s.port ? `UDP ${s.rtp_adres || s.port} dinleniyor…`
+      : s.kaynak === "push" ? `Ses bekleniyor: POST ${location.origin}/streams/${s.id}/audio?seq=0 (ham PCM16, mono, 16 kHz)`
+      : "Bağlanıyor…";
     $("liveStart").classList.add("hidden"); $("liveStop").classList.remove("hidden");
     const key = $("apiKey").value.trim();
     liveWs = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/streams/${s.id}/ws` + (key ? `?key=${encodeURIComponent(key)}` : ""));
