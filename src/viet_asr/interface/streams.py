@@ -4,6 +4,7 @@ Kaynak yazımı (POST /streams "kaynak", CLI --kaynak):
     rtp://0.0.0.0:5004        UDP portunda RTP dinle (G.711 PCMU/PCMA, L16; bizim alıcı)
     rtp://0.0.0.0:0           boş port seçilir, yanıtta "port" döner
     /yol/cagri.sdp            RTP + SDP (Opus, G.722...; ffmpeg)
+    push                      sesi karşı servis parça parça yollar (POST/WS /streams/{id}/audio)
     http(s)://.../akim.ogg    OGG/MP3/WAV yayını (ffmpeg); rtsp://, srt://, udp:// da olur
     /yol/kayit.wav            dosyayı gerçek zaman hızında oynat (deneme; ALLOW_LOCAL_PATHS=1)
 
@@ -28,6 +29,7 @@ from viet_asr.application.config import VadConfig
 from viet_asr.application.stream import StreamTranscriber
 from viet_asr.domain import AudioJob, StreamSegment
 from viet_asr.infrastructure.ffmpeg_source import FfmpegSource
+from viet_asr.infrastructure.push_source import PushSource
 from viet_asr.infrastructure.rtp import RtpSource
 from viet_asr.infrastructure.sherpa_vad import SileroStreamingVad
 
@@ -52,6 +54,8 @@ class StreamSpec:
     num_speakers: int | None = None
     callback_url: str | None = None
     idle_timeout: float = 5.0
+    ses_hizi: int = 16000    # push kaynağında gönderilen PCM16'nın örnekleme hızı
+    canli_url: str | None = None  # canlı parçalar buraya POST edilir (imzalı); callback_url bitişteki işe aittir
     sdp: str | None = None   # SDP metni (santralin verdiği); kaynak yerine ya da rtp:// ile birlikte
 
 
@@ -85,19 +89,34 @@ def source_from_sdp(text: str, spec: StreamSpec, work_dir: Path | None = None):
     return src
 
 
-def parse_source(spec: StreamSpec, allow_files: bool, work_dir: Path | None = None):
+def bind_rtp(host: str, port: int, spec: StreamSpec, rtp_ports: tuple[int, int] | None):
+    """port 0 ve aralık tanımlıysa (STREAM_RTP_PORTS) aralıktaki ilk boş portu alır: güvenlik duvarı
+    ve Docker'da yalnızca o aralık açılır."""
+    if port == 0 and rtp_ports:
+        for p in range(rtp_ports[0], rtp_ports[1] + 1):
+            try:
+                return RtpSource(host, p, spec.codec, spec.clock_rate, idle_timeout=spec.idle_timeout)
+            except OSError:
+                continue
+        raise OSError(f"RTP port aralığı dolu ({rtp_ports[0]}-{rtp_ports[1]})")
+    return RtpSource(host, port, spec.codec, spec.clock_rate, idle_timeout=spec.idle_timeout)
+
+
+def parse_source(spec: StreamSpec, allow_files: bool, work_dir: Path | None = None,
+                 rtp_ports: tuple[int, int] | None = None):
     """Kaynak yazımından AudioStream nesnesi."""
     if spec.sdp:
         return source_from_sdp(spec.sdp, spec, work_dir)
     k = spec.kaynak.strip()
+    if k.lower() == "push":
+        return PushSource(spec.ses_hizi, idle_timeout=max(spec.idle_timeout, 5.0))
     u = urlparse(k)
     if u.scheme == "rtp" and not k.lower().endswith(".sdp"):
         if u.port is None:
             raise StreamError("rtp://adres:port biçiminde olmalı (port 0 = boş port seç)")
         if spec.codec not in ("auto", "pcmu", "pcma", "l16"):
             raise StreamError("codec: auto | pcmu | pcma | l16 (Opus vb. için SDP dosyası verin)")
-        return RtpSource(u.hostname or "0.0.0.0", u.port, spec.codec, spec.clock_rate,
-                         idle_timeout=spec.idle_timeout)
+        return bind_rtp(u.hostname or "0.0.0.0", u.port, spec, rtp_ports)
     if u.scheme in URL_SCHEMES:
         return FfmpegSource(k)
     p = Path(k)
@@ -126,11 +145,18 @@ class StreamSession:
     stop: threading.Event = field(default_factory=threading.Event)
     source: object = None
     subscribers: list[queue_mod.Queue] = field(default_factory=list)
+    notifier: object = None
+    rtp_adres: str | None = None   # karşı servisin RTP göndereceği adres (STREAM_PUBLIC_HOST ile)
 
     def to_dict(self, with_segments: bool = True) -> dict:
         d = {"id": self.id, "kaynak": self.spec.kaynak, "dil": self.spec.dil, "durum": self.durum,
              "port": self.port, "baslangic": self.started_at, "parca_sayisi": len(self.segments),
              "ozet": self.ozet, "hata": self.hata, "son_is": self.son_is}
+        if self.rtp_adres:
+            d["rtp_adres"] = self.rtp_adres
+        if isinstance(self.source, PushSource):
+            d["ses"] = {"alinan_sn": round(self.source.received, 2), "bekleyen_sn": round(self.source.backlog, 2),
+                        "sonraki_sira": self.source.next_seq}
         if with_segments:
             d["parcalar"] = self.segments
             d["ara"] = self.ara
@@ -142,19 +168,93 @@ def segment_dict(s: StreamSegment) -> dict:
             "confidence": s.conf, "low_confidence_words": list(s.low_conf), "latency": s.latency}
 
 
+def port_range(text: str) -> tuple[int, int] | None:
+    """"40000-40100" -> (40000, 40100); boş -> None."""
+    if not text:
+        return None
+    a, _, b = text.partition("-")
+    lo, hi = int(a), int(b or a)
+    if not 1024 <= lo <= hi <= 65535:
+        raise ValueError(f"STREAM_RTP_PORTS geçersiz: {text}")
+    return lo, hi
+
+
+class LiveNotifier:
+    """Canlı parçaları karşı servisin adresine sırayla POST eder (stream.segment, sonda stream.ended).
+
+    İmza ve başlıklar iş bildirimleriyle aynı (infrastructure/webhook.py). Tek iş parçacığı =
+    parçalar sırayla gider. Teslim edilemeyen parça 3 denemeden sonra atılır (canlı akış beklemez;
+    kesin metin zaten son tam analizde ve GET /streams/{id}'de durur)."""
+
+    def __init__(self, url: str, secret: str, sid: str, post=None, attempts: int = 3, base_wait: float = 0.5):
+        self.url, self.secret, self.sid = url, secret, sid
+        self.post, self.attempts, self.base_wait = post or self._post, attempts, base_wait
+        self.sent = self.dropped = 0
+        self._q: queue_mod.Queue = queue_mod.Queue(maxsize=1000)
+        self._t = threading.Thread(target=self._loop, daemon=True, name=f"bildirim-{sid[:8]}")
+        self._t.start()
+
+    @staticmethod
+    def _post(url: str, body: bytes, headers: dict) -> bool:
+        import httpx
+
+        try:
+            return httpx.post(url, content=body, headers=headers, timeout=5.0).is_success
+        except httpx.HTTPError:
+            return False
+
+    def send(self, event: str, payload: dict) -> None:
+        try:
+            self._q.put_nowait((event, {"stream_id": self.sid, **payload}))
+        except queue_mod.Full:
+            self.dropped += 1
+
+    def _loop(self) -> None:
+        from viet_asr.infrastructure.webhook import build_request
+
+        while True:
+            item = self._q.get()
+            if item is None:
+                return
+            event, payload = item
+            for i in range(self.attempts):
+                body, headers = build_request(payload, event, self.sid, uuid.uuid4().hex, self.secret)
+                if self.post(self.url, body, headers):
+                    self.sent += 1
+                    break
+                time.sleep(self.base_wait * 2 ** i)
+            else:
+                self.dropped += 1
+
+    def close(self, wait: float = 15.0) -> None:
+        self._q.put(None)
+        self._t.join(wait)
+
+
 class StreamManager:
     def __init__(self, engines, vad_cfg: VadConfig, data_dir: str | Path, submit=None,
                  languages: list[str] | None = None, max_sessions: int = 8, allow_files: bool = False,
-                 max_speech: float = 10.0, vad_factory=None):
+                 max_speech: float = 10.0, vad_factory=None, rtp_ports: tuple[int, int] | None = None,
+                 public_host: str = "", notify_secret: str = "", notify_post=None):
         self.engines, self.vad_cfg, self.submit = engines, vad_cfg, submit
         self.dir = Path(data_dir) / "akislar"
         self.dir.mkdir(parents=True, exist_ok=True)
         self.languages = languages or list(engines)
         self.max_sessions, self.allow_files, self.max_speech = max_sessions, allow_files, max_speech
+        self.rtp_ports, self.public_host = rtp_ports, public_host
+        self.notify_secret, self.notify_post = notify_secret, notify_post
         self.vad_factory = vad_factory or (lambda max_speech=None: SileroStreamingVad(
             self.vad_cfg, max_speech=max_speech or self.max_speech))
         self.sessions: dict[str, StreamSession] = {}
         self._lock = threading.Lock()
+
+    @classmethod
+    def from_settings(cls, s, engines, vad_cfg, submit=None) -> "StreamManager":
+        """Tek yer: yerel mod ve tam mod aynı ayarlarla kurar."""
+        return cls(engines, vad_cfg, s.data_dir, submit=submit, languages=list(s.languages),
+                   max_sessions=s.stream_max_sessions, allow_files=s.allow_local_paths,
+                   max_speech=s.stream_max_speech, rtp_ports=port_range(s.stream_rtp_ports),
+                   public_host=s.stream_public_host, notify_secret=s.webhook_secret)
 
     def active(self) -> int:
         return sum(1 for s in self.sessions.values() if s.durum == "dinleniyor")
@@ -165,11 +265,15 @@ class StreamManager:
         with self._lock:
             if self.active() >= self.max_sessions:
                 raise StreamError(f"en fazla {self.max_sessions} canlı akış (STREAM_MAX_SESSIONS)")
-            source = parse_source(spec, self.allow_files, self.dir)
+            source = parse_source(spec, self.allow_files, self.dir, self.rtp_ports)
             self._prune()
             sid = uuid.uuid4().hex
             s = StreamSession(sid, spec, datetime.now(timezone.utc).isoformat(timespec="seconds"),
                               port=getattr(source, "port", None), source=source)
+            if s.port and self.public_host:
+                s.rtp_adres = f"{self.public_host}:{s.port}"
+            if spec.canli_url:
+                s.notifier = LiveNotifier(spec.canli_url, self.notify_secret, sid, self.notify_post)
             self.sessions[sid] = s
         threading.Thread(target=self._run, args=(s,), daemon=True, name=f"akis-{sid[:8]}").start()
         return s
@@ -190,13 +294,33 @@ class StreamManager:
             s.source.close()
         return s
 
-    def subscribe(self, sid: str) -> queue_mod.Queue | None:
+    def push(self, sid: str, data: bytes, seq: int | None = None) -> StreamSession:
+        """Push kaynağına ses parçası (HTTP/WS). Hatalar: KeyError (yok), StreamError (push değil/kapalı),
+        BacklogFull (yavaşla), SeqError (atlanan parça)."""
+        s = self.sessions.get(sid)
+        if s is None:
+            raise KeyError(sid)
+        if not isinstance(s.source, PushSource):
+            raise StreamError("bu akış push kaynağı değil (kaynak: \"push\")")
+        if s.durum != "dinleniyor":
+            raise StreamError(f"akış {s.durum}")
+        s.source.feed(data, seq)
+        return s
+
+    def end_push(self, sid: str) -> None:
+        s = self.sessions.get(sid)
+        if s is not None and isinstance(s.source, PushSource):
+            s.source.end()
+
+    def subscribe(self, sid: str, after: int = -1) -> queue_mod.Queue | None:
+        """after: bu sıradaki ve öncesindeki kesin parçaları yeniden gönderme (bağlantı kopup dönenler)."""
         s = self.sessions.get(sid)
         if s is None:
             return None
         q: queue_mod.Queue = queue_mod.Queue()
         for seg in s.segments:  # geç bağlanan da baştan görsün
-            q.put({"tur": "parca", **seg})
+            if seg["index"] > after:
+                q.put({"tur": "parca", **seg})
         if s.durum != "dinleniyor":
             q.put({"tur": "bitti", **s.to_dict(with_segments=False)})
         s.subscribers.append(q)
@@ -205,6 +329,13 @@ class StreamManager:
     def _publish(self, s: StreamSession, event: dict) -> None:
         for q in list(s.subscribers):
             q.put(event)
+        n = s.notifier
+        if n is not None:
+            if event["tur"] == "parca" and event.get("final"):
+                n.send("stream.segment", {k: v for k, v in event.items() if k != "tur"})
+            elif event["tur"] == "bitti":
+                n.send("stream.ended", {k: v for k, v in event.items() if k != "tur"})
+                threading.Thread(target=n.close, daemon=True).start()
 
     def _run(self, s: StreamSession) -> None:
         path = self.dir / f"{s.id}.wav"

@@ -80,6 +80,8 @@ class StreamStart(BaseModel):
     num_speakers: int | None = Field(None, ge=1, le=20)
     callback_url: str | None = None
     idle_timeout: float = Field(5.0, ge=1.0, le=300.0)        # bu kadar paket gelmezse akış biter
+    ses_hizi: int = Field(16000, ge=8000, le=48000)           # kaynak "push": gönderilen PCM16 hızı
+    canli_url: str | None = None                              # canlı parçaların POST edileceği adres (imzalı)
 
 
 class Reanalyze(BaseModel):
@@ -222,7 +224,7 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         """Canlı akışı dinlemeye başlar; metin GET /streams/{id} ve WS /streams/{id}/ws ile gelir."""
         from viet_asr.interface.streams import StreamError, StreamSpec
 
-        problem = callback_problem(body.callback_url, settings)
+        problem = callback_problem(body.callback_url, settings) or callback_problem(body.canli_url, settings)
         if problem:
             raise HTTPException(422, problem)
         if not body.sdp and len(body.kaynak.strip()) < 3:
@@ -252,6 +254,155 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         if s is None:
             raise HTTPException(404, "akış bulunamadı")
         return {"id": sid, "durum": "durduruluyor" if s.durum == "dinleniyor" else s.durum}
+
+    @api.post("/streams/{sid}/audio", status_code=202, dependencies=[auth])
+    async def push_audio(sid: str, request: Request, seq: int | None = None, son: bool = False):
+        """Parça parça ses (kaynak "push"): gövde ham PCM16 little-endian, tek kanal, hız = akışın ses_hizi.
+        seq: 0'dan artan sıra no (tekrar gönderilen parça atlanır). son=true: akış biter.
+        429 + Retry-After: işleme yetişilemiyor, bekleyip aynı parçayı tekrar gönderin."""
+        from viet_asr.infrastructure.push_source import BacklogFull, SeqError
+        from viet_asr.interface.streams import StreamError
+
+        mgr = _streams()
+        data = await request.body()
+        if len(data) > 2_000_000:
+            raise HTTPException(413, "parça en fazla 2 MB (yaklaşık 60 sn @16 kHz)")
+        try:
+            s = mgr.push(sid, data, seq)
+        except KeyError:
+            raise HTTPException(404, "akış bulunamadı")
+        except StreamError as e:
+            raise HTTPException(409, str(e))
+        except BacklogFull as e:
+            raise HTTPException(429, str(e), headers={"Retry-After": "1"})
+        except SeqError as e:
+            raise HTTPException(409, f"{e}; araya giren parça var", headers={"X-Expected-Seq": str(e.expected)})
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        if son:
+            mgr.end_push(sid)
+        src = s.source
+        return {"alinan_sn": round(src.received, 2), "bekleyen_sn": round(src.backlog, 2),
+                "sonraki_sira": src.next_seq}
+
+    @api.get("/streams/{sid}/events", dependencies=[auth])
+    async def stream_events(sid: str, request: Request, after: int = -1):
+        """Sunucu-gönderimli olaylar (SSE): her kesin parça {"tur":"parca",...}, sonda "bitti".
+        Kesin parçanın id'si = sırası; kopup dönen istemci Last-Event-ID (ya da ?after=) ile kaldığı yerden alır."""
+        import asyncio
+        import json as json_mod
+        import queue as queue_mod
+
+        from fastapi.responses import StreamingResponse
+
+        mgr = _streams()
+        last = request.headers.get("last-event-id")
+        if last is not None and last.lstrip("-").isdigit():
+            after = max(after, int(last))
+        q = mgr.subscribe(sid, after)
+        if q is None:
+            raise HTTPException(404, "akış bulunamadı")
+
+        async def gen():
+            idle = 0.0
+            try:
+                while True:
+                    try:
+                        ev = q.get_nowait()
+                    except queue_mod.Empty:
+                        if await request.is_disconnected():
+                            return
+                        await asyncio.sleep(0.05)
+                        idle += 0.05
+                        if idle >= 15:
+                            idle = 0.0
+                            yield ": canli\n\n"
+                        continue
+                    idle = 0.0
+                    sid_line = f"id: {ev['index']}\n" if ev.get("tur") == "parca" and ev.get("final") else ""
+                    yield f"{sid_line}event: {ev['tur']}\ndata: {json_mod.dumps(ev, ensure_ascii=False)}\n\n"
+                    if ev.get("tur") == "bitti":
+                        return
+            finally:
+                s = mgr.get(sid)
+                if s is not None and q in s.subscribers:
+                    s.subscribers.remove(q)
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @api.websocket("/streams/{sid}/audio")
+    async def stream_audio_ws(ws: WebSocket, sid: str, key: str | None = None):
+        """Tek bağlantıda ses yukarı, metin aşağı: ikili mesaj = ham PCM16 parçası (akışın ses_hizi),
+        "son" metni ya da bağlantıyı kapatmak akışı bitirir. Sunucu aynı bağlantıdan JSON olayları yollar."""
+        import asyncio
+        import queue as queue_mod
+
+        from viet_asr.infrastructure.push_source import BacklogFull
+        from viet_asr.interface.streams import StreamError
+
+        if not key_ok(settings, key or ws.headers.get("x-api-key")):
+            await ws.close(code=4401)
+            return
+        mgr = streams if (streams is not None and settings.enable_streams) else None
+        q = mgr.subscribe(sid) if mgr else None
+        if q is None:
+            await ws.close(code=4404)
+            return
+        await ws.accept()
+        done = asyncio.Event()
+
+        async def down():
+            while not done.is_set():
+                try:
+                    ev = q.get_nowait()
+                except queue_mod.Empty:
+                    await asyncio.sleep(0.05)
+                    continue
+                await ws.send_json(ev)
+                if ev.get("tur") == "bitti":
+                    done.set()
+
+        sender = asyncio.create_task(down())
+        try:
+            while not done.is_set():
+                recv = asyncio.create_task(ws.receive())
+                await asyncio.wait({recv, asyncio.create_task(done.wait())}, return_when=asyncio.FIRST_COMPLETED)
+                if not recv.done():
+                    recv.cancel()
+                    break
+                msg = recv.result()
+                if msg["type"] == "websocket.disconnect":
+                    break
+                if msg.get("bytes"):
+                    for _ in range(100):  # geri basınç: kuyruk boşalana kadar (en çok ~10 sn) bekle
+                        try:
+                            mgr.push(sid, msg["bytes"])
+                            break
+                        except BacklogFull:
+                            await asyncio.sleep(0.1)
+                        except (KeyError, StreamError, ValueError):
+                            done.set()
+                            break
+                elif (msg.get("text") or "").strip().lower() in ("son", "end"):
+                    break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            mgr.end_push(sid)
+            if not done.is_set():  # son sonuçlar gelene kadar en çok 30 sn bekle
+                try:
+                    await asyncio.wait_for(done.wait(), 30)
+                except asyncio.TimeoutError:
+                    pass
+            sender.cancel()
+            s = mgr.get(sid)
+            if s is not None and q in s.subscribers:
+                s.subscribers.remove(q)
+            try:
+                await ws.close()
+            except RuntimeError:
+                pass
 
     @api.websocket("/streams/{sid}/ws")
     async def stream_ws(ws: WebSocket, sid: str, key: str | None = None):
@@ -576,9 +727,7 @@ def _production_app() -> FastAPI:
     if s.enable_streams:
         from viet_asr.interface.streams import StreamManager
 
-        streams = StreamManager(engines, cfg.vad, s.data_dir, submit=submit, languages=list(s.languages),
-                                max_sessions=s.stream_max_sessions, allow_files=s.allow_local_paths,
-                                max_speech=s.stream_max_speech)
+        streams = StreamManager.from_settings(s, engines, cfg.vad, submit)
     app = create_app(store, queue, s, {"veritabani": store.ping, "kuyruk": r.ping},
                      queue_stats=lambda: queue.stats(["lid", *s.languages]), rate_limiter=limiter,
                      readiness={"isciler": workers}, streams=streams)

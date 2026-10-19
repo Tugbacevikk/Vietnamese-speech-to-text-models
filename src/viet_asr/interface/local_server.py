@@ -70,10 +70,8 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
         from viet_asr.application.jobs import SubmitJob
         from viet_asr.interface.streams import StreamManager
 
-        streams = StreamManager(pipeline.engines, cfg.vad, settings.data_dir,
-                                submit=SubmitJob(store, queue, settings.languages),
-                                languages=list(settings.languages), max_sessions=settings.stream_max_sessions,
-                                allow_files=settings.allow_local_paths, max_speech=settings.stream_max_speech)
+        streams = StreamManager.from_settings(settings, pipeline.engines, cfg.vad,
+                                              SubmitJob(store, queue, settings.languages))
     app = create_app(store, queue, settings, {"veritabani": store.ping}, queue_stats=queue.stats,
                      readiness={"modeller": models_ready}, streams=streams)
     app.state.streams = streams

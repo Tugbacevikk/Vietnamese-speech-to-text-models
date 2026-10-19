@@ -261,3 +261,118 @@ def test_akis_ucu_sdp_metniyle(tmp_path):
         time.sleep(0.1)
     got = c.get(f"/streams/{r.json()['id']}").json()
     assert got["durum"] == "bitti" and got["parca_sayisi"] == 2 and got["ozet"]["rtp"]["paket"] == 100
+
+
+# --- dışarıdan servis: parça parça ses, SSE, canlı bildirim, port aralığı ---
+
+def _pcm16(seconds, rate=16000):
+    x = (0.3 * np.sin(2 * np.pi * 300 * np.arange(int(seconds * rate)) / rate) * 32767).astype("<i2")
+    return x.tobytes()
+
+
+def _push_app(tmp_path, **mgr_kw):
+    from fastapi.testclient import TestClient
+
+    from viet_asr.infrastructure.memory_store import MemoryJobStore
+    from viet_asr.interface.api import create_app
+    from viet_asr.interface.settings import Settings
+    from viet_asr.interface.streams import StreamManager
+
+    store = MemoryJobStore()
+
+    class Q:
+        def enqueue_detection(self, j): pass
+        def enqueue_transcription(self, j, lang): pass
+
+    s = Settings(data_dir=str(tmp_path), languages=["vi"], enable_streams=True)
+    mgr = StreamManager({"vi": FakeAsr()}, None, tmp_path, submit=None, vad_factory=FakeVad, **mgr_kw)
+    return TestClient(create_app(store, Q(), s, streams=mgr)), mgr
+
+
+def test_push_kaynagi_siralama_tekrar_geri_basinc():
+    from viet_asr.infrastructure.push_source import BacklogFull, PushSource, SeqError
+
+    src = PushSource(8000, idle_timeout=0.4, max_backlog=1.0)
+    assert src.feed(_pcm16(0.5, 8000), 0) is True
+    assert src.feed(_pcm16(0.5, 8000), 0) is False          # tekrar: atlanır
+    with pytest.raises(SeqError) as e:
+        src.feed(b"\0\0", 5)
+    assert e.value.expected == 1
+    src.feed(b"\x01", None)                                  # örnek ortasında bölünmüş parça (1 bayt arta kalır)
+    src.feed(_pcm16(1.0, 8000)[1:], 1)                       # bir sonraki parça baytı tamamlar
+    with pytest.raises(BacklogFull):
+        src.feed(_pcm16(0.1, 8000), 2)
+    src.end()
+    frames = list(src.frames())
+    assert sum(len(f) for f in frames) == pytest.approx(16000 * 1.5, abs=64)   # 8 kHz -> 16 kHz, 1,5 sn
+    assert src.stats["tekrar"] == 1
+
+
+def test_push_http_sse_ve_canli_bildirim(tmp_path):
+    posted = []
+    c, mgr = _push_app(tmp_path, notify_secret="gizli",
+                       notify_post=lambda url, body, headers: posted.append((url, body, headers)) or True)
+    assert c.post("/streams/yok/audio", content=b"\0\0").status_code == 404
+    r = c.post("/streams", json={"kaynak": "push", "dil": "vi", "canli_url": "http://servis.local/hook",
+                                 "idle_timeout": 5.0})
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+    assert r.json()["port"] is None
+    for i in range(3):                                       # 3 x 1 sn, sıra numaralı
+        a = c.post(f"/streams/{sid}/audio?seq={i}", content=_pcm16(1.0))
+        assert a.status_code == 202, a.text
+    assert a.json()["sonraki_sira"] == 3
+    assert c.post(f"/streams/{sid}/audio?seq=0", content=_pcm16(1.0)).status_code == 202   # tekrar: zararsız
+    assert c.post(f"/streams/{sid}/audio?seq=9", content=_pcm16(1.0)).headers["X-Expected-Seq"] == "3"
+    assert c.post(f"/streams/{sid}/audio?son=true", content=b"").status_code == 202
+    body = ""
+    with c.stream("GET", f"/streams/{sid}/events") as resp:
+        for line in resp.iter_lines():
+            body += line + "\n"
+    assert "event: parca" in body and "event: bitti" in body and "id: 2" in body
+    with c.stream("GET", f"/streams/{sid}/events", headers={"Last-Event-ID": "1"}) as resp:   # kaldığı yerden
+        again = "\n".join(resp.iter_lines())
+    assert "id: 2" in again and "id: 0" not in again and "id: 1\n" not in again
+    deadline = time.time() + 5
+    while time.time() < deadline and not any(h["X-Event"] == "stream.ended" for _, _, h in posted):
+        time.sleep(0.05)
+    events = [h["X-Event"] for _, _, h in posted]
+    assert events == ["stream.segment"] * 3 + ["stream.ended"]
+    url, raw, hdr = posted[0]
+    from viet_asr.infrastructure.webhook import verify_signature
+    assert url == "http://servis.local/hook"
+    assert verify_signature("gizli", hdr["X-Timestamp"], raw, hdr["X-Signature"])
+    assert c.post(f"/streams/{sid}/audio", content=b"\0\0").status_code == 409        # bitti
+
+
+def test_push_websocket_tek_baglanti(tmp_path):
+    c, mgr = _push_app(tmp_path)
+    sid = c.post("/streams", json={"kaynak": "push", "dil": "vi", "ses_hizi": 8000}).json()["id"]
+    got = []
+    with c.websocket_connect(f"/streams/{sid}/audio") as ws:
+        for _ in range(2):
+            ws.send_bytes(_pcm16(1.0, 8000))
+        ws.send_text("son")
+        while True:
+            ev = ws.receive_json()
+            got.append(ev)
+            if ev["tur"] == "bitti":
+                break
+    finals = [e for e in got if e["tur"] == "parca" and e["final"]]
+    assert len(finals) == 2 and got[-1]["durum"] == "bitti"
+    assert c.post("/streams", json={"kaynak": "rtp://127.0.0.1:0"}).status_code == 201   # rtp akışına push olmaz
+    rtp = [s for s in mgr.sessions.values() if s.spec.kaynak.startswith("rtp")][0]
+    assert c.post(f"/streams/{rtp.id}/audio", content=b"\0\0").status_code == 409
+    c.delete(f"/streams/{rtp.id}")
+
+
+def test_rtp_port_araligi_ve_adres(tmp_path):
+    base = 47600
+    c, mgr = _push_app(tmp_path, rtp_ports=(base, base + 1), public_host="asr.ornek.lan")
+    a = c.post("/streams", json={"kaynak": "rtp://0.0.0.0:0", "dil": "vi"}).json()
+    b = c.post("/streams", json={"kaynak": "rtp://0.0.0.0:0", "dil": "vi"}).json()
+    assert sorted([a["port"], b["port"]]) == [base, base + 1]
+    assert a["rtp_adres"] == f"asr.ornek.lan:{a['port']}"
+    assert c.post("/streams", json={"kaynak": "rtp://0.0.0.0:0", "dil": "vi"}).status_code == 409   # aralık dolu
+    for x in (a, b):
+        c.delete(f"/streams/{x['id']}")

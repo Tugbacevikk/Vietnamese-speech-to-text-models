@@ -294,6 +294,43 @@ metnin hazır olmasına kadar geçen süre.
   [--kayip 0.02 --karistir 0.05]` ya da `ffmpeg -re -i kayit.wav -ar 8000 -ac 1 -c:a pcm_mulaw
   -f rtp rtp://127.0.0.1:5004`.
 
+### Dışarıdaki servis için: ses nasıl girer, sonuç nasıl alınır
+
+Karşıdaki servis iki yoldan birini seçer; sonucu almanın üç yolu her ikisinde de aynıdır.
+
+**Ses girişi**
+
+| Yol | Ne zaman | Nasıl |
+|---|---|---|
+| **RTP** | santral / VoIP / medya sunucusu zaten RTP yayınlıyor | `POST /streams {"kaynak": "rtp://0.0.0.0:0"}` → yanıttaki `rtp_adres` (`STREAM_PUBLIC_HOST:port`) adresine UDP gönderilir. Opus için `sdp` alanı |
+| **Parça parça HTTP** | servis RTP kuramıyor, sesi kendisi bölüyor | `{"kaynak": "push", "ses_hizi": 16000}` açılır; her parça `POST /streams/{id}/audio?seq=N` (gövde: ham PCM16 little-endian, mono) |
+| **WebSocket** | tek bağlantıda hem ses hem metin | `WS /streams/{id}/audio?key=…`: ikili mesaj = PCM16 parçası, `"son"` metni = bitir; metin olayları aynı bağlantıdan döner |
+
+Parça süresi 0,5–2 sn önerilir (en çok 2 MB/istek). Aynı `seq` iki kez gelirse ikincisi yok sayılır
+(zaman aşımı sonrası güvenle tekrar gönderilir); atlanan numara `409` + `X-Expected-Seq`.
+Sunucu yetişemezse `429` + `Retry-After`: **aynı parçayı** bekleyip yeniden gönderin
+(en çok ~30 sn ses bekletilir; sınırsız büyütmek belleği doldururdu). Bitirmek için
+`POST …/audio?son=true`, ya da DELETE, ya da `idle_timeout` sn ses gelmemesi.
+
+**Sonuç alma**
+
+| Yol | Ne |
+|---|---|
+| `GET /streams/{id}/events` (SSE) | her kesin parça `id: <index>` ile; koparsa `Last-Event-ID` ile kaldığı yerden. Ara sonuçlar da gelir |
+| `WS /streams/{id}/ws` | aynı olaylar WebSocket ile |
+| **`canli_url`** (webhook) | akış açılırken verilir; her **kesin** parça `stream.segment`, sonda `stream.ended` olarak POST edilir. İmza ve başlıklar iş bildirimleriyle aynı (`WEBHOOK_SECRET`, `X-Signature`). Teslim edilemezse 3 deneme (0,5 / 1 / 2 sn), sonra o parça atılır: canlı akış beklemez, kesin metin `GET /streams/{id}` ve `son_is`te durur. `callback_url` ise akış bitince oluşan **tam analiz işinin** bildirimidir (iki ayrı şey) |
+
+**Sunucu tarafı**
+
+- `STREAM_RTP_PORTS=40000-40100`: port 0 istenince bu aralıktan boş port verilir; Docker/güvenlik
+  duvarında yalnızca bu UDP aralığı açılır. `STREAM_PUBLIC_HOST`: karşı servise söylenecek adres.
+- `STREAM_MAX_SESSIONS` aşılırsa `422`. Canlı oturumlar bu sürecin belleğindedir: birden çok API
+  kopyası arkasında aynı akışın istekleri aynı kopyaya gitmeli (yapışkan oturum).
+- API anahtarı: HTTP'de `X-API-Key`; tarayıcı dışı istemcide WebSocket için de başlık olur,
+  tarayıcıda `?key=`.
+- Deneme istemcisi (servisin yazacağı kodun örneği): `python scripts/dis_servis_ornek.py kayit.wav
+  --api http://sunucu:8000 [--uc ws] [--hiz 0]`.
+
 ## 10. İzleme
 
 | Uç | Ne için |
