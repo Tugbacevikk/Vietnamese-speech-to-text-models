@@ -207,7 +207,7 @@ def fake_engines():
 
 
 def make_local(tmp_path, monkeypatch, languages=("tr", "vi"), engines=None, detect=None, trackers=None,
-               **settings):
+               live_detector=None, **settings):
     """Yerel sunucu (toplu iş + canlı altyazı), modeller yerine sahte nesnelerle."""
     from viet_asr.interface import local_server
     from viet_asr.interface.settings import Settings
@@ -224,8 +224,8 @@ def make_local(tmp_path, monkeypatch, languages=("tr", "vi"), engines=None, dete
                  languages=list(languages), live_language="tr", **settings)
     engines = engines or {k: v for k, v in fake_engines().items() if k in languages}
     app, store, queue, _ = local_server.build_local(s, workers=1, warm_up=False, live_engines=engines,
-                                                    live_detector=EnergyDetector, live_detect=detect,
-                                                    live_speakers=trackers)
+                                                    live_detector=live_detector or EnergyDetector,
+                                                    live_detect=detect, live_speakers=trackers)
     sent = []
     queue.enqueue_transcription = lambda job_id, lang: sent.append((job_id, lang))
     queue.enqueue_detection = lambda job_id: sent.append((job_id, "lid"))
@@ -694,3 +694,51 @@ def test_canli_isin_sesi_arayuzde_calinabilir_ve_bakim_kayitlari_temizler(local)
     m = build_maintenance(store, s)
     assert m.run_once()["canli_kayit_silindi"] == 1 and not old.exists()
     assert len(list((tmp / "rec").glob("*.wav"))) == 1   # yeni kayıt duruyor
+
+
+def test_canli_ayarlari_ozellestirilebilir_ve_vietnamca_bolucu_baglantisi(tmp_path, monkeypatch):
+    """Canlı altyazı parametreleri (silence_ms, max_sec, partial_sec, min_sec, vad_th)
+    dinamik olarak oturuma ve bölücüye aktarılır; /live/health varsayılanları döner."""
+    class FullAsr(FakeLiveAsr):
+        segmentation = "full"
+
+    from viet_asr.interface.live_server import LiveEngine
+
+    engines = {"vi": LiveEngine(lambda: FullAsr("vi:"), "sahte-vi"),
+               "tr": LiveEngine(lambda: FakeLiveAsr("tr:"), "sahte-tr")}
+
+    seen_thresholds = []
+
+    def custom_detector(threshold=None):
+        seen_thresholds.append(threshold)
+        return EnergyDetector()
+
+    app, store, sent = make_local(tmp_path, monkeypatch, languages=("vi", "tr"), engines=engines,
+                                  live_detector=custom_detector)
+    client = TestClient(app)
+
+    # 1. /live/health varsayılanları ve vad_threshold içerir
+    h = client.get("/live/health").json()
+    assert "defaults" in h and "vad_threshold" in h
+    assert h["defaults"]["silence_ms"] == 700 or h["defaults"]["silence_ms"] == 650
+
+    # 2. Özel sorgu parametreleriyle WebSocket bağlantısı
+    with client.websocket_connect("/ws/live?language=vi&silence_ms=450&max_sec=9&partial_sec=0.5&min_sec=3.5&vad_th=0.65") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "ready"
+        runs = app.state.live_runs
+        assert msg["session_id"] in runs
+        r = runs[msg["session_id"]]
+        seg = r.session.segmenter
+        # Vietnamca için ContiguousSegmenter kullanıldı ve parametreleri aldı
+        from viet_asr.application.live import ContiguousSegmenter
+        assert isinstance(seg, ContiguousSegmenter)
+        assert seg.min_sec == 3.5
+        assert seg.max_sec == 9.0
+        assert seg.cfg.partial_interval_sec == 0.5
+        assert seg.cfg.end_silence_ms == 450
+        ws.send_text('{"type": "stop"}')
+        done = ws.receive_json()
+        assert done["type"] == "done"
+    assert seen_thresholds == [0.65]
+

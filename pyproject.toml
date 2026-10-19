@@ -43,7 +43,7 @@ viet_asr = ["infrastructure/db/migrations/script.py.mako", "interface/static/*.h
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 markers = ["models: modeller indirilmiş olmalı (models/ klasörü)"]
 
 # Katman kuralları: içteki katman dıştakini import edemez.

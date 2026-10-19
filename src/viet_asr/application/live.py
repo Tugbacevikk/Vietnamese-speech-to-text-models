@@ -37,13 +37,16 @@ TranscribeText = Callable[[np.ndarray, bool, "str | None"], str]
 
 @dataclass
 class SegmenterConfig:
-    end_silence_ms: int = 700          # bu kadar sessizlik -> cümle bitti
+    end_silence_ms: int = 650          # bu kadar sessizlik -> cümle bitti (Whisper)
     max_utterance_sec: float = 12.0    # durmadan konuşulursa zorla böl
-    partial_interval_sec: float = 1.2  # ara metin sıklığı (0 = kapalı)
-    pre_roll_ms: int = 300             # konuşma başlamadan önceki sesi de al (ilk hece kesilmesin)
+    partial_interval_sec: float = 0.8  # ara metin sıklığı (0 = kapalı, 0.8s akıcı canlı altyazı)
+    pre_roll_ms: int = 350             # konuşma başlamadan önceki sesi de al (ilk hece kesilmesin)
     start_frames: int = 3              # konuşma başladı demek için ardışık konuşma çerçevesi
     min_voiced_sec: float = 0.3        # toplam sesli süre bundan azsa (öksürük, tık) at
     tail_keep_ms: int = 200            # cümle sonundaki sessizlikten bırakılacak pay
+    min_chunk_sec: float = 5.0         # bitişik bölücü (Zipformer) için en az parça süresi (sn)
+    max_chunk_sec: float = 8.0         # bitişik bölücü için en fazla parça süresi (sn)
+    cut_silence_ms: int = 500          # bitişik bölücü için kesim duraklaması (ms)
 
 
 @dataclass
@@ -162,11 +165,16 @@ class ContiguousSegmenter:
     son kesimden bu yana bütün ses (konuşma algılandıysa)."""
 
     def __init__(self, detector: SpeechDetector, config: SegmenterConfig | None = None,
-                 min_sec: float = 5.0, max_sec: float = 8.0, cut_silence_ms: int = 500):
+                 min_sec: float | None = None, max_sec: float | None = None,
+                 cut_silence_ms: int | None = None):
         self.detector = detector
         self.cfg = config or SegmenterConfig()
-        self.min_sec, self.max_sec = min_sec, max(max_sec, min_sec + 1.0)
-        self.cut_frames = max(1, round(cut_silence_ms / 1000 / FRAME_SEC))
+        eff_min = min_sec if min_sec is not None else getattr(self.cfg, "min_chunk_sec", 5.0)
+        eff_max = max_sec if max_sec is not None else getattr(self.cfg, "max_chunk_sec", 8.0)
+        eff_cut = cut_silence_ms if cut_silence_ms is not None else getattr(self.cfg, "cut_silence_ms", 500)
+        self.min_sec = float(eff_min)
+        self.max_sec = max(float(eff_max), self.min_sec + 1.0)
+        self.cut_frames = max(1, round(int(eff_cut) / 1000 / FRAME_SEC))
         self._leftover = np.zeros(0, dtype=np.float32)
         self._frames: list[np.ndarray] = []
         self._speech: list[bool] = []

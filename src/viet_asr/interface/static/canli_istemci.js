@@ -85,10 +85,15 @@ registerProcessor("pcm16", Pcm16);`;
     async _openAudio(kind) {
       if (kind.type === "mic") {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error("Tarayıcı mikrofona izin vermiyor." + secureHint());
+        const ns = this.o.noiseSuppression !== undefined ? (typeof this.o.noiseSuppression === "function" ? this.o.noiseSuppression() : this.o.noiseSuppression) : true;
+        const agc = this.o.autoGainControl !== undefined ? (typeof this.o.autoGainControl === "function" ? this.o.autoGainControl() : this.o.autoGainControl) : true;
+        const ec = this.o.echoCancellation !== undefined ? (typeof this.o.echoCancellation === "function" ? this.o.echoCancellation() : this.o.echoCancellation) : false;
         this.mic = await navigator.mediaDevices.getUserMedia({ audio: {
           deviceId: kind.deviceId ? { exact: kind.deviceId } : undefined,
-          channelCount: 1, echoCancellation: false,
-          noiseSuppression: this.o.noiseSuppression ? this.o.noiseSuppression() : true, autoGainControl: true } });
+          channelCount: 1,
+          echoCancellation: Boolean(ec),
+          noiseSuppression: Boolean(ns),
+          autoGainControl: Boolean(agc) } });
         try { this.ctx = await this._context(true); this.src = this.ctx.createMediaStreamSource(this.mic); }
         catch { await this.ctx?.close().catch(() => {}); this.ctx = await this._context(false); this.src = this.ctx.createMediaStreamSource(this.mic); }
         this.sendTrack = this.mic.getAudioTracks()[0];

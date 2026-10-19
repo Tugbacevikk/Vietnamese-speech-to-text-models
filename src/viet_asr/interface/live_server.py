@@ -222,6 +222,13 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
             "speakers": speaker_factory is not None,
             "webrtc": webrtc_available(),
             "ready": all(e.asr is not None for e in engines.values()),
+            "vad_threshold": settings.live_vad_threshold,
+            "defaults": {
+                "silence_ms": settings.end_silence_ms,
+                "partial_sec": settings.partial_interval_sec,
+                "max_sec": settings.max_utterance_sec,
+                "vad_threshold": settings.live_vad_threshold,
+            },
         }
 
     async def reject(ws: WebSocket, message: str) -> None:
@@ -323,14 +330,23 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
     # ------------------------------------------------------------------ bağlantı
     async def new_run(q) -> _Run:
         try:
+            silence_ms = int(q.get("silence_ms", settings.end_silence_ms))
+            max_sec = float(q.get("max_sec", settings.max_utterance_sec))
+            partial_sec = float(q.get("partial_sec", settings.partial_interval_sec))
+            min_sec = float(q.get("min_sec", 4.0))
+            cut_ms = int(q.get("cut_ms", min(silence_ms, 600)))
             seg_cfg = SegmenterConfig(
-                end_silence_ms=int(q.get("silence_ms", settings.end_silence_ms)),
-                max_utterance_sec=float(q.get("max_sec", settings.max_utterance_sec)),
-                partial_interval_sec=float(q.get("partial_sec", settings.partial_interval_sec)),
+                end_silence_ms=silence_ms,
+                max_utterance_sec=max_sec,
+                partial_interval_sec=partial_sec,
+                min_chunk_sec=min_sec,
+                max_chunk_sec=max_sec,
+                cut_silence_ms=cut_ms,
             )
             save = q.get("save", "1" if settings.save_recordings else "0") == "1"
             want_speakers = q.get("speakers", "1") == "1"
             analyze = save and q.get("analyze", "1" if settings.live_auto_analyze else "0") == "1"
+            vad_th = float(q.get("vad_th", settings.live_vad_threshold))
         except ValueError:
             raise _Reject("Geçersiz ayar değeri.") from None
         asked = (q.get("callback_url") or "").strip() or None
@@ -359,7 +375,15 @@ def add_live_routes(app: FastAPI, settings, engines: dict[str, LiveEngine], dete
             code = lock.decide(audio, final=not fast)
             return "" if code is None else engines[code].transcribe(audio, fast, prompt)
 
-        detector = await asyncio.to_thread(detector_factory)
+        try:
+            import inspect
+            sig = inspect.signature(detector_factory)
+            if "threshold" in sig.parameters:
+                detector = await asyncio.to_thread(detector_factory, threshold=vad_th)
+            else:
+                detector = await asyncio.to_thread(detector_factory)
+        except Exception:
+            detector = await asyncio.to_thread(detector_factory)
         recorder = SessionRecorder(settings.recordings_dir) if save else None
         tracker = speaker_factory() if speaker_factory and want_speakers else None
         # Dil belli ve motor sesin tamamına bakıyorsa (Vietnamca Zipformer) bitişik parçalar:

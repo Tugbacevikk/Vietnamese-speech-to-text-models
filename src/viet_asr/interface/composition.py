@@ -292,8 +292,9 @@ def build_live(settings, cfg: PipelineConfig, engines: LazyAsrEngines, resolver:
             load = (lambda p=live_prof, code=lang: build_asr(p, normalizer_for(code)))
         live[lang] = LiveEngine(load, model, normalizer=live_normalizer(lang))
 
-    def detector():
-        return make_detector(settings.live_vad, cfg.vad.model, settings.live_vad_threshold)
+    def detector(threshold: float | None = None):
+        th = settings.live_vad_threshold if threshold is None else threshold
+        return make_detector(settings.live_vad, cfg.vad.model, th)
 
     def detect(audio):
         """Otomatik dil: oturumun ilk cümlesinden (toplu işle aynı kademeli tespit)."""

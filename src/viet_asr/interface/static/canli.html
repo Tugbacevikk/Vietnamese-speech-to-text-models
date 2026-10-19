@@ -97,12 +97,29 @@
 <details class="settings">
   <summary>Ayarlar</summary>
   <div class="grid">
-    <label>Cümle sonu duraklaması (ms)<input id="silence_ms" type="number" min="300" max="2000" step="50" value="700"></label>
-    <label>Ara metin sıklığı (sn, 0 = kapalı)<input id="partial_sec" type="number" min="0" max="5" step="0.1" value="1.2"></label>
+    <label>Hız Profili
+      <select id="preset">
+        <option value="balanced" selected>⚖️ Dengeli (650 ms duraklama, 0.8 sn ara metin)</option>
+        <option value="fast">⚡ Hızlı Diyalog (500 ms duraklama, 0.6 sn ara metin)</option>
+        <option value="presentation">🎙️ Sunum / Konferans (900 ms duraklama, 1.2 sn ara metin)</option>
+        <option value="custom">🛠️ Özel Ayar</option>
+      </select>
+    </label>
+    <label>Cümle sonu duraklaması (ms)<input id="silence_ms" type="number" min="300" max="2000" step="50" value="650"></label>
+    <label>Ara metin sıklığı (sn, 0 = kapalı)<input id="partial_sec" type="number" min="0" max="5" step="0.1" value="0.8"></label>
     <label>Azami cümle süresi (sn)<input id="max_sec" type="number" min="4" max="30" step="1" value="12"></label>
+    <label>Konuşma Algılama (VAD) Eşiği
+      <select id="vad_th">
+        <option value="0.35">Yüksek Hassasiyet (0.35 - Fısıltı / Uzak mikrofon)</option>
+        <option value="0.5" selected>Normal / Dengeli (0.50)</option>
+        <option value="0.65">Düşük Hassasiyet (0.65 - Gürültülü ortam)</option>
+      </select>
+    </label>
+    <label class="check"><input id="ns" type="checkbox" checked> Tarayıcı gürültü bastırma</label>
+    <label class="check"><input id="agc" type="checkbox" checked> Otomatik ses kazancı (AGC)</label>
+    <label class="check"><input id="ec" type="checkbox"> Yankı önleme (Echo Cancellation)</label>
     <label class="check"><input id="save" type="checkbox" checked> Sesi ve metni diske kaydet</label>
     <label class="check"><input id="analyze" type="checkbox" checked> Bitince konuşmacı ayrımlı transkript hazırla</label>
-    <label class="check"><input id="ns" type="checkbox" checked> Tarayıcı gürültü bastırma</label>
     <label class="check" id="spkRow" hidden><input id="spk" type="checkbox" checked> Konuşmacıları ayır (soru-cevap)</label>
     <label>Bağlantı<select id="transport">
       <option value="auto">Otomatik (başka cihazdan WebRTC, bu bilgisayarda WebSocket)</option>
@@ -130,11 +147,14 @@ const client = new LiveClient({
   params: () => ({
     language: $("langSel").value,
     silence_ms: $("silence_ms").value, partial_sec: $("partial_sec").value,
-    max_sec: $("max_sec").value, save: $("save").checked ? "1" : "0",
+    max_sec: $("max_sec").value, vad_th: $("vad_th").value,
+    save: $("save").checked ? "1" : "0",
     analyze: $("save").checked && $("analyze").checked ? "1" : "0",
     speakers: $("spk").checked ? "1" : "0", key: $("apiKey").value.trim() }),
   transport: () => $("transport").value,
   noiseSuppression: () => $("ns").checked,
+  autoGainControl: () => $("agc").checked,
+  echoCancellation: () => $("ec").checked,
   onStatus: setStatus,
   onLevel: (rms) => { $("lvl").style.width = Math.min(100, rms * 600) + "%"; },
   onStopped: () => { resetButtons(); wakeLock?.release().catch(() => {}); wakeLock = null; },
@@ -250,9 +270,78 @@ async function listLangs() {
     if (want) $("langSel").value = want;
   } catch {}
 }
+/* ---------- Hız Profilleri & Ayar Kalıcılığı ---------- */
+const PRESETS = {
+  fast: { silence_ms: 500, partial_sec: 0.6, max_sec: 10 },
+  balanced: { silence_ms: 650, partial_sec: 0.8, max_sec: 12 },
+  presentation: { silence_ms: 900, partial_sec: 1.2, max_sec: 15 },
+};
+
+function applyPreset(name) {
+  const p = PRESETS[name];
+  if (p) {
+    $("silence_ms").value = p.silence_ms;
+    $("partial_sec").value = p.partial_sec;
+    $("max_sec").value = p.max_sec;
+  }
+}
+
+$("preset").onchange = () => {
+  if ($("preset").value !== "custom") applyPreset($("preset").value);
+  saveSettings();
+};
+
+[$("silence_ms"), $("partial_sec"), $("max_sec")].forEach((el) => {
+  el.oninput = () => { $("preset").value = "custom"; saveSettings(); };
+});
+
+function saveSettings() {
+  try {
+    localStorage.setItem("captionSettings", JSON.stringify({
+      preset: $("preset").value,
+      silence_ms: $("silence_ms").value,
+      partial_sec: $("partial_sec").value,
+      max_sec: $("max_sec").value,
+      vad_th: $("vad_th").value,
+      ns: $("ns").checked,
+      agc: $("agc").checked,
+      ec: $("ec").checked,
+      save: $("save").checked,
+      analyze: $("analyze").checked,
+      spk: $("spk").checked,
+      transport: $("transport").value,
+    }));
+  } catch {}
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem("captionSettings");
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s.preset && $("preset").querySelector(`option[value="${s.preset}"]`)) $("preset").value = s.preset;
+    if (s.silence_ms) $("silence_ms").value = s.silence_ms;
+    if (s.partial_sec) $("partial_sec").value = s.partial_sec;
+    if (s.max_sec) $("max_sec").value = s.max_sec;
+    if (s.vad_th) $("vad_th").value = s.vad_th;
+    if (s.ns !== undefined) $("ns").checked = Boolean(s.ns);
+    if (s.agc !== undefined) $("agc").checked = Boolean(s.agc);
+    if (s.ec !== undefined) $("ec").checked = Boolean(s.ec);
+    if (s.save !== undefined) $("save").checked = Boolean(s.save);
+    if (s.analyze !== undefined) $("analyze").checked = Boolean(s.analyze);
+    if (s.spk !== undefined) $("spk").checked = Boolean(s.spk);
+    if (s.transport) $("transport").value = s.transport;
+  } catch {}
+}
+
+[$("ns"), $("agc"), $("ec"), $("save"), $("analyze"), $("spk"), $("vad_th"), $("transport")].forEach((el) => {
+  if (el) el.onchange = saveSettings;
+});
+loadSettings();
+
 try { $("apiKey").value = localStorage.getItem("asr_api_key") || ""; } catch {}
 try { $("transport").value = localStorage.getItem("captionTransport") || "auto"; } catch {}
-$("transport").onchange = () => { try { localStorage.setItem("captionTransport", $("transport").value); } catch {} };
+$("transport").onchange = () => { try { localStorage.setItem("captionTransport", $("transport").value); } catch {} saveSettings(); };
 $("apiKey").onchange = () => { try { localStorage.setItem("asr_api_key", $("apiKey").value.trim()); } catch {} };
 $("langSel").onchange = () => { try { localStorage.setItem("captionLang", $("langSel").value); } catch {} };
 listLangs();
