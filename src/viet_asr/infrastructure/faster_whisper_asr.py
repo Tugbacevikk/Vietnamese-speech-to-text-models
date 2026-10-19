@@ -42,16 +42,24 @@ def _cuda_ok() -> bool:
         if sys.platform == "win32":
             import ctypes
             candidates = [
+                Path(os.environ.get("CUDA_DIR", "")) if os.environ.get("CUDA_DIR") else None,
+                Path(os.environ.get("CUDA_DLL_DIR", "")) if os.environ.get("CUDA_DLL_DIR") else None,
+                Path("D:/sesAnalizi_venv/Lib/site-packages/torch/lib"),
+                Path(os.environ.get("USERPROFILE", "")) / "AppData" / "Local" / "Programs" / "Ollama" / "lib" / "ollama" / "cuda_v12",
                 Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin",
                 Path(sys.prefix) / "nvidia" / "cublas" / "bin",
-                Path(os.environ.get("CUDA_PATH", "")) / "bin",
+                Path(os.environ.get("CUDA_PATH", "")) / "bin" if os.environ.get("CUDA_PATH") else None,
             ]
             for cand in candidates:
-                if cand.is_dir() and hasattr(os, "add_dll_directory"):
-                    try:
-                        os.add_dll_directory(str(cand))
-                    except Exception:
-                        pass
+                if cand and cand.is_dir():
+                    s = str(cand)
+                    if s not in os.environ.get("PATH", ""):
+                        os.environ["PATH"] = s + ";" + os.environ.get("PATH", "")
+                    if hasattr(os, "add_dll_directory"):
+                        try:
+                            os.add_dll_directory(s)
+                        except Exception:
+                            pass
             try:
                 ctypes.CDLL("cublas64_12.dll")
             except Exception:
@@ -106,8 +114,12 @@ class FasterWhisperAsr:
                     f"{model.folder}/model.bin yok: python scripts/download_models.py --tr {model.name}")
 
             dev = getattr(self.wp, "device", "auto")
+            cuda_ok = _cuda_ok()
             if dev == "auto":
-                dev = "cuda" if _cuda_ok() else "cpu"
+                dev = "cuda" if cuda_ok else "cpu"
+            elif dev == "cuda" and not cuda_ok:
+                log.warning("CUDA istendi ama CUDA kütüphaneleri bulunamadı; CPU moduna düşülüyor.")
+                dev = "cpu"
 
             c_type = getattr(self.wp, "compute_type", "auto")
             if c_type == "auto":
