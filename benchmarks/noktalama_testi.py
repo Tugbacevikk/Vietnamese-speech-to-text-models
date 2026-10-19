@@ -19,13 +19,11 @@ import json
 import re
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from viet_asr.application.punctuator import punctuate_text, punctuate_words  # noqa: E402
-from viet_asr.domain import Word  # noqa: E402
+from viet_asr.application.punctuator import punctuate_text  # noqa: E402
 
 # Doğruluk ve hız ölçümü için örnek tıbbi ve genel diyalog referans kümesi
 ORNEK_REFERANS_KUMESI = [
@@ -211,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.tsv and args.tsv.exists():
         with args.tsv.open(encoding="utf-8") as f:
             reader = csv.reader(f, delimiter="\t")
-            header = next(reader, None)
+            next(reader, None)  # başlık satırı
             for row in reader:
                 if len(row) >= 2 and row[0].strip() and row[1].strip():
                     pairs.append((row[0].strip(), row[1].strip()))

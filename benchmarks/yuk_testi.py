@@ -41,8 +41,6 @@ import soundfile as sf
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from viet_asr.interface.settings import available_cpus  # noqa: E402
-
 SR = 16000
 
 
@@ -84,7 +82,7 @@ def run_api_load_test(api_url: str, samples: list[tuple[str, bytes, float]], tot
     # Health kontrolü
     try:
         req = urllib.request.urlopen(f"{api_url}/health", timeout=5)
-        health = json.loads(req.read().decode("utf-8"))
+        req.read()
     except Exception as e:
         raise RuntimeError(f"Sunucuya bağlanılamadı ({api_url}/health): {e}")
 

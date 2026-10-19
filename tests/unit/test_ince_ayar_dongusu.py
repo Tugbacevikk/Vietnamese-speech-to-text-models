@@ -1,8 +1,10 @@
 """İnce ayar döngüsü birim testleri."""
-import json
+import sys
 from pathlib import Path
 
-from scripts.ince_ayar_dongusu import check_leakage_with_test_sets, run_cycle
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+
+from ince_ayar_dongusu import check_leakage_with_test_sets, run_cycle
 
 
 def test_leak_check_clean(tmp_path):

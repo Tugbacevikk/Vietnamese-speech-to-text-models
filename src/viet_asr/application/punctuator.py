@@ -7,7 +7,6 @@ büyük harflerini birleştirerek ASR çıktısını yüksek okunabilirlikte bi�
 from __future__ import annotations
 
 import re
-import unicodedata
 from typing import Sequence
 
 from viet_asr.domain import Word

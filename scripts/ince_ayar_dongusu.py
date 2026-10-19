@@ -29,7 +29,6 @@ import json
 import shutil
 import subprocess
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -261,7 +260,7 @@ def run_cycle(esik: int = 20, esik_sn: float = 0.0, zorla: bool = False,
         )
         status["terfi_model_yolu"] = str(prod_model_dir)
         print(f"  - Model basariyla uretim dizinine kaydedildi: {prod_model_dir.name}")
-        print(f"  - MODEL_KARTI.json olusturuldu.")
+        print("  - MODEL_KARTI.json olusturuldu.")
     else:
         print("\n[BILGI] Kapi 2 kurallari saglanamadigi icin mevcut model korunuyor.")
 
