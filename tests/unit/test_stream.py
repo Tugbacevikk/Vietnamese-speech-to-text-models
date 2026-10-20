@@ -488,6 +488,16 @@ def test_iki_asamali_akis_duzeltme():
     assert corrections[1].index == 1
     assert corrections[1].text == "Düzeltilmiş metin."
     assert sm.duzeltmeler == 2
+    assert sm.duzeltme_pencere >= 1  # sayaç çalışıyor
+    assert sm.duzeltme_pencere <= 2
+
+
+def test_duzeltme_grubu_bekleme_suresi_parca_araligindan_buyuk():
+    # Omnilingual parçaları 5-8 sn arayla gelir; grup bekleme süresi bundan büyük olmalı,
+    # yoksa her parça ayrı 30 sn'lik Whisper penceresi tutar.
+    from viet_asr.application import stream as st
+    assert st.REFINE_IDLE_SEC > 8.0
+    assert st.REFINE_FLUSH_SPAN < 29.5
 
 
 def test_stream_manager_iki_asamali_websocket(tmp_path):

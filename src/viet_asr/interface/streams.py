@@ -408,7 +408,7 @@ class StreamManager:
                       "kuyruk_bekleme_max_sn": round(sm.max_kuyruk_bekleme, 2),
                       "toplam_gecikme_p95_sn": round(sm.p95_toplam_gecikme, 2),
                       "toplam_gecikme_max_sn": round(sm.max_toplam_gecikme, 2),
-                      "duzeltmeler": sm.duzeltmeler,
+                      "duzeltmeler": sm.duzeltmeler, "duzeltme_pencere": sm.duzeltme_pencere,
                       "duvar_sn": round(time.monotonic() - t0, 1),
                       **({("push" if isinstance(s.source, PushSource) else "rtp"): dict(s.source.stats)}
                          if hasattr(s.source, "stats") else {})}

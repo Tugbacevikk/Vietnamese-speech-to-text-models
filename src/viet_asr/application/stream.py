@@ -31,6 +31,11 @@ from viet_asr.domain import StreamSegment, VadSegment, Word
 
 from .ports import AsrEngine, AudioStream, StreamingVad
 
+REFINE_IDLE_SEC = 10.0    # yeni parça gelmezse toplanan düzeltme grubu bu süreden sonra çözülür
+REFINE_FLUSH_SPAN = 24.0  # grup bu kadar sese ulaşınca beklemeden çözülür (pencere 29,5 sn)
+REFINE_JOIN_SEC = 60.0    # akış bitince bekleyen düzeltmeler için azami bekleme
+REFINE_JOIN_STOP_SEC = 3.0  # iptalde bekleme
+
 log = logging.getLogger(__name__)
 SR = 16000
 
@@ -47,6 +52,7 @@ class StreamSummary:
     toplam_gecikmeler: list[float] = field(default_factory=list)
     max_toplam_gecikme: float = 0.0
     duzeltmeler: int = 0
+    duzeltme_pencere: int = 0  # medium'a giden çözme çağrısı sayısı (az = iyi paketlenmiş)
 
     @property
     def p95_latency(self) -> float:
@@ -97,6 +103,12 @@ class StreamTranscriber:
         total, index, last_interim = 0, 0, 0.0
 
         refine_q: queue.Queue[tuple[StreamSegment, VadSegment, float] | None] | None = None
+        emit_lock = threading.Lock()  # düzeltme iş parçacığı ile ana döngü aynı anda olay yayınlamasın
+        _on_segment, _on_refine = on_segment, on_refine
+
+        def on_segment(seg: StreamSegment) -> None:
+            with emit_lock:
+                _on_segment(seg)
         refine_t: threading.Thread | None = None
 
         if refiner is not None:
@@ -107,6 +119,7 @@ class StreamTranscriber:
                     return
                 t0 = min(s.start for _, s, _ in batch)
                 shifted = [VadSegment(start=max(0.0, s.start - t0), samples=s.samples) for _, s, _ in batch]
+                summary.duzeltme_pencere += 1
                 try:
                     words = refiner.transcribe(shifted)
                 except Exception as e:
@@ -149,8 +162,9 @@ class StreamTranscriber:
                         duzeltildi=True,
                     )
                     summary.duzeltmeler += 1
-                    if on_refine is not None:
-                        on_refine(ref_seg)
+                    if _on_refine is not None:
+                        with emit_lock:
+                            _on_refine(ref_seg)
                     else:
                         on_segment(ref_seg)
 
@@ -159,7 +173,7 @@ class StreamTranscriber:
                 batch_start = 0.0
                 last_end = 0.0
                 while True:
-                    timeout = 2.0 if batch else None
+                    timeout = REFINE_IDLE_SEC if batch else None
                     try:
                         item = refine_q.get(timeout=timeout)
                     except queue.Empty:
@@ -186,6 +200,9 @@ class StreamTranscriber:
 
                     batch.append((st_seg, vad_seg, t_in))
                     last_end = vad_seg.end
+                    if last_end - batch_start >= REFINE_FLUSH_SPAN:
+                        _process_refine_batch(batch)
+                        batch = []
 
             refine_t = threading.Thread(target=_refine_loop, daemon=True, name="refine-worker")
             refine_t.start()
@@ -282,7 +299,11 @@ class StreamTranscriber:
         finally:
             if refine_q is not None and refine_t is not None:
                 refine_q.put(None)
-                refine_t.join(timeout=60.0)
+                refine_t.join(timeout=REFINE_JOIN_STOP_SEC if (stop is not None and stop.is_set())
+                              else REFINE_JOIN_SEC)
+                if refine_t.is_alive():
+                    log.warning("düzeltme bitmeden akış kapandı: %d parça düzeltilmedi",
+                                max(0, summary.segments - summary.duzeltmeler))
             source.close()
         summary.duration = total / SR
         return summary
