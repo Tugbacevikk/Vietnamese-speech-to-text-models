@@ -325,7 +325,7 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
                             yield ": canli\n\n"
                         continue
                     idle = 0.0
-                    sid_line = f"id: {ev['index']}\n" if ev.get("tur") == "parca" and ev.get("final") else ""
+                    sid_line = f"id: {ev['index']}\n" if ev.get("tur") in ("parca", "duzeltme") and ev.get("final") else ""
                     yield f"{sid_line}event: {ev['tur']}\ndata: {json_mod.dumps(ev, ensure_ascii=False)}\n\n"
                     if ev.get("tur") == "bitti":
                         return

@@ -703,7 +703,14 @@ $("liveStart").addEventListener("click", async () => {
     $("liveStart").classList.add("hidden"); $("liveStop").classList.remove("hidden");
     const key = $("apiKey").value.trim();
     liveWs = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/streams/${s.id}/ws` + (key ? `?key=${encodeURIComponent(key)}` : ""));
-    liveWs.onmessage = (m) => { const ev = JSON.parse(m.data); if (ev.tur === "parca") { liveLine(ev); $("liveInfo").textContent = `canlı · gecikme ${ev.latency.toFixed(2)} sn`; } else if (ev.tur === "bitti") liveDone(ev); };
+    liveWs.onmessage = (m) => {
+      const ev = JSON.parse(m.data);
+      if (ev.tur === "parca" || ev.tur === "duzeltme") {
+        liveLine(ev);
+        const tag = ev.tur === "duzeltme" ? "düzeltme" : "canlı";
+        $("liveInfo").textContent = `${tag} · gecikme ${ev.latency.toFixed(2)} sn`;
+      } else if (ev.tur === "bitti") liveDone(ev);
+    };
     liveWs.onerror = () => { $("liveInfo").textContent = "Canlı bağlantı koptu (sonuç geçmişe düşer)"; };
   } catch (e) { $("liveInfo").textContent = "Başlatılamadı: " + e.message; }
 });

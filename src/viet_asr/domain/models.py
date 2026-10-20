@@ -127,6 +127,9 @@ class StreamSegment:
     conf: float | None = None
     low_conf: tuple[int, ...] = ()
     latency: float = 0.0  # parçanın sonu ile metnin hazır olması arasındaki süre (sn)
+    kuyruk_bekleme_sn: float = 0.0  # sesin sunucu kuyruğunda bekleme süresi (sn)
+    toplam_gecikme_sn: float = 0.0  # sesin kuyruğa girişinden metne kadar geçen toplam süre (sn)
+    duzeltildi: bool = False  # iki aşamalı akışta arka plan düzeltmesi mi
 
 
 @dataclass(frozen=True)

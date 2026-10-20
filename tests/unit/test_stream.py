@@ -417,3 +417,135 @@ def test_akis_ucu_dis_adresi_reddeder_ve_backlog_ayari(tmp_path):
     assert c.post(f"/streams/{sid}/audio", content=_pcm16(1.0)).status_code == 202
     assert mgr.get(sid).source.max_backlog == 0.5                 # STREAM_MAX_BACKLOG kaynağa ulaştı
     c.delete(f"/streams/{sid}")
+
+
+def test_kuyruk_bekleme_ve_toplam_gecikme_metrikleri():
+    from viet_asr.infrastructure.push_source import PushSource
+    from viet_asr.interface.streams import segment_dict
+
+    src = PushSource(16000, idle_timeout=0.5)
+    # 1. parça gönderilir
+    src.feed(_pcm16(1.0), 0)
+    # Kuyrukta bilerek 100 ms bekletme simülasyonu
+    time.sleep(0.1)
+    # 2. parça gönderilir
+    src.feed(_pcm16(1.0), 1)
+    src.end()
+
+    events = []
+    sm = StreamTranscriber(FakeVad).run(src, FakeAsr(), events.append, interim=False)
+    finals = [e for e in events if e.final]
+    assert len(finals) == 2
+
+    # Her iki parçada da kuyruk bekleme ve toplam gecikme hesaplanmış olmalı
+    for seg in finals:
+        assert hasattr(seg, "kuyruk_bekleme_sn")
+        assert hasattr(seg, "toplam_gecikme_sn")
+        assert seg.kuyruk_bekleme_sn >= 0.0
+        assert seg.toplam_gecikme_sn >= seg.latency
+        assert seg.toplam_gecikme_sn >= seg.kuyruk_bekleme_sn
+
+        d = segment_dict(seg)
+        assert "kuyruk_bekleme_sn" in d
+        assert "toplam_gecikme_sn" in d
+        assert "latency" in d
+
+    # 1. parça en az 100 ms kuyrukta beklemiş olmalı (t_pop - t_ingress)
+    assert finals[0].kuyruk_bekleme_sn >= 0.05
+    assert sm.max_kuyruk_bekleme >= 0.05
+    assert sm.max_toplam_gecikme >= sm.max_latency
+
+
+class FakeRefinerAsr:
+    name = "faster-whisper-medium-mock"
+
+    def transcribe(self, segs):
+        out = []
+        for s in segs:
+            out.append(Word("Düzeltilmiş", s.start, s.start + 0.4, conf=0.98))
+            out.append(Word("metin.", s.start + 0.5, s.end, conf=0.99))
+        return out
+
+
+def test_iki_asamali_akis_duzeltme():
+    frames = [np.zeros(1600, np.float32)] * 20  # 2,0 sn
+    src = ListSource(frames)
+    events = []
+    sm = StreamTranscriber(FakeVad).run(
+        src, FakeAsr(), events.append, interim=False, refiner=FakeRefinerAsr())
+
+    initial_finals = [e for e in events if e.final and not e.duzeltildi]
+    corrections = [e for e in events if e.duzeltildi]
+
+    assert len(initial_finals) == 2
+    assert initial_finals[0].text == "k0 x"
+    assert initial_finals[1].text == "k1 x"
+
+    # Arka plan düzeltmesi her parça için gelmiş olmalı
+    assert len(corrections) == 2
+    assert corrections[0].index == 0
+    assert corrections[0].text == "Düzeltilmiş metin."
+    assert corrections[1].index == 1
+    assert corrections[1].text == "Düzeltilmiş metin."
+    assert sm.duzeltmeler == 2
+
+
+def test_stream_manager_iki_asamali_websocket(tmp_path):
+    from fastapi.testclient import TestClient
+    from viet_asr.infrastructure.memory_store import MemoryJobStore
+    from viet_asr.interface.api import create_app
+    from viet_asr.interface.settings import Settings
+    from viet_asr.interface.streams import StreamManager
+
+    class DummyQ:
+        def enqueue_detection(self, j): pass
+        def enqueue_transcription(self, j, lang): pass
+
+    s = Settings(data_dir=str(tmp_path), languages=["tr"], enable_streams=True,
+                 stream_two_stage=True)
+    fast_mock = FakeAsr()
+    refiner_mock = FakeRefinerAsr()
+    mgr = StreamManager({"tr": refiner_mock}, None, tmp_path,
+                        submit=None, vad_factory=FakeVad,
+                        fast_engines={"tr": fast_mock}, stream_two_stage=True)
+
+    c = TestClient(create_app(MemoryJobStore(), DummyQ(), s, streams=mgr))
+    r = c.post("/streams", json={"kaynak": "push", "dil": "tr", "iki_asama": True})
+    assert r.status_code == 201
+    sid = r.json()["id"]
+
+    events = []
+    # WebSocket dinleyici
+    def listen():
+        with c.websocket_connect(f"/streams/{sid}/ws") as ws:
+            while True:
+                ev = ws.receive_json()
+                events.append(ev)
+                if ev["tur"] == "bitti":
+                    break
+
+    t_listen = threading.Thread(target=listen)
+    t_listen.start()
+    time.sleep(0.05)
+
+    # 2 sn ses gönder
+    c.post(f"/streams/{sid}/audio?seq=0", content=_pcm16(1.0))
+    c.post(f"/streams/{sid}/audio?seq=1", content=_pcm16(1.0))
+    c.post(f"/streams/{sid}/audio?son=true", content=b"")
+
+    t_listen.join(timeout=5.0)
+
+    # Olayları incele
+    parcalar = [e for e in events if e["tur"] == "parca" and e["final"]]
+    duzeltmeler = [e for e in events if e["tur"] == "duzeltme"]
+
+    assert len(parcalar) == 2
+    assert len(duzeltmeler) == 2
+    assert duzeltmeler[0]["text"] == "Düzeltilmiş metin."
+
+    # Oturumdaki parçalar düzeltilmiş metinle güncellenmiş olmalı
+    session_data = c.get(f"/streams/{sid}").json()
+    assert session_data["parca_sayisi"] == 2
+    assert session_data["parcalar"][0]["text"] == "Düzeltilmiş metin."
+    assert session_data["ozet"]["duzeltmeler"] == 2
+    assert "toplam_gecikme_p95_sn" in session_data["ozet"]

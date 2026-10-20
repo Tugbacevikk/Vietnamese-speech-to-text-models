@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
 from bisect import bisect_left
@@ -41,12 +42,29 @@ class StreamSummary:
     words: int = 0
     max_latency: float = 0.0
     latencies: list[float] = field(default_factory=list)
+    kuyruk_beklemeler: list[float] = field(default_factory=list)
+    max_kuyruk_bekleme: float = 0.0
+    toplam_gecikmeler: list[float] = field(default_factory=list)
+    max_toplam_gecikme: float = 0.0
+    duzeltmeler: int = 0
 
     @property
     def p95_latency(self) -> float:
         if not self.latencies:
             return 0.0
         return float(np.percentile(self.latencies, 95))
+
+    @property
+    def p95_toplam_gecikme(self) -> float:
+        if not self.toplam_gecikmeler:
+            return 0.0
+        return float(np.percentile(self.toplam_gecikmeler, 95))
+
+    @property
+    def p95_kuyruk_bekleme(self) -> float:
+        if not self.kuyruk_beklemeler:
+            return 0.0
+        return float(np.percentile(self.kuyruk_beklemeler, 95))
 
 
 class StreamTranscriber:
@@ -66,30 +84,139 @@ class StreamTranscriber:
 
     def run(self, source: AudioStream, asr: AsrEngine, on_segment: Callable[[StreamSegment], None],
             record: Callable[[np.ndarray], None] | None = None, interim: bool = True,
-            stop: threading.Event | None = None) -> StreamSummary:
+            stop: threading.Event | None = None,
+            refiner: AsrEngine | None = None,
+            on_refine: Callable[[StreamSegment], None] | None = None) -> StreamSummary:
         contiguous = getattr(asr, "segmentation", "vad") == "full"
         try:  # bitişik modda VAD'ın zorla kesmesi (kelime ortası) yerine en sessiz yerden keseriz
             vad = self.vad_factory(max_speech=self.max_chunk * 2) if contiguous else self.vad_factory()
         except TypeError:
             vad = self.vad_factory()
         summary = StreamSummary()
-        arrived: list[tuple[int, float]] = []  # (o ana kadar gelen örnek, duvar saati)
+        arrived: list[tuple[int, float, float]] = []  # (o ana kadar gelen örnek, pop saati, giriş saati)
         total, index, last_interim = 0, 0, 0.0
+
+        refine_q: queue.Queue[tuple[StreamSegment, VadSegment, float] | None] | None = None
+        refine_t: threading.Thread | None = None
+
+        if refiner is not None:
+            refine_q = queue.Queue()
+
+            def _process_refine_batch(batch: list[tuple[StreamSegment, VadSegment, float]]) -> None:
+                if not batch:
+                    return
+                t0 = min(s.start for _, s, _ in batch)
+                shifted = [VadSegment(start=max(0.0, s.start - t0), samples=s.samples) for _, s, _ in batch]
+                try:
+                    words = refiner.transcribe(shifted)
+                except Exception as e:
+                    log.warning("düzeltme motoru başarısız (%s), hızlı metinler korunuyor", e)
+                    return
+                words = [Word(text=w.text, start=w.start + t0, end=w.end + t0, conf=w.conf) for w in words]
+                seg_words: list[list[Word]] = [[] for _ in batch]
+                for w in words:
+                    mid = (w.start + w.end) / 2.0
+                    best_i = 0
+                    min_dist = float("inf")
+                    for i, (_, s, _) in enumerate(batch):
+                        if s.start <= mid <= s.end:
+                            best_i = i
+                            break
+                        dist = min(abs(mid - s.start), abs(mid - s.end))
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_i = i
+                    seg_words[best_i].append(w)
+
+                t_now = time.monotonic()
+                for (st_seg, vad_seg, t_in), ws in zip(batch, seg_words):
+                    txt = " ".join(w.text for w in ws).strip()
+                    if not txt:
+                        txt = st_seg.text
+                    confs = [w.conf for w in ws if w.conf is not None]
+                    avg_conf = round(sum(confs) / len(confs), 3) if confs else st_seg.conf
+                    ref_seg = StreamSegment(
+                        index=st_seg.index,
+                        start=st_seg.start,
+                        end=st_seg.end,
+                        text=txt,
+                        final=True,
+                        conf=avg_conf,
+                        low_conf=(),
+                        latency=round(max(0.0, t_now - vad_seg.end), 3),
+                        kuyruk_bekleme_sn=st_seg.kuyruk_bekleme_sn,
+                        toplam_gecikme_sn=round(max(0.0, t_now - t_in), 3),
+                        duzeltildi=True,
+                    )
+                    summary.duzeltmeler += 1
+                    if on_refine is not None:
+                        on_refine(ref_seg)
+                    else:
+                        on_segment(ref_seg)
+
+            def _refine_loop() -> None:
+                batch: list[tuple[StreamSegment, VadSegment, float]] = []
+                batch_start = 0.0
+                last_end = 0.0
+                while True:
+                    timeout = 2.0 if batch else None
+                    try:
+                        item = refine_q.get(timeout=timeout)
+                    except queue.Empty:
+                        if batch:
+                            _process_refine_batch(batch)
+                            batch = []
+                        continue
+
+                    if item is None:
+                        if batch:
+                            _process_refine_batch(batch)
+                        break
+
+                    st_seg, vad_seg, t_in = item
+                    if batch:
+                        span = vad_seg.end - batch_start
+                        gap = vad_seg.start - last_end
+                        if span > 29.5 or gap > 3.0:
+                            _process_refine_batch(batch)
+                            batch = []
+
+                    if not batch:
+                        batch_start = vad_seg.start
+
+                    batch.append((st_seg, vad_seg, t_in))
+                    last_end = vad_seg.end
+
+            refine_t = threading.Thread(target=_refine_loop, daemon=True, name="refine-worker")
+            refine_t.start()
 
         def emit(seg: VadSegment, final: bool) -> None:
             nonlocal index
             words = asr.transcribe([seg]) if len(seg.samples) else []
             end_sample = int(round(seg.end * SR))
-            k = bisect_left(arrived, (end_sample, 0.0))
-            t_end = arrived[k][1] if k < len(arrived) else time.monotonic()
-            latency = max(0.0, time.monotonic() - t_end)
-            out = _segment(index, seg, words, final, latency, self.low_conf)
+            k = bisect_left(arrived, (end_sample, 0.0, 0.0))
+            if k < len(arrived):
+                _, t_pop, t_in = arrived[k]
+            else:
+                t_pop = t_in = time.monotonic()
+            t_now = time.monotonic()
+            latency = max(0.0, t_now - t_pop)
+            queue_wait = max(0.0, t_pop - t_in)
+            total_latency = max(0.0, t_now - t_in)
+            out = _segment(index, seg, words, final, latency, self.low_conf,
+                           queue_wait=queue_wait, total_latency=total_latency)
             if final:
                 index += 1
                 summary.segments += 1
                 summary.words += len(words)
                 summary.latencies.append(latency)
                 summary.max_latency = max(summary.max_latency, latency)
+                summary.kuyruk_beklemeler.append(queue_wait)
+                summary.max_kuyruk_bekleme = max(summary.max_kuyruk_bekleme, queue_wait)
+                summary.toplam_gecikmeler.append(total_latency)
+                summary.max_toplam_gecikme = max(summary.max_toplam_gecikme, total_latency)
+                if refine_q is not None and len(seg.samples):
+                    refine_q.put((out, seg, t_in))
             if out.text or final:
                 on_segment(out)
 
@@ -114,8 +241,12 @@ class StreamTranscriber:
                 frame = np.asarray(frame, dtype=np.float32)
                 if record is not None:
                     record(frame)
+                t_pop = time.monotonic()
+                t_in = getattr(source, "last_ingress_time", None)
+                if t_in is None:
+                    t_in = t_pop
                 total += len(frame)
-                arrived.append((total, time.monotonic()))
+                arrived.append((total, t_pop, t_in))
                 if len(arrived) > 4096:
                     del arrived[:2048]
                 if contiguous:
@@ -149,6 +280,9 @@ class StreamTranscriber:
                 for seg in tail:
                     emit(seg, True)
         finally:
+            if refine_q is not None and refine_t is not None:
+                refine_q.put(None)
+                refine_t.join(timeout=60.0)
             source.close()
         summary.duration = total / SR
         return summary
@@ -168,7 +302,8 @@ def _quietest_cut(a: np.ndarray, frame: float = 0.1) -> int:
 
 
 def _segment(index: int, seg: VadSegment, words: list[Word], final: bool, latency: float,
-             low: float) -> StreamSegment:
+             low: float, queue_wait: float = 0.0, total_latency: float = 0.0,
+             duzeltildi: bool = False) -> StreamSegment:
     confs = [w.conf for w in words if w.conf is not None]
     return StreamSegment(
         index=index, start=round(words[0].start if words else seg.start, 3),
@@ -176,4 +311,7 @@ def _segment(index: int, seg: VadSegment, words: list[Word], final: bool, latenc
         text=" ".join(w.text for w in words), final=final,
         conf=round(sum(confs) / len(confs), 3) if confs else None,
         low_conf=tuple(i for i, w in enumerate(words) if w.conf is not None and w.conf < low),
-        latency=round(latency, 3))
+        latency=round(latency, 3),
+        kuyruk_bekleme_sn=round(queue_wait, 3),
+        toplam_gecikme_sn=round(total_latency, 3),
+        duzeltildi=duzeltildi)

@@ -72,6 +72,9 @@ def build_local(settings: Settings, workers: int | None = None, warm_up: bool = 
 
         streams = StreamManager.from_settings(settings, pipeline.engines, cfg.vad,
                                               SubmitJob(store, queue, settings.languages))
+        if warm_up and getattr(streams, "fast_engines", None) is not None:
+            for lang in getattr(streams.fast_engines, "_factories", {}):
+                streams.fast_engines[lang]
     app = create_app(store, queue, settings, {"veritabani": store.ping}, queue_stats=queue.stats,
                      readiness={"modeller": models_ready}, streams=streams)
     app.state.streams = streams

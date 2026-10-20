@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from collections.abc import Iterator
 
 import numpy as np
@@ -40,7 +41,8 @@ class PushSource:
         self.max_backlog = max_backlog
         self.port = None
         self.stats = {"parca": 0, "tekrar": 0}
-        self._q: queue.Queue[np.ndarray | None] = queue.Queue()
+        self.last_ingress_time: float | None = None
+        self._q: queue.Queue = queue.Queue()
         self._lock = threading.Lock()
         self._backlog = 0.0       # kuyruktaki ses, sn
         self._received = 0.0      # toplam gelen ses, sn
@@ -87,7 +89,7 @@ class PushSource:
             secs = len(x) / self.rate
             self._backlog += secs
             self._received += secs
-            self._q.put(x)
+            self._q.put((x, time.monotonic()))
             return True
 
     def end(self) -> None:
@@ -104,14 +106,19 @@ class PushSource:
         waited, got = 0.0, False
         while not self._stop.is_set():
             try:
-                x = self._q.get(timeout=0.2)
+                item = self._q.get(timeout=0.2)
             except queue.Empty:
                 waited += 0.2
                 if waited >= (self.idle_timeout if got else self.first_timeout):
                     break
                 continue
-            if x is None:
+            if item is None:
                 break
+            if isinstance(item, tuple):
+                x, t_in = item
+            else:
+                x, t_in = item, time.monotonic()
+            self.last_ingress_time = t_in
             waited, got = 0.0, True
             with self._lock:
                 self._backlog = max(0.0, self._backlog - len(x) / self.rate)

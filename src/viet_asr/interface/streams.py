@@ -57,6 +57,7 @@ class StreamSpec:
     ses_hizi: int = 16000    # push kaynağında gönderilen PCM16'nın örnekleme hızı
     canli_url: str | None = None  # canlı parçalar buraya POST edilir (imzalı); callback_url bitişteki işe aittir
     sdp: str | None = None   # SDP metni (santralin verdiği); kaynak yerine ya da rtp:// ile birlikte
+    iki_asama: bool | None = None  # True: hızlı model + arka plan Whisper düzeltmesi; None: STREAM_TWO_STAGE
 
 
 def source_from_sdp(text: str, spec: StreamSpec, work_dir: Path | None = None):
@@ -164,8 +165,13 @@ class StreamSession:
 
 
 def segment_dict(s: StreamSegment) -> dict:
-    return {"index": s.index, "start": s.start, "end": s.end, "text": s.text, "final": s.final,
-            "confidence": s.conf, "low_confidence_words": list(s.low_conf), "latency": s.latency}
+    d = {"index": s.index, "start": s.start, "end": s.end, "text": s.text, "final": s.final,
+         "confidence": s.conf, "low_confidence_words": list(s.low_conf), "latency": s.latency,
+         "kuyruk_bekleme_sn": round(s.kuyruk_bekleme_sn, 3),
+         "toplam_gecikme_sn": round(s.toplam_gecikme_sn, 3)}
+    if s.duzeltildi:
+        d["duzeltildi"] = True
+    return d
 
 
 def port_range(text: str) -> tuple[int, int] | None:
@@ -235,8 +241,11 @@ class StreamManager:
     def __init__(self, engines, vad_cfg: VadConfig, data_dir: str | Path, submit=None,
                  languages: list[str] | None = None, max_sessions: int = 8, allow_files: bool = False,
                  max_speech: float = 10.0, vad_factory=None, rtp_ports: tuple[int, int] | None = None,
-                 public_host: str = "", notify_secret: str = "", notify_post=None, max_backlog: float = 30.0):
+                 public_host: str = "", notify_secret: str = "", notify_post=None, max_backlog: float = 30.0,
+                 fast_engines=None, stream_two_stage: bool = False):
         self.engines, self.vad_cfg, self.submit = engines, vad_cfg, submit
+        self.fast_engines = fast_engines
+        self.stream_two_stage = stream_two_stage
         self.dir = Path(data_dir) / "akislar"
         self.dir.mkdir(parents=True, exist_ok=True)
         self.languages = languages or list(engines)
@@ -249,13 +258,29 @@ class StreamManager:
         self._lock = threading.Lock()
 
     @classmethod
-    def from_settings(cls, s, engines, vad_cfg, submit=None) -> "StreamManager":
+    def from_settings(cls, s, engines, vad_cfg, submit=None, fast_engines=None) -> "StreamManager":
         """Tek yer: yerel mod ve tam mod aynı ayarlarla kurar."""
+        two_stage = getattr(s, "stream_two_stage", False)
+        if fast_engines is None and two_stage:
+            from viet_asr.infrastructure.catalog import language_profile
+            from viet_asr.infrastructure.engines import LazyAsrEngines
+            from viet_asr.infrastructure.normalizer import normalizer_for
+            from viet_asr.infrastructure.sherpa_asr import build_asr
+
+            threads = getattr(s, "threads", 2)
+            fast_model = getattr(s, "stream_fast_model", "omnilingual-300m")
+            models_dir = getattr(s, "models_dir", "models")
+            fast_engines = LazyAsrEngines({
+                "tr": lambda: build_asr(
+                    language_profile("tr", models_dir, fast_model, num_threads=threads),
+                    normalizer_for("tr"))
+            })
         return cls(engines, vad_cfg, s.data_dir, submit=submit, languages=list(s.languages),
                    max_sessions=s.stream_max_sessions, allow_files=s.allow_local_paths,
                    max_speech=s.stream_max_speech, rtp_ports=port_range(s.stream_rtp_ports),
                    public_host=s.stream_public_host, notify_secret=s.webhook_secret,
-                   max_backlog=s.stream_max_backlog)
+                   max_backlog=s.stream_max_backlog, fast_engines=fast_engines,
+                   stream_two_stage=two_stage)
 
     def active(self) -> int:
         return sum(1 for s in self.sessions.values() if s.durum == "dinleniyor")
@@ -321,7 +346,8 @@ class StreamManager:
         q: queue_mod.Queue = queue_mod.Queue()
         for seg in s.segments:  # geç bağlanan da baştan görsün
             if seg["index"] > after:
-                q.put({"tur": "parca", **seg})
+                tur = "duzeltme" if seg.get("duzeltildi") else "parca"
+                q.put({"tur": tur, **seg})
         if s.durum != "dinleniyor":
             q.put({"tur": "bitti", **s.to_dict(with_segments=False)})
         s.subscribers.append(q)
@@ -334,6 +360,8 @@ class StreamManager:
         if n is not None:
             if event["tur"] == "parca" and event.get("final"):
                 n.send("stream.segment", {k: v for k, v in event.items() if k != "tur"})
+            elif event["tur"] == "duzeltme":
+                n.send("stream.correction", {k: v for k, v in event.items() if k != "tur"})
             elif event["tur"] == "bitti":
                 n.send("stream.ended", {k: v for k, v in event.items() if k != "tur"})
                 threading.Thread(target=n.close, daemon=True).start()
@@ -345,21 +373,42 @@ class StreamManager:
 
         def on_segment(seg: StreamSegment) -> None:
             d = segment_dict(seg)
-            if seg.final:
+            if seg.duzeltildi:
+                for i, ex in enumerate(s.segments):
+                    if ex["index"] == seg.index:
+                        s.segments[i] = d
+                        break
+                else:
+                    s.segments.append(d)
+                self._publish(s, {"tur": "duzeltme", **d})
+            elif seg.final:
                 s.segments.append(d)
                 s.ara = None
+                self._publish(s, {"tur": "parca", **d})
             else:
                 s.ara = d
-            self._publish(s, {"tur": "parca", **d})
+                self._publish(s, {"tur": "parca", **d})
 
         try:
-            asr = self.engines[s.spec.dil]
+            two_stage = (s.spec.iki_asama if s.spec.iki_asama is not None else self.stream_two_stage) and \
+                        self.fast_engines is not None and s.spec.dil in self.fast_engines
+            if two_stage:
+                asr = self.fast_engines[s.spec.dil]
+                refiner = self.engines[s.spec.dil]
+            else:
+                asr = self.engines[s.spec.dil]
+                refiner = None
             fast = any(k in getattr(asr, "name", "") for k in FAST_ENGINES)
             st = StreamTranscriber(self.vad_factory)
             t0 = time.monotonic()
-            sm = st.run(s.source, asr, on_segment, record=wav.write, interim=fast, stop=s.stop)
+            sm = st.run(s.source, asr, on_segment, record=wav.write, interim=fast, stop=s.stop,
+                        refiner=refiner)
             s.ozet = {"sure_sn": round(sm.duration, 1), "parca": sm.segments, "kelime": sm.words,
                       "gecikme_p95_sn": round(sm.p95_latency, 2), "gecikme_max_sn": round(sm.max_latency, 2),
+                      "kuyruk_bekleme_max_sn": round(sm.max_kuyruk_bekleme, 2),
+                      "toplam_gecikme_p95_sn": round(sm.p95_toplam_gecikme, 2),
+                      "toplam_gecikme_max_sn": round(sm.max_toplam_gecikme, 2),
+                      "duzeltmeler": sm.duzeltmeler,
                       "duvar_sn": round(time.monotonic() - t0, 1),
                       **({("push" if isinstance(s.source, PushSource) else "rtp"): dict(s.source.stats)}
                          if hasattr(s.source, "stats") else {})}

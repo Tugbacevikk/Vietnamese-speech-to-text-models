@@ -47,10 +47,11 @@ def listen(api: str, sid: str, headers: dict, sent_at: dict, out: list, done: th
                         ev = line[6:].strip()
                     elif line.startswith("data:"):
                         d = json.loads(line[5:])
-                        if ev == "parca" and d.get("final"):
+                        if ev in ("parca", "duzeltme") and d.get("final"):
                             last = d["index"]
                             out.append(d)
-                            print(f"[{d['start']:6.1f}-{d['end']:6.1f}] {d['text']}")
+                            tag = " [düzeltildi]" if d.get("duzeltildi") else ""
+                            print(f"[{d['start']:6.1f}-{d['end']:6.1f}]{tag} {d['text']}")
                         elif ev == "bitti":
                             print("bitti:", d.get("durum"), d.get("ozet"))
                             done.set()
@@ -90,9 +91,10 @@ def main() -> None:
             def rx():
                 for m in ws:
                     d = json.loads(m)
-                    if d["tur"] == "parca" and d["final"]:
+                    if d.get("tur") in ("parca", "duzeltme") and d.get("final"):
                         out.append(d)
-                        print(f"[{d['start']:6.1f}-{d['end']:6.1f}] {d['text']}")
+                        tag = " [düzeltildi]" if d.get("duzeltildi") else ""
+                        print(f"[{d['start']:6.1f}-{d['end']:6.1f}]{tag} {d['text']}")
                     elif d["tur"] == "bitti":
                         print("bitti:", d.get("durum"), d.get("ozet"))
                         return
