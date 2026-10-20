@@ -443,3 +443,11 @@ def test_temiz_transkript_ucu(ctx):
     res = c.get(f"/jobs/{jid}").json()["result"]
     assert res["speaker_labels"]["speaker_01"] == "Konuşmacı 2 - Kadın"
     assert res["speaker_info"]["speaker_01"] == {"f0": 221.0, "gender": "kadın"}
+
+
+def test_yukleme_siniri_dosya_diske_tamamen_yazilmadan_uygulanir(ctx, tmp_path):
+    """Sınırı aşan yükleme yarıda kesilir ve yarım dosya diskte kalmaz."""
+    store, _, c = ctx
+    assert post(c, content=b"\0" * (3 * 1024 * 1024)).status_code == 413     # 1 MB sınırı
+    assert [p for p in tmp_path.iterdir() if p.suffix == ".wav"] == []
+    assert store.jobs == {} if hasattr(store, "jobs") else True

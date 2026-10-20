@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def collect(store, settings) -> list[dict]:
-    """[{"tur", "mesaj"}]; tür: bildirim | kuyruk | hata | yedek | disk."""
+    """[{"tur", "mesaj"}]; tür: bildirim | kuyruk | hata | yedek | disk | izleme."""
     out: list[dict] = []
     now = datetime.now(timezone.utc)
 
@@ -24,21 +24,21 @@ def collect(store, settings) -> list[dict]:
         if dead:
             add("bildirim", f"{dead} bildirim teslim edilemedi (alıcı yanıt vermiyor). "
                             "Liste: GET /webhooks/dead, yeniden dene: POST /webhooks/{id}/retry")
-    except Exception:
-        pass
+    except Exception as e:  # kontrol edilemiyorsa "sorun yok" demek yanıltır: görünür kıl
+        add("izleme", f"teslim edilemeyen bildirimler kontrol edilemedi ({type(e).__name__}); veritabanına erişimi ve sunucu günlüğünü kontrol edin")
     try:
         waiting = len(store.stale_queued(now - timedelta(minutes=settings.alert_queue_wait_min)))
         if waiting:
             add("kuyruk", f"{waiting} iş {settings.alert_queue_wait_min:g} dakikadan uzun süredir kuyrukta: "
                           "işçi çalışıyor mu (/health/ready), yük çok mu (/metrics)?")
-    except Exception:
-        pass
+    except Exception as e:  # kontrol edilemiyorsa "sorun yok" demek yanıltır: görünür kıl
+        add("izleme", f"kuyrukta bekleyen işler kontrol edilemedi ({type(e).__name__}); veritabanına erişimi ve sunucu günlüğünü kontrol edin")
     try:
         failed = store.failed_since(now - timedelta(hours=24))
         if failed:
             add("hata", f"son 24 saatte {failed} iş başarısız oldu (geçmişte kırmızı olanların hata mesajına bakın)")
-    except Exception:
-        pass
+    except Exception as e:  # kontrol edilemiyorsa "sorun yok" demek yanıltır: görünür kıl
+        add("izleme", f"başarısız işler kontrol edilemedi ({type(e).__name__}); veritabanına erişimi ve sunucu günlüğünü kontrol edin")
     if settings.backup_every_hours > 0:
         files = [p for p in Path(settings.backup_dir).glob("yedek_*") if not p.name.endswith(".part")]
         age = (time.time() - max(p.stat().st_mtime for p in files)) / 3600 if files else None

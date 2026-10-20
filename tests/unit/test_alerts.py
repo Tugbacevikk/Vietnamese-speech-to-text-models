@@ -57,3 +57,14 @@ def test_health_uyarilari_dondurur(tmp_path):
                                                       backup_every_hours=0, alert_disk_gb=0), {}))
     body = c.get("/health").json()
     assert [a["tur"] for a in body["uyarilar"]] == ["hata"]
+
+
+def test_kontrol_edilemeyen_sey_sessiz_kalmaz(tmp_path):
+    """Veritabanı erişilemezse "sorun yok" değil, "kontrol edilemedi" uyarısı çıkar."""
+    class Bozuk(MemoryJobStore):
+        def outbox_stats(self, *a, **k):
+            raise RuntimeError("baglanti yok")
+    s = Settings(data_dir=str(tmp_path / "up"), backup_every_hours=0, alert_disk_gb=0)
+    uyarilar = collect(Bozuk(), s)
+    assert [a["tur"] for a in uyarilar] == ["izleme"]
+    assert "RuntimeError" in uyarilar[0]["mesaj"]

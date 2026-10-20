@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import shutil
 import uuid
 from pathlib import Path
 
@@ -167,10 +166,16 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
             if ext in FFMPEG_ONLY and ffmpeg_bin() is None:
                 raise HTTPException(415, f"'{ext}' için sunucuda ffmpeg kurulu olmalı")
             path = data_dir / f"{job_id}{ext}"
+            written, too_big = 0, False
             with path.open("wb") as out:
-                shutil.copyfileobj(file.file, out, length=1 << 20)
-            if path.stat().st_size > max_bytes:
-                path.unlink()
+                while chunk := file.file.read(1 << 20):
+                    written += len(chunk)
+                    if written > max_bytes:  # sınır aşılınca dur: devasa yükleme diski doldurmasın
+                        too_big = True
+                        break
+                    out.write(chunk)
+            if too_big:
+                path.unlink(missing_ok=True)
                 raise HTTPException(413, f"dosya {settings.max_upload_mb} MB'tan büyük")
         elif audio_path and settings.allow_local_paths:
             path = Path(audio_path)
