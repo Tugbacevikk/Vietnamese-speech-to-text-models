@@ -31,8 +31,10 @@ from viet_asr.domain import StreamSegment, VadSegment, Word
 
 from .ports import AsrEngine, AudioStream, StreamingVad
 
-REFINE_IDLE_SEC = 10.0    # yeni parça gelmezse toplanan düzeltme grubu bu süreden sonra çözülür
-REFINE_FLUSH_SPAN = 24.0  # grup bu kadar sese ulaşınca beklemeden çözülür (pencere 29,5 sn)
+# 10 sn bekleme + 24 sn erken çözme denendi: ölçümde duvar süresi 144-150 -> 175-185 sn, düzeltme
+# gecikmesi p50 28-58 -> 78-82 sn oldu (docs/olcumler.md). Ölçülen daha iyi değerlere dönüldü.
+REFINE_IDLE_SEC = 2.0     # yeni parça gelmezse toplanan düzeltme grubu bu süreden sonra çözülür
+REFINE_FLUSH_SPAN = 29.5  # grup bu kadar sese ulaşınca beklemeden çözülür (Whisper penceresi)
 REFINE_JOIN_SEC = 60.0    # akış bitince bekleyen düzeltmeler için azami bekleme
 REFINE_JOIN_STOP_SEC = 3.0  # iptalde bekleme
 

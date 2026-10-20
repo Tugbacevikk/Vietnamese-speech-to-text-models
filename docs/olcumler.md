@@ -429,3 +429,28 @@ her parça ayrı bir 30 sn'lik Whisper penceresinde çözülüyordu; süre parç
   (3 dosya; birbirine kıyas, doğruluk değil). Paketleme çıktıyı eski koda göre %7,7-21 değiştirdi;
   hangisinin referansa daha yakın olduğu doğrulanmış metin olmadığı için bilinmiyor.
 - **Sınırlar:** tek bilgisayar, 3 dosya, tek iş. Sunucu donanımı, kısa mesajlar ve 4000 mesajlık ani yük ölçülmedi.
+
+## Türkçe canlı akış — yalnızca CPU, iki aşamalı (omnilingual anlık + medium düzeltme) (20 Ekim 2026)
+
+Makine: i5-11400H (6 çekirdek/12 iş parçacığı), 15,8 GB RAM, Windows 11. Ses: `parca_01.wav` (114,3 sn),
+`scripts/dis_servis_ornek.py ... --hiz 1 --parca 1` (gerçek zamanlı push). Ayarlar: `STREAM_TWO_STAGE=1`,
+`TR_MODEL=faster-whisper-medium`, `WHISPER_DEVICE=cpu`, `WHISPER_COMPUTE_TYPE=int8`, `WHISPER_BEAM_SIZE=5`.
+Ölçen: Antigravity (kendi çıktısı); ham JSON'lar kullanıcının bilgisayarında. Ben yalnızca raporu okudum,
+sayıları yeniden hesaplamadım.
+
+| Düzen | Boş RAM | Koşu | duvar_sn | Anlık toplam gecikme p50/p95/max (sn) | Düzeltme gecikmesi p50/max (sn) |
+| --- | --- | --- | --- | --- | --- |
+| Yalnız medium (iki aşamasız) | 2,88 GB | 1 | 374,1 | 91,4 / 104 / 109,8 | — |
+| Yalnız omnilingual | — | 1 | 120,3 | 3,2 / 5,2 / 6,5 | — |
+| İki aşamalı, grup bekleme 2 sn (35d709d) | 5,3–5,6 GB | 2 | 150,4 ve 143,2 | 6,1–7,0 / 9,6–18,6 / 11,6–20,4 | 27,8–58,6 / 37,8–83,4 |
+| İki aşamalı, grup bekleme 10 sn + 24 sn erken çözme (54de2e9) | 6,8–7,1 GB | 3 | 175,3–184,9 | 7,2–13,2 / 24,4–30,3 / 26,2–32,3 | 77,7–82,1 / 97,1–100,1 |
+
+Bulgular:
+- Yalnız medium canlıya yetişmiyor (akış süresi/ses süresi 3,27). İki aşamalı düzen gecikmeyi 91 sn'den 6–13 sn'ye indirdi.
+- Düzeltme çağrısı sayısı 6'ya (54de2e9) indi ama her şey kötüleşti. Önceki düzende bu sayaç yoktu, yani "18 pencere"
+  varsayımı ölçülmemişti. Sonuç: pencere sayısını azaltmak, medium'un CPU'yu omnilingual ile paylaştığı bu makinede
+  gecikmeyi azaltmıyor. Sabitler 2,0 / 29,5'e geri alındı.
+- Anlık metin, medium arka planda çalışırken yavaşlıyor (omnilingual tek başına 3,2 sn; iki aşamalıda 6–13 sn).
+  Neden: CPU çekişmesi. İş parçacığı sayısı denemesi yapılmadı.
+- Boş RAM koşular arasında 2,9 / 5,3–5,6 / 6,8–7,1 GB. Koşullar tam eşit değil; 2 sn düzeninin yeniden ölçümü gerekir.
+- Metin kalitesi: yalnızca 7 parça el ile karşılaştırıldı. WER ölçülmedi (insan doğrulamalı referans yok).
