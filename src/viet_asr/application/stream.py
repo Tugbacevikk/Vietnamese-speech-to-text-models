@@ -31,8 +31,8 @@ from viet_asr.domain import StreamSegment, VadSegment, Word
 
 from .ports import AsrEngine, AudioStream, StreamingVad
 
-# 10 sn bekleme + 24 sn erken çözme denendi: ölçümde duvar süresi 144-150 -> 175-185 sn, düzeltme
-# gecikmesi p50 28-58 -> 78-82 sn oldu (docs/olcumler.md). Ölçülen daha iyi değerlere dönüldü.
+# 2 sn / 10 sn bekleme ölçümde fark yaratmadı: medium canlıya yetişemediği için kuyruk hep dolu ve gruplar
+# bekleme süresinden değil birikmeden oluşuyor (docs/olcumler.md). Eski davranış korundu.
 REFINE_IDLE_SEC = 2.0     # yeni parça gelmezse toplanan düzeltme grubu bu süreden sonra çözülür
 REFINE_FLUSH_SPAN = 29.5  # grup bu kadar sese ulaşınca beklemeden çözülür (Whisper penceresi)
 REFINE_JOIN_SEC = 60.0    # akış bitince bekleyen düzeltmeler için azami bekleme

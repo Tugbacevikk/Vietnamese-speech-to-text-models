@@ -493,7 +493,7 @@ def test_iki_asamali_akis_duzeltme():
 
 
 def test_duzeltme_grubu_sabitleri_olculen_degerde():
-    # 10 sn bekleme / 24 sn erken çözme ölçümde kötüleştirdi; sabitler bilinçli olarak 2.0 / 29.5.
+    # 2 sn ve 10 sn bekleme ölçümde fark yaratmadı; eski davranış (2.0 / 29.5) korunur.
     from viet_asr.application import stream as st
     assert st.REFINE_IDLE_SEC == 2.0
     assert st.REFINE_FLUSH_SPAN == 29.5

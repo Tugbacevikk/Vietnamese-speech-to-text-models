@@ -447,10 +447,32 @@ sayıları yeniden hesaplamadım.
 
 Bulgular:
 - Yalnız medium canlıya yetişmiyor (akış süresi/ses süresi 3,27). İki aşamalı düzen gecikmeyi 91 sn'den 6–13 sn'ye indirdi.
-- Düzeltme çağrısı sayısı 6'ya (54de2e9) indi ama her şey kötüleşti. Önceki düzende bu sayaç yoktu, yani "18 pencere"
-  varsayımı ölçülmemişti. Sonuç: pencere sayısını azaltmak, medium'un CPU'yu omnilingual ile paylaştığı bu makinede
-  gecikmeyi azaltmıyor. Sabitler 2,0 / 29,5'e geri alındı.
+- DÜZELTME (aynı gün, sonraki ölçüm): 54de2e9'daki 10 sn bekleme ile 2 sn bekleme arasında fark ölçülemedi.
+  Aynı kodla 2 sn bekleme yeniden ölçüldü: duvar 161–181 sn, düzeltme p50 74–88 sn (aşağıdaki tablo, A düzeni);
+  yani yukarıdaki 143–150 sn / 28–58 sn değerleri yeniden üretilemedi (neden bilinmiyor: koşu değişkenliği
+  olabilir). Medium canlıya yetişmediği için kuyruk hep dolu; gruplar bekleme süresinden değil birikmeden oluşuyor
+  (bu bir yorum, doğrudan sınanmadı). Sabitler eski davranışa (2,0 / 29,5) çevrildi, sebep "kötüleştirdi" değildi.
 - Anlık metin, medium arka planda çalışırken yavaşlıyor (omnilingual tek başına 3,2 sn; iki aşamalıda 6–13 sn).
   Neden: CPU çekişmesi. İş parçacığı sayısı denemesi yapılmadı.
 - Boş RAM koşular arasında 2,9 / 5,3–5,6 / 6,8–7,1 GB. Koşullar tam eşit değil; 2 sn düzeninin yeniden ölçümü gerekir.
 - Metin kalitesi: yalnızca 7 parça el ile karşılaştırıldı. WER ölçülmedi (insan doğrulamalı referans yok).
+
+### Aynı düzen, medium iş parçacığı sayısı ve düzeltme modeli (20 Ekim 2026, 3 koşu/düzen)
+
+Ses ve ortam aynı (`parca_01.wav`, 114,3 sn, i5-11400H, boş RAM 6,2–7,6 GB). Ölçen: Antigravity; ham özet JSON'lar
+kullanıcının bilgisayarında, ben raporu okudum.
+
+| Düzen | duvar_sn | duzeltme_pencere | Anlık toplam gecikme p50 (sn) | Anlık p95 (sn) | Düzeltme gecikmesi p50 / max (sn) |
+| --- | --- | --- | --- | --- | --- |
+| A medium, 6 iş parçacığı | 161,0 / 163,6 / 181,4 | 5, 5, 5 | 8,4 / 8,5 / 16,4 | 20,8–29,6 | 74–88 / 94–106 |
+| B medium, `WHISPER_THREADS=2` | 174,0 / 175,1 / 188,7 | 5, 5, 3 | 2,4 / 2,6 / 8,5 | 4,0 / 4,3 / 11,5 | 84 / 84 / 147; max 105–160 |
+| C medium, `WHISPER_THREADS=3` | 170,5 / 190,7 / 194,0 | 5, 5, 4 | 3,8 / 6,2 / 11,1 | 6,4 / 16,3 / 16,7 | 84–124 / 105–137 |
+| D small, 6 iş parçacığı | 127,0 / 131,7 / 140,8 | 14, 15, 15 | 5,4 / 5,6 / 11,9 | 8,8 / 11,7 / 20,2 | 12,7 / 13,6 / 21,2; max 21–35 |
+
+Bulgular:
+- Medium düzeltmesi hiçbir iş parçacığı ayarında canlıya yetişmiyor; akış, ses bittikten ~45–80 sn sonra bitiyor.
+- `WHISPER_THREADS=2` anlık metni omnilingual tek başına hızına (p50 ~2,5 sn) getiriyor (2 koşuda; 3. koşu 8,5 sn),
+  bedeli düzeltmenin daha geç gelmesi. Koşular arası değişkenlik büyük (n=3).
+- Small düzeltmesi ses bittikten ~13–27 sn sonra bitiyor (akış süresi/ses 1,11–1,23); düzeltme gecikmesi p50 13–21 sn.
+  Small'ın metin kalitesi medium'a göre ölçülmedi.
+- `WHISPER_THREADS` genel bir ayar; dosya (toplu iş) hızına etkisi bu ölçümde bakılmadı.
