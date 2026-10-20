@@ -17,6 +17,7 @@ Windows'ta da çalışır (Linux'a özel modül yok).
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import os
@@ -33,8 +34,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from viet_asr.domain import AudioJob  # noqa: E402
 from viet_asr.infrastructure.memory_store import MemoryJobStore  # noqa: E402
-from viet_asr.interface.composition import build_pipeline, default_config  # noqa: E402
-from viet_asr.interface.settings import available_cpus  # noqa: E402
+from viet_asr.interface.composition import build_pipeline, config_from_settings  # noqa: E402
+from viet_asr.interface.settings import Settings, available_cpus  # noqa: E402
 
 
 def git_version() -> str:
@@ -72,15 +73,29 @@ def main() -> int:
     p.add_argument("--vi-model", default=None)
     p.add_argument("--tr-model", default=None)
     p.add_argument("--models-dir", default=str(ROOT / "models"))
-    p.add_argument("--threads", type=int, default=2, help="iş başına çekirdek (ONNX_THREADS)")
+    p.add_argument("--threads", type=int, default=None, help="iş başına çekirdek (boşsa ONNX_THREADS, varsayılan 2)")
+    p.add_argument("--whisper-device", choices=["auto", "cpu", "cuda"], default=None,
+                   help="Whisper cihazı (boşsa WHISPER_DEVICE); GPU'suz hedefi ölçmek için cpu")
+    p.add_argument("--whisper-compute-type", default=None, help="float16 / int8 / auto (boşsa WHISPER_COMPUTE_TYPE)")
+    p.add_argument("--whisper-beam-size", type=int, default=None, help="boşsa WHISPER_BEAM_SIZE")
+    p.add_argument("--whisper-threads", type=int, default=None, help="boşsa WHISPER_THREADS (auto: fiziksel çekirdek)")
     p.add_argument("--es-zamanli", type=int, default=1, help="aynı anda işlenen ses sayısı")
     p.add_argument("--tekrar", type=int, default=1, help="her dosya kaç kez işlensin")
     p.add_argument("--hedef", type=float, default=1.0, help="izin verilen en kötü oran")
     p.add_argument("--cikti", default="kabul_sonucu.json")
     a = p.parse_args()
 
-    models = {k: v for k, v in (("vi", a.vi_model), ("tr", a.tr_model)) if v}
-    cfg = default_config(a.models_dir, models=models, threads=a.threads)
+    # Ayarlar sunucuyla aynı kaynaktan (ortam değişkeni / .env); komut satırı ezer.
+    # (Eskiden WHISPER_* yok sayılıyor, ölçüm farkında olmadan GPU'da yapılabiliyordu.)
+    over = {"models_dir": a.models_dir, "vi_model": a.vi_model, "tr_model": a.tr_model,
+            "threads": a.threads, "whisper_device": a.whisper_device,
+            "whisper_compute_type": a.whisper_compute_type, "whisper_beam_size": a.whisper_beam_size,
+            "whisper_threads_raw": None if a.whisper_threads is None else str(a.whisper_threads)}
+    s = dataclasses.replace(Settings(), **{k: v for k, v in over.items() if v is not None})
+    cfg = config_from_settings(s)
+    a.threads = s.threads
+    print(f"ayarlar: whisper_device={s.whisper_device} compute={s.whisper_compute_type} "
+          f"beam={s.whisper_beam_size} whisper_threads={s.whisper_threads} onnx_threads={s.threads}")
     pipe = build_pipeline(cfg, MemoryJobStore())
     t0 = time.perf_counter()
     langs = [a.dil] if a.dil else list(cfg.languages)
@@ -115,7 +130,9 @@ def main() -> int:
     ozet = {"en_kotu_oran": worst, "hedef": a.hedef, "gecti": worst <= a.hedef,
             "toplam_ses_sn": round(total_audio, 1), "toplam_duvar_sn": round(wall, 1),
             "verim_ses_sn_per_sn": round(total_audio / wall, 2), "model_yukleme_sn": round(load_s, 1),
-            "es_zamanli": a.es_zamanli, "threads": a.threads}
+            "es_zamanli": a.es_zamanli, "threads": a.threads,
+            "whisper": {"device": s.whisper_device, "compute_type": s.whisper_compute_type,
+                        "beam_size": s.whisper_beam_size, "threads": s.whisper_threads}}
     out = {"tarih": datetime.now(timezone.utc).isoformat(timespec="seconds"), "git": git_version(),
            "donanim": hardware(), "modeller": {c: cfg.languages[c].asr_model.name for c in langs},
            "manifest_sha256": manifest_digest(Path(a.models_dir)), "ozet": ozet, "dosyalar": results}

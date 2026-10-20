@@ -383,3 +383,23 @@ parçalarda sessizlik yok denecek kadar az) ses imzası. Kümeleme 0,01-0,2 sn.
   diyalog yanlış cümle %11,7 -> %11,7, sentetik %10,9 -> %6,3. fine-tuning projesindeki "küme
   çökmesi" koruması burada gereksiz: 65 çok konuşmacılı kayıtta hiç çökme yok.
 
+
+## Türkçe hız — GPU'lu geliştirme bilgisayarı (20 Ekim 2026)
+
+Tuğba'nın bilgisayarı (i5-11400H, RTX 3050 Ti 4 GB), `viet_asr.interface.cli --lang tr`, faster-whisper
+medium, CUDA FP16 (ayar verilmediği için `auto` GPU'yu seçti). Ölçümü kullanıcının yardımcısı yaptı;
+JSON dosyaları kullanıcıda, bu depoda yok. Her dosya bir kez çalıştı.
+
+| Dosya | Ses (sn) | Hat süresi (sn) | Oran | Satır |
+|---|---|---|---|---|
+| parca_01 | 114,3 | 22,4 | 0,196 | 14 |
+| parca_02 | 101,1 | 20,4 | 0,201 | 13 |
+| diyalog_parca_01 | 120,2 | 18,4 | 0,153 | 16 |
+| diyalog_parca_02 | 115,8 | 16,0 | 0,138 | 7 |
+
+- Hiçbir dosyada 10 sn'den uzun boşluk yok. Aşama süreleri (parca_01): Whisper 17,7 sn, konuşmacı
+  ayırma 4,0 sn, VAD 0,4 sn.
+- **Bu GPU sonucudur; GPU'suz hedefin kanıtı değil.** CPU ölçümü için `--whisper-device cpu`
+  (ya da `WHISPER_DEVICE=cpu`) ile `benchmarks/kabul_testi.py` ya da CLI. 20 Ekim'e kadar
+  CLI ve kabul testi `WHISPER_*` ayarlarını yok sayıyordu; düzeltildi, eski ölçümler bu yüzden `auto` idi.
+- Doğruluk (WER) ölçülmedi: doğrulanmış referans metin yok.

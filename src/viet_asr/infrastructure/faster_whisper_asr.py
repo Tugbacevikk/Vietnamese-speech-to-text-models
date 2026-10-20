@@ -44,8 +44,6 @@ def _cuda_ok() -> bool:
             candidates = [
                 Path(os.environ.get("CUDA_DIR", "")) if os.environ.get("CUDA_DIR") else None,
                 Path(os.environ.get("CUDA_DLL_DIR", "")) if os.environ.get("CUDA_DLL_DIR") else None,
-                Path("D:/sesAnalizi_venv/Lib/site-packages/torch/lib"),
-                Path(os.environ.get("USERPROFILE", "")) / "AppData" / "Local" / "Programs" / "Ollama" / "lib" / "ollama" / "cuda_v12",
                 Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin",
                 Path(sys.prefix) / "nvidia" / "cublas" / "bin",
                 Path(os.environ.get("CUDA_PATH", "")) / "bin" if os.environ.get("CUDA_PATH") else None,
@@ -58,17 +56,19 @@ def _cuda_ok() -> bool:
                     if hasattr(os, "add_dll_directory"):
                         try:
                             os.add_dll_directory(s)
-                        except Exception:
-                            pass
+                        except OSError as e:
+                            log.debug("DLL klasörü eklenemedi (%s): %s", s, e)
             try:
                 ctypes.CDLL("cublas64_12.dll")
-            except Exception:
+            except OSError:
                 try:
                     ctypes.CDLL("cublas64_11.dll")
-                except Exception:
+                except OSError as e:
+                    log.debug("cublas DLL'i yüklenemedi: %s", e)
                     return False
         return True
-    except Exception:
+    except Exception as e:  # ctranslate2 yok / CUDA yok: CPU'ya düşülür, nedeni hata ayıklamada görünür
+        log.debug("CUDA kullanılamıyor: %s", e)
         return False
 
 
@@ -114,7 +114,7 @@ class FasterWhisperAsr:
                     f"{model.folder}/model.bin yok: python scripts/download_models.py --tr {model.name}")
 
             dev = getattr(self.wp, "device", "auto")
-            cuda_ok = _cuda_ok()
+            cuda_ok = dev != "cpu" and _cuda_ok()  # cpu istenmişse CUDA'ya hiç bakılmaz (PATH'e dokunulmaz)
             if dev == "auto":
                 dev = "cuda" if cuda_ok else "cpu"
             elif dev == "cuda" and not cuda_ok:
