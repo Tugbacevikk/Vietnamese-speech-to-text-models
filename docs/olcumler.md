@@ -403,3 +403,29 @@ JSON dosyaları kullanıcıda, bu depoda yok. Her dosya bir kez çalıştı.
   (ya da `WHISPER_DEVICE=cpu`) ile `benchmarks/kabul_testi.py` ya da CLI. 20 Ekim'e kadar
   CLI ve kabul testi `WHISPER_*` ayarlarını yok sayıyordu; düzeltildi, eski ölçümler bu yüzden `auto` idi.
 - Doğruluk (WER) ölçülmedi: doğrulanmış referans metin yok.
+
+## Türkçe hız — yalnızca CPU, Whisper paketleme düzeltmesi (20 Ekim 2026)
+
+Tuğba'nın bilgisayarı (i5-11400H, 6 çekirdek, 16 GB RAM; ölçümde boş RAM 5-6 GB), `WHISPER_DEVICE=cpu`,
+faster-whisper medium int8 beam 5, `whisper_threads=6`. Ölçümü kullanıcının yardımcısı yaptı; JSON'lar
+kullanıcıda. Chrome ve Docker kapalıydı. Dosyalar: parca_01, diyalog_parca_01, diyalog_parca_02 (~2 dk).
+
+**Neden yavaştı:** VAD 2 dk'lık sesi 19 (diyalog_parca_01) ve 39 (parca_01) küçük parçaya bölüyordu ve
+her parça ayrı bir 30 sn'lik Whisper penceresinde çözülüyordu; süre parça sayısıyla orantılıydı
+(39/19 = 2,05; ölçülen oran 2,86/1,39 = 2,06). Düzeltme: yakın parçalar tek pencerede paketlenir
+(`FasterWhisperAsr.pack_clips`; en fazla 29,5 sn, aradaki boşluk en fazla 3 sn).
+
+| Ölçüm (CPU medium) | Önce | Sonra |
+|---|---|---|
+| parca_01, CLI, soğuk (model her çalıştırmada yüklenir) | 2,86 | 1,21 / 0,80 / 0,70 |
+| diyalog_parca_01, CLI | 1,39 | 0,58 |
+| Isınmış model, `kabul_testi.py --tekrar 3`, 9 çalıştırma | – | 0,455-0,659 (en kötü 0,659) |
+
+- Isınmış çalıştırmalar tekrar boyunca düştü (parca_01: 0,66 → 0,61 → 0,51); kararlı değer daha düşük olabilir.
+- Soğuk ilk çalıştırma 1,21 oldu; nedeni ölçülmedi. Sunucuda modeli açılışta yükleyip ısıtın (`WARMUP_LANGS`).
+- GPU medium: 0,09-0,10 (önce 0,14-0,20). Small, CPU, beam 1: 0,19-0,23.
+- Medium, CPU, beam 1: iki dosyada da `0xC0000005` ile çöktü (paketlemeden önce); yeniden denenmedi, kullanmayın.
+- Metin: CPU ile GPU çıktısı arasındaki kelime farkı paketlemeden sonra %0,5-6,0, önce %6,4-14,1
+  (3 dosya; birbirine kıyas, doğruluk değil). Paketleme çıktıyı eski koda göre %7,7-21 değiştirdi;
+  hangisinin referansa daha yakın olduğu doğrulanmış metin olmadığı için bilinmiyor.
+- **Sınırlar:** tek bilgisayar, 3 dosya, tek iş. Sunucu donanımı, kısa mesajlar ve 4000 mesajlık ani yük ölçülmedi.

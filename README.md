@@ -38,10 +38,13 @@ ses ─► 16 kHz mono ─► VAD (Silero) ─► dil kararı ─► ASR (dile g
 - Vietnamca, VietMed 50 dosya: WER %10,1, CER %7,3. Dil tespiti 85/85 doğru.
 - Konuşmacı ayırma, 9 gerçek görüşme: DER %10,2 (sayı istekte verilirse %5,2).
 - Hız: 3 dk'lık diyalog 2 çekirdekte 28 sn (oran 0,15). 1 dk ses ≈ 9 sn.
-- Türkçe faster-whisper medium'un hızı bu ortamda ölçülemedi (model indirilemedi).
-  Kendi bilgisayarında `python benchmarks/kabul_testi.py --dil tr kayit.wav` ile ölç.
+- Türkçe faster-whisper medium, **yalnızca CPU** (int8, beam 5, 6 çekirdek, Tuğba'nın i5-11400H bilgisayarı):
+  ısınmış modelle 9 ölçümde oran 0,46-0,66 (hedef <= 1). Aynı bilgisayarda GPU ile 0,09-0,10.
+  Ölçüm 3 dosya (~2 dk'lık), tek iş; sunucu donanımında ve kısa mesajlarda yeniden ölçülmeli
+  ([docs/olcumler.md](docs/olcumler.md)). Türkçe doğruluk (WER) henüz ölçülmedi.
+  Kendi makinende: `python benchmarks/kabul_testi.py --dil tr --whisper-device cpu --tekrar 3 kayit.wav`.
   Oran 1'i aşarsa `.env` içinde önce `TR_MODEL=faster-whisper-small`, o da aşarsa
-  `TR_MODEL=omnilingual-300m` (Türkçe 2 dk'lık kayıtlarda oran 0,27, 2 çekirdek).
+  `TR_MODEL=omnilingual-300m`.
 
 ### Dil seçimi
 
