@@ -272,17 +272,36 @@ class FasterWhisperAsr:
             words = [Word(text=w, start=0.0, end=0.0) for w in " ".join(parts).split()]
             return " ".join(w.text for w in drop_repeats(words, wp.max_repeat))
 
+    # Whisper her pencereyi 30 sn'lik işler: kısa parça da tam pencere kadar sürer. Bu yüzden yakın
+    # konuşma parçaları tek pencerede paketlenir (kütüphanenin kendi VAD yolu da böyle yapar).
+    # Ölçüm: 2 dk'lık sesin VAD'i 19-39 parçaya bölüyordu, medium CPU'da süre parça sayısıyla orantılıydı.
+    PACK_MAX_SEC = 29.5   # tek pencerede en fazla (30 sn'nin biraz altı: sınırda kesilmesin)
+    PACK_MAX_GAP = 3.0    # pencere içinde iki parça arası en fazla sessizlik (sıfırla doldurulur)
+
+    @classmethod
+    def pack_clips(cls, spans: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        """(başlangıç, bitiş) aralıklarını, her grup PACK_MAX_SEC'i ve aradaki boşluk PACK_MAX_GAP'i
+        aşmayacak şekilde gruplar. Sıra korunur, hiçbir aralık bölünmez ya da atılmaz."""
+        out: list[list[float]] = []
+        for a, b in sorted(spans):
+            if out and a - out[-1][1] <= cls.PACK_MAX_GAP and b - out[-1][0] <= cls.PACK_MAX_SEC:
+                out[-1][1] = max(out[-1][1], b)
+            else:
+                out.append([a, b])
+        return [(a, b) for a, b in out]
+
     def _batched(self, segments: list[VadSegment], fast: bool = False, opts: dict | None = None):
-        """Parçalar asıl zamanlarıyla tek bir diziye yerleştirilir; clip_timestamps ile
-        yalnızca onlar çözülür ve kelime zamanları doğrudan mutlak gelir."""
+        """Parçalar asıl zamanlarıyla tek bir diziye yerleştirilir (aralar sessizlik); yakın parçalar
+        tek pencerede paketlenip clip_timestamps ile çözülür, kelime zamanları doğrudan mutlak gelir."""
         end = max(s.end for s in segments)
         audio = np.zeros(int(np.ceil(end * SR)) + 1, dtype=np.float32)
-        clips = []
+        spans = []
         for s in segments:
             i = int(round(s.start * SR))
             n = min(len(s.samples), len(audio) - i)
             audio[i:i + n] = s.samples[:n]
-            clips.append({"start": i / SR, "end": (i + n) / SR})
+            spans.append((i / SR, (i + n) / SR))
+        clips = [{"start": a, "end": b} for a, b in self.pack_clips(spans)]
         result, _ = self.batched.transcribe(audio, clip_timestamps=clips,
                                             batch_size=self.wp.batch_size, **(opts or self._options(fast)))
         return [(r.text, list(r.words or [])) for r in result]  # list(): hatalar burada çıksın

@@ -62,7 +62,7 @@ def test_toplu_cozme_mutlak_zaman_ve_suzgecler():
     assert [x.text for x in words] == ["merhaba", "nasılsınız", "evet", "evet"]
     assert words[0].start == 1.0 and words[1].end == 2.1
     audio, clips, bs, opt = b.calls[0]
-    assert clips == [{"start": 1.0, "end": 2.2}, {"start": 5.0, "end": 7.0}] and bs == 8
+    assert clips == [{"start": 1.0, "end": 7.0}] and bs == 8   # 2,8 sn boşluk: tek pencerede paketlenir
     assert audio[int(1.5 * 16000)] == pytest.approx(0.1) and audio[int(3 * 16000)] == 0  # boşluk sessiz
     assert opt["language"] == "tr" and opt["word_timestamps"] is True
     assert opt["condition_on_previous_text"] is False and opt["log_prob_threshold"] == -1.0
@@ -113,7 +113,9 @@ def test_guvenlik_agi_tek_toplu_cozum_ve_sinirli_tekrar():
     b, m = RescueBatched(), FakeModel()
     segs = [seg(1.0, 3.0)] + [seg(10.0 + 5 * i, 12.0 + 5 * i + 0.1 * i) for i in range(6)]
     words = engine(b, m).rescue(segs)
-    assert len(b.calls) == 1 and len(b.calls[0][0]) == 7         # tüm aralıklar tek çağrıda
+    clips = b.calls[0][0]
+    assert len(b.calls) == 1 and len(clips) < 7                  # tüm aralıklar tek çağrıda (yakınlar paketli)
+    assert all(any(c["start"] <= s.start and s.end <= c["end"] + 1e-6 for c in clips) for s in segs)  # hiçbiri dışarıda kalmaz
     opt = b.calls[0][1]
     assert opt["temperature"] == 0.0 and opt["no_speech_threshold"] == 0.8
     # boş kalan 6 aralığın en uzun 4'ü tek tek, düşük maliyetle yeniden denenir
@@ -127,3 +129,22 @@ def test_guvenlik_agi_tekrar_ayarlari():
     o = e._options(rescue=True, retry=True)
     assert o["temperature"] == (0.2, 0.4) and o["best_of"] == 1 and o["beam_size"] == 1
     assert engine(None)._options(rescue=True)["beam_size"] == 5
+
+
+def test_yakin_parcalar_tek_pencerede_paketlenir():
+    """Whisper her pencereyi 30 sn'lik işler: yakın parçalar birleşmeli, uzak olanlar ve sınır aşanlar ayrı."""
+    p = FasterWhisperAsr.pack_clips
+    assert p([]) == []
+    assert p([(0, 2), (2.5, 5), (6, 9)]) == [(0, 9)]                 # yakın: tek pencere
+    assert p([(0, 2), (6, 8)]) == [(0, 2), (6, 8)]                   # boşluk 4 sn > 3 sn: ayrı
+    assert p([(0, 10), (10.5, 20), (20.5, 30)]) == [(0, 20), (20.5, 30)]   # 30 sn'yi aşarsa yeni pencere
+    assert p([(0, 40)]) == [(0, 40)]                                 # tek uzun parça bölünmez
+    assert p([(6, 9), (0, 2), (2.5, 5)]) == [(0, 9)]                 # sıra karışık gelse de
+
+
+def test_toplu_cozum_paketlenmis_pencereleri_kullanir_kelimeler_kaybolmaz():
+    batched = FakeBatched()
+    asr = engine(batched=batched)
+    asr.transcribe([seg(1.0, 3.0), seg(3.5, 6.0), seg(40.0, 42.0)])
+    clips = batched.calls[0][1]
+    assert clips == [{"start": 1.0, "end": 6.0}, {"start": 40.0, "end": 42.0}]   # 3 parça -> 2 pencere
