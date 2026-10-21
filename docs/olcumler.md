@@ -476,3 +476,41 @@ Bulgular:
 - Small düzeltmesi ses bittikten ~13–27 sn sonra bitiyor (akış süresi/ses 1,11–1,23); düzeltme gecikmesi p50 13–21 sn.
   Small'ın metin kalitesi medium'a göre ölçülmedi.
 - `WHISPER_THREADS` genel bir ayar; dosya (toplu iş) hızına etkisi bu ölçümde bakılmadı.
+
+## Türkçe dosya hızı — CPU ayar taraması (21 Ekim 2026)
+
+Makine: i5-11400H (6 fiziksel/12 mantıksal çekirdek), 15,8 GB RAM, Windows 11, yalnızca CPU. Model:
+`faster-whisper-medium`, int8. Ses: `parca_01.wav` (114,3 sn) + `parca_02.wav` (101,1 sn).
+Komut: `benchmarks/kabul_testi.py ... --dil tr --whisper-device cpu`. Ölçen: Antigravity; ben raporu okudum,
+ham JSON'ları görmedim. Boş RAM koşulara göre 3,4–7,7 GB değişti.
+
+**1. Tek tek ayar (parça başına 3 tekrar, toplam oran = işlem süresi / ses süresi):**
+
+| Ayar | Toplam oran | Metin farkı (taban: beam 5, batch 8, 6 iş parçacığı) |
+| --- | --- | --- |
+| Taban | 0,688 | — |
+| batch 4 / batch 16 | 0,797 / 0,755 | %0,00 |
+| beam 2 / beam 3 | 0,577 / 0,677 | %3,0 / %0,9 |
+| 4 / 12 iş parçacığı | 0,637 / 0,578 | %0,00 |
+| 2 eşzamanlı iş (3'er iş parçacığı) | toplam 0,592; tek tek 1,09–1,25 | %0,00 |
+| 3 eşzamanlı iş (2'şer iş parçacığı) | toplam 0,868; tek tek 2,1–3,0 | %0,00 |
+
+**2. Karışık sıralı (ABAB düzeni, her ayar 5 tur, aynı oturum):**
+
+| Ayar | Koşu oranları (toplam duvar / ses) | Ortalama | En kötü tek dosya |
+| --- | --- | --- | --- |
+| X: 6 iş parçacığı, beam 5 | 0,703 0,669 0,643 0,612 0,823 | 0,690 | 0,846 |
+| Y: 12 iş parçacığı, beam 5 | 0,686 0,752 0,867 0,792 0,777 | 0,775 | 0,892 |
+| Z: 12 iş parçacığı, beam 2 | 0,607 0,633 0,683 0,738 0,584 | 0,649 | 0,826 |
+
+Bulgular:
+- 12 iş parçacığı bu makinede **daha hızlı değil**: tek tek taramadaki %16 kazanç koşu gürültüsüydü (karışık
+  sıralı ölçümde Y, X'ten ortalama %12 yavaş). `WHISPER_THREADS=auto` (fiziksel çekirdek) kalıyor.
+- Aynı 12 iş parçacığında beam 2, beam 5'ten 5 turun 5'inde hızlıydı (Y−Z: +0,05 ile +0,19, ortalama %16).
+  Beam 2'nin 6 iş parçacığıyla ölçümü yok. X'e göre Z'nin farkı (%6) koşu gürültüsünün içinde.
+- Beam 2 metni %3 değiştiriyor; hangisinin daha doğru olduğu bilinmiyor (referans metin yok, WER ölçülmedi).
+- Eşzamanlı iş: toplam verim biraz artıyor ama tek tek oran 1'i geçiyor; "her ses kendi süresinde" şartını bozuyor.
+- Koşu gürültüsü büyük: aynı ayarda tek koşu oranı 0,61–0,82. Tüm 15 karışık koşuda tek dosya oranı < 1
+  (en kötü 0,892).
+- Rapordaki "Duvar Süresi" sütunu (ör. 164,7 sn), JSON'daki `toplam_duvar_sn` (151,5 sn) ile uyuşmuyor; oranlar
+  JSON'a göre hesaplanmış görünüyor. Fark nedeni bilinmiyor.
