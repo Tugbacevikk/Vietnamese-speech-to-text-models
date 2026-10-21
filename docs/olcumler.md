@@ -559,3 +559,36 @@ kullanıcıda, ben raporu okudum. Ölçüm öncesi işlemci %8–26 idi (hedef <
 - Ölçülmedi: birden çok eşzamanlı akış, 8 kHz telefon sesi, düzeltme metninin doğruluğu (WER).
 - Aritmetik tahmin (ölçüm değil): tek bir Whisper çözümü aynı anda çalıştığı ve medium ~0,46 oranında
   olduğu için medium düzeltmesi en fazla ~2 eşzamanlı akışa yeter; small (0,19–0,23) ~4–5'e.
+
+## Türkçe canlı akış — eşzamanlı akış sayısı (21 Ekim 2026)
+
+Aynı makine ve koşullar (i5-11400H, prizde, "Yüksek performans", ağır programlar kapalı; Antigravity IDE
+BelowNormal önceliğe çekildi; başlangıç işlemci ortalaması %8,5). Her akış farklı dosya (`parca_01..04`: 114,3 /
+101,1 / 106,2 / 104,1 sn), hepsi aynı anda başlatıldı, `--hiz 1 --parca 3`, `STREAM_MAX_SESSIONS=8`, beam 5, int8,
+`WHISPER_THREADS=auto`. 12 düzen/akış kombinasyonu × 2 tur, karışık sıra. Ölçen: Antigravity; ham JSON'lar
+kullanıcıda, ben raporu okudum. Aşağıdaki "bitiş" değerleri, en uzun dosyanın (parca_01) turun duvar süresine göre
+hesaplanan bitişidir; raporda kısa dosyaların "bitişi" tur duvar süresinden hesaplanmış olduğu için şişkin (üst sınır).
+
+| Düzen | Akış | Bitiş (parca_01, sesten sonra sn) | Anlık gecikme p50 (ort.) | Anlık p95 / max | Düzeltme gecikmesi p50 (ort.) | Düzeltme max (sn) | Tur işlemci |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A Omnilingual | 1 | 4,9–5,2 | 1,0 | 3,5 / 3,7 | — | — | %15 |
+| A | 2 | 5,0–5,3 | 1,3 | 3,1 / 4,2 | — | — | %19 |
+| A | 3 | 5,6–6,0 | 2,0 | 3,6 / 4,7 | — | — | %41 |
+| A | 4 | 5,4–6,1 | 2,2 | 3,7 / 4,9 | — | — | %38 |
+| B +medium | 1 | 10,9–11,3 | 1,7 | 3,6 / 4,1 | 25,5 | 56 | %71 |
+| B | 2 | 54,9–56,6 | 1,9 | 3,5 / 4,3 | 60 (35–86) | 105 | %66 |
+| B | 3 | 65,5 | 2,6 | 3,8 / 4,6 | 91 | 129 | %71 |
+| B | 4 | 65,6–66,2 | 3,6 | 5,7 / 8,0 | 119 | 172 | %79 |
+| D +small | 1 | 6,4 | 1,2 | 3,5 / 3,7 | 6,8 | 51 | %39 |
+| D | 2 | 15,3–16,2 | 2,1 | 3,7 / 4,6 | 17 (7–32) | 58 | %77 |
+| D | 3 | 24,2–30,4 | 2,5 | 3,8 / 4,6 | 27 (8–48) | 77 | %76 |
+| D | 4 | 17,8–60,2 | 3,1 | 4,4 / 5,6 | 33 (22–52) | 76 | %82 |
+
+- **Yalnız Omnilingual 4 eşzamanlı akışı rahat taşıyor:** anlık gecikme p95 ≤3,7 sn, max ≤4,9 sn, ortalama işlemci %38.
+  4'ün üstü ölçülmedi.
+- **Medium düzeltmesi yalnızca tek akışta güvenilir.** 2 akışta düzeltme gecikmesi ~35–86 sn, 3–4 akışta 90–120 sn;
+  4 akışta anlık metin de bozuluyor (max 8 sn). Test sesleri ~100–114 sn; daha uzun görüşmelerde birikimin büyümesi
+  beklenir (ölçülmedi).
+- **Small düzeltmesi 2–3 akışta kullanılabilir ama kararsız:** aynı kombinasyonda iki tur arasında düzeltme p50'si
+  7 → 22 sn, 8 → 48 sn gibi büyük sapma var. Small'ın metin doğruluğu ölçülmedi.
+- Bu tablo yalnızca ses uzunluğu 100–114 sn olan akışları kapsar; tek ses türü (16 kHz, podcast), 8 kHz telefon sesi değil.
