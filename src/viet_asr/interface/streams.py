@@ -242,10 +242,14 @@ class StreamManager:
                  languages: list[str] | None = None, max_sessions: int = 8, allow_files: bool = False,
                  max_speech: float = 10.0, vad_factory=None, rtp_ports: tuple[int, int] | None = None,
                  public_host: str = "", notify_secret: str = "", notify_post=None, max_backlog: float = 30.0,
-                 fast_engines=None, stream_two_stage: bool = False):
+                 fast_engines=None, stream_two_stage: bool = False, two_stage_max: int = 1):
         self.engines, self.vad_cfg, self.submit = engines, vad_cfg, submit
         self.fast_engines = fast_engines
         self.stream_two_stage = stream_two_stage
+        # Aynı anda Whisper düzeltmesi alan akış sayısı üst sınırı (0 = sınırsız). Medium düzeltmesi CPU'da
+        # yalnızca tek akışta güvenilir (docs/olcumler.md); diğer akışlar yalnız hızlı modelle devam eder.
+        self.two_stage_max = two_stage_max
+        self._two_stage_active = 0
         self.dir = Path(data_dir) / "akislar"
         self.dir.mkdir(parents=True, exist_ok=True)
         self.languages = languages or list(engines)
@@ -280,7 +284,7 @@ class StreamManager:
                    max_speech=s.stream_max_speech, rtp_ports=port_range(s.stream_rtp_ports),
                    public_host=s.stream_public_host, notify_secret=s.webhook_secret,
                    max_backlog=s.stream_max_backlog, fast_engines=fast_engines,
-                   stream_two_stage=two_stage)
+                   stream_two_stage=two_stage, two_stage_max=getattr(s, "stream_two_stage_max", 1))
 
     def active(self) -> int:
         return sum(1 for s in self.sessions.values() if s.durum == "dinleniyor")
@@ -389,12 +393,22 @@ class StreamManager:
                 s.ara = d
                 self._publish(s, {"tur": "parca", **d})
 
+        slot = False  # iki aşamalı düzeltme kotasından yer aldı mı
+        kota_doldu = False
         try:
             two_stage = (s.spec.iki_asama if s.spec.iki_asama is not None else self.stream_two_stage) and \
                         self.fast_engines is not None and s.spec.dil in self.fast_engines
             if two_stage:
                 asr = self.fast_engines[s.spec.dil]
-                refiner = self.engines[s.spec.dil]
+                with self._lock:
+                    if self.two_stage_max <= 0 or self._two_stage_active < self.two_stage_max:
+                        self._two_stage_active += 1
+                        slot = True
+                if slot:
+                    refiner = self.engines[s.spec.dil]
+                else:  # kota dolu: Whisper düzeltmesi yok, yalnız hızlı model (CPU'yu boğmasın)
+                    refiner, kota_doldu = None, True
+                    log.info("akış %s: iki aşamalı kota dolu (%d), yalnız hızlı modelle devam", s.id, self.two_stage_max)
             else:
                 asr = self.engines[s.spec.dil]
                 refiner = None
@@ -409,6 +423,7 @@ class StreamManager:
                       "toplam_gecikme_p95_sn": round(sm.p95_toplam_gecikme, 2),
                       "toplam_gecikme_max_sn": round(sm.max_toplam_gecikme, 2),
                       "duzeltmeler": sm.duzeltmeler, "duzeltme_pencere": sm.duzeltme_pencere,
+                      "iki_asama": refiner is not None, "iki_asama_kota_doldu": kota_doldu,
                       "duvar_sn": round(time.monotonic() - t0, 1),
                       **({("push" if isinstance(s.source, PushSource) else "rtp"): dict(s.source.stats)}
                          if hasattr(s.source, "stats") else {})}
@@ -418,6 +433,9 @@ class StreamManager:
             s.durum, s.hata = "hata", f"{type(e).__name__}: {e}"
         finally:
             wav.close()
+            if slot:
+                with self._lock:
+                    self._two_stage_active -= 1
         dur = (s.ozet or {}).get("sure_sn", 0)
         if s.spec.son_analiz and self.submit is not None and dur >= 1.0:
             try:

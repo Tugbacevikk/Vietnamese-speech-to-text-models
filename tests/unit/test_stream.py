@@ -558,3 +558,48 @@ def test_stream_manager_iki_asamali_websocket(tmp_path):
     assert session_data["parcalar"][0]["text"] == "Düzeltilmiş metin."
     assert session_data["ozet"]["duzeltmeler"] == 2
     assert "toplam_gecikme_p95_sn" in session_data["ozet"]
+
+
+def test_iki_asama_kotasi_ikinci_akisi_hizli_modele_dusurur(tmp_path):
+    from fastapi.testclient import TestClient
+    from viet_asr.infrastructure.memory_store import MemoryJobStore
+    from viet_asr.interface.api import create_app
+    from viet_asr.interface.settings import Settings
+    from viet_asr.interface.streams import StreamManager
+
+    class DummyQ:
+        def enqueue_detection(self, j): pass
+        def enqueue_transcription(self, j, lang): pass
+
+    s = Settings(data_dir=str(tmp_path), languages=["tr"], enable_streams=True, stream_two_stage=True)
+    mgr = StreamManager({"tr": FakeRefinerAsr()}, None, tmp_path, submit=None, vad_factory=FakeVad,
+                        fast_engines={"tr": FakeAsr()}, stream_two_stage=True, two_stage_max=1)
+    c = TestClient(create_app(MemoryJobStore(), DummyQ(), s, streams=mgr))
+
+    def ac():
+        r = c.post("/streams", json={"kaynak": "push", "dil": "tr", "iki_asama": True})
+        assert r.status_code == 201
+        return r.json()["id"]
+
+    def bitir(sid):
+        c.post(f"/streams/{sid}/audio?seq=0", content=_pcm16(1.0))
+        c.post(f"/streams/{sid}/audio?seq=1", content=_pcm16(1.0))
+        c.post(f"/streams/{sid}/audio?son=true", content=b"")
+        for _ in range(100):
+            d = c.get(f"/streams/{sid}").json()
+            if d["durum"] != "dinleniyor":
+                return d
+            time.sleep(0.05)
+        raise AssertionError("akış bitmedi")
+
+    a = ac()                    # kotayı tutar (henüz ses gelmedi, açık)
+    time.sleep(0.3)
+    b = ac()                    # kota dolu: yalnız hızlı model
+    db = bitir(b)
+    assert db["ozet"]["duzeltmeler"] == 0
+    assert db["ozet"]["iki_asama"] is False and db["ozet"]["iki_asama_kota_doldu"] is True
+    assert db["parca_sayisi"] == 2  # yine de anlık metin geldi
+
+    da = bitir(a)
+    assert da["ozet"]["duzeltmeler"] == 2 and da["ozet"]["iki_asama"] is True
+    assert mgr._two_stage_active == 0  # kota geri verildi

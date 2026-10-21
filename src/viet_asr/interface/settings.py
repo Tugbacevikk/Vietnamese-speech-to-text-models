@@ -154,6 +154,7 @@ class Settings:
         "STREAM_TWO_STAGE", "0").lower() in ("1", "true", "evet"))
     stream_fast_model: str = field(default_factory=lambda: os.environ.get(
         "STREAM_FAST_MODEL", "omnilingual-300m"))
+    stream_two_stage_max: int = field(default_factory=lambda: int(os.environ.get("STREAM_TWO_STAGE_MAX", "1")))
     # worker açılırken önceden yüklenecek diller (ilk işte gecikme olmasın)
     warmup: list[str] = field(default_factory=lambda: _list(os.environ.get("WARMUP_LANGS", "")))
     # dil tespiti worker'ı: Whisper-small'ı da baştan yükle (yoksa ilk zor seste ~5-15 sn gecikme)
