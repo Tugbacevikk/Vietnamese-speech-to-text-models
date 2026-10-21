@@ -398,8 +398,16 @@ class StreamManager:
         try:
             two_stage = (s.spec.iki_asama if s.spec.iki_asama is not None else self.stream_two_stage) and \
                         self.fast_engines is not None and s.spec.dil in self.fast_engines
+            fast_asr = None
             if two_stage:
-                asr = self.fast_engines[s.spec.dil]
+                try:  # hızlı model yüklenemezse (indirilmemiş, bozuk) iki aşamasız, eski davranışla devam et
+                    fast_asr = self.fast_engines[s.spec.dil]
+                except Exception as e:
+                    log.warning("akış %s: hızlı model yüklenemedi (%s: %s), iki aşamasız devam", s.id,
+                                type(e).__name__, e)
+                    two_stage = False
+            if two_stage:
+                asr = fast_asr
                 with self._lock:
                     if self.two_stage_max <= 0 or self._two_stage_active < self.two_stage_max:
                         self._two_stage_active += 1

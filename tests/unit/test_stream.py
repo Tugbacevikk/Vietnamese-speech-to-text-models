@@ -603,3 +603,35 @@ def test_iki_asama_kotasi_ikinci_akisi_hizli_modele_dusurur(tmp_path):
     da = bitir(a)
     assert da["ozet"]["duzeltmeler"] == 2 and da["ozet"]["iki_asama"] is True
     assert mgr._two_stage_active == 0  # kota geri verildi
+
+
+def test_iki_asama_hizli_model_yoksa_eski_davranisa_doner(tmp_path):
+    from fastapi.testclient import TestClient
+    from viet_asr.infrastructure.memory_store import MemoryJobStore
+    from viet_asr.interface.api import create_app
+    from viet_asr.interface.settings import Settings
+    from viet_asr.interface.streams import StreamManager
+
+    class DummyQ:
+        def enqueue_detection(self, j): pass
+        def enqueue_transcription(self, j, lang): pass
+
+    class Bozuk(dict):
+        def __getitem__(self, k):
+            raise FileNotFoundError("omnilingual-300m modeli yok")
+
+    s = Settings(data_dir=str(tmp_path), languages=["tr"], enable_streams=True, stream_two_stage=True)
+    mgr = StreamManager({"tr": FakeAsr()}, None, tmp_path, submit=None, vad_factory=FakeVad,
+                        fast_engines=Bozuk(tr=1), stream_two_stage=True)
+    c = TestClient(create_app(MemoryJobStore(), DummyQ(), s, streams=mgr))
+    sid = c.post("/streams", json={"kaynak": "push", "dil": "tr", "iki_asama": True}).json()["id"]
+    c.post(f"/streams/{sid}/audio?seq=0", content=_pcm16(1.0))
+    c.post(f"/streams/{sid}/audio?seq=1", content=_pcm16(1.0))
+    c.post(f"/streams/{sid}/audio?son=true", content=b"")
+    for _ in range(100):
+        d = c.get(f"/streams/{sid}").json()
+        if d["durum"] != "dinleniyor":
+            break
+        time.sleep(0.05)
+    assert d["durum"] == "bitti" and d["hata"] is None
+    assert d["ozet"]["iki_asama"] is False and d["parca_sayisi"] == 2
