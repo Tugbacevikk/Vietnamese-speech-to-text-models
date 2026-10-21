@@ -514,3 +514,25 @@ Bulgular:
   (en kötü 0,892).
 - Rapordaki "Duvar Süresi" sütunu (ör. 164,7 sn), JSON'daki `toplam_duvar_sn` (151,5 sn) ile uyuşmuyor; oranlar
   JSON'a göre hesaplanmış görünüyor. Fark nedeni bilinmiyor.
+
+## Türkçe dosya hızı — temiz koşullarda yeniden ölçüm (21 Ekim 2026)
+
+Aynı makine, ses ve komut (`kabul_testi.py ... --dil tr --whisper-device cpu --whisper-threads 6`, batch 8, int8).
+Ölçüm sırasında başka iş çalıştırılmadı, prizde ve "En iyi performans" güç modunda. ABAB düzeni, 6 tur. Ölçen:
+Antigravity (ham JSON'lar kullanıcıda; ben raporu okudum).
+
+| Ayar | Koşu oranları (toplam duvar / ses) | Ortalama | En kötü tek dosya |
+| --- | --- | --- | --- |
+| X: beam 5 | 0,476 0,461 0,465 0,452 0,446 0,445 | 0,457 | 0,487 |
+| Y: beam 2 | 0,369 0,373 0,377 0,362 0,354 0,351 | 0,359 | 0,414 |
+
+- **Temiz koşulda medium CPU oranı ~0,46** (önceki ABAB ölçümünde 0,69). Önceki ölçümlerdeki büyük oynama
+  büyük olasılıkla ölçüm sırasında çalışan başka işlerden geliyordu. Tur arası oynama şimdi ~%7 (önceden ~%30).
+  Bu oturumdan önceki CPU tablolarındaki oranlar (ve iki aşamalı canlı akış ölçümleri) arka plan yüküyle ölçülmüş
+  olabilir; kötümser sayılmalı.
+- Beam 2, beam 5'ten 6 turun 6'sında hızlı (ortalama %21). Metin kelime düzeyinde sabit %3,0 / %2,9 farklı.
+  Hangisinin daha doğru olduğu bilinmiyor (referans metin yok).
+- Ölçüm öncesi işlemci kullanımı %7–19 idi (hedef <%5 değildi); 5. ve 6. turda sayaç hata verdi. İlk turlar
+  biraz yavaş, oran turdan tura hafifçe düşüyor (X: 0,476 → 0,445). Hafif bir arka plan yükü kalmış olabilir.
+- Rapordaki saat hızı sabit 2688 MHz (WMI `CurrentClockSpeed`). Bu değer çoğu zaman anlık frekansı değil
+  nominal hızı gösterir; "ısıl kısma yok" kanıtı olarak zayıf. Tutarlı süreler kısma olmadığını destekliyor ama kanıtlamıyor.
