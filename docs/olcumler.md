@@ -536,3 +536,26 @@ Antigravity (ham JSON'lar kullanıcıda; ben raporu okudum).
   biraz yavaş, oran turdan tura hafifçe düşüyor (X: 0,476 → 0,445). Hafif bir arka plan yükü kalmış olabilir.
 - Rapordaki saat hızı sabit 2688 MHz (WMI `CurrentClockSpeed`). Bu değer çoğu zaman anlık frekansı değil
   nominal hızı gösterir; "ısıl kısma yok" kanıtı olarak zayıf. Tutarlı süreler kısma olmadığını destekliyor ama kanıtlamıyor.
+
+## Türkçe canlı akış — temiz koşulda, iki aşamalı (21 Ekim 2026)
+
+Aynı makine (i5-11400H, prizde, "Yüksek performans" güç modu, Chrome/Docker/WSL/VLC kapalı). Ses: `parca_01.wav`
+(114,3 sn), `scripts/dis_servis_ornek.py ... --hiz 1 --parca 3` (3 sn'lik push parçaları), tek akış. Ortak ayar: CPU,
+int8, beam 5, `STREAM_MAX_SPEECH=10`. Düzen başına 3 tur, karışık sıra (ABCD ABCD ABCD). Ölçen: Antigravity; ham JSON'lar
+kullanıcıda, ben raporu okudum. Ölçüm öncesi işlemci %8–26 idi (hedef <%5 değildi: Antigravity IDE'nin kendi yükü).
+
+| Düzen | Akış süresi / ses | Sesten sonra bitiş (sn) | Anlık metin gecikmesi p50 / p95 / max (sn) | Düzeltme gecikmesi p50 / p95 / max (sn) | Medium/small çağrısı |
+| --- | --- | --- | --- | --- | --- |
+| A: yalnız Omnilingual | 1,045 | 5,1 | 1,1 / 3,6 / 3,8 | — | 0 |
+| B: + medium, 6 iş parçacığı | 1,13 | 14,9 | 1,8 / 4,0 / 4,3 | 27 / 52 / 58 | 8 |
+| C: + medium, 2 iş parçacığı | 1,19 | 21,2 | 1,3 / 3,7 / 3,95 | 48 / 70 / 76 | 5–6 |
+| D: + small, 6 iş parçacığı | 1,065 | 7,5 | 1,1 / 3,6 / 3,8 | 5,3 / 12,0 / 12,8 | 17 |
+
+- Temiz koşulda medium düzeltmesi tek akışta **yetişiyor**: akış sesten ~15 sn sonra bitiyor (önceki kirli
+  ölçümde 45–80 sn). Önceki "medium canlıda yetişmiyor" sonucu arka plan yükünden etkilenmişti.
+- `WHISPER_THREADS=2` temiz koşulda gereksiz: anlık metin zaten hızlı (p50 1,8 sn) ve düzeltme daha geç
+  geliyor (p50 48 sn, bitiş 21 sn). Önceki "2 iş parçacığı öner" tavsiyesi geri alındı. Varsayılan `auto` kalıyor.
+- Anlık gecikme ve koşu süreleri çok tutarlı (3 turda ±%1–3).
+- Ölçülmedi: birden çok eşzamanlı akış, 8 kHz telefon sesi, düzeltme metninin doğruluğu (WER).
+- Aritmetik tahmin (ölçüm değil): tek bir Whisper çözümü aynı anda çalıştığı ve medium ~0,46 oranında
+  olduğu için medium düzeltmesi en fazla ~2 eşzamanlı akışa yeter; small (0,19–0,23) ~4–5'e.
