@@ -698,3 +698,18 @@ anlık gecikme p50 1,7 sn / p95 4,6 sn; düzeltme ses bitişinden ~15,6 sn sonra
 - **Omni 16 kHz'de 8 kHz'den yaklaşık 19–21 puan kötü** (kayıt 1: %61,5 / %40,6; kayıt 2: %47,8 / %28,3; canlı push 16 kHz'de de %65). Nedeni
   bilinmiyor. 16 kHz kaynaklarda (mikrofon sayfası, push) anlık metin bu yüzden daha zayıf olabilir.
 - Whisper "birinci sınıf" ve "elli" gibi sayıları rakamla yazıyor, normalleştirme bunu çevirmiyor; rakam farkı WER'e +1 kelime ekler.
+
+## Omnilingual 8 kHz bantlama (22 Ekim 2026)
+
+Canlı akışta anlık metni üreten omnilingual-300m, 16 kHz girişte 8 kHz'e göre ~20 puan kötü çıkıyordu.
+`SherpaOmnilingualAsr` artık girişi 8 kHz'e indirip geri çıkarıyor (`OMNI_BANDLIMIT_HZ`, varsayılan 8000, 0 = kapalı).
+
+Ölçüm (diyalog_parca_01, 16 kHz wav, `benchmarks/yerel_dogruluk_testi.py`, aynı betik, tek koşu; sonuçlar deterministik):
+
+| OMNI_BANDLIMIT_HZ | WER % | CER % | RTF |
+|---|---|---|---|
+| 0 (kapalı) | 61,50 | 32,66 | 0,277 |
+| 8000 | 40,11 | 12,80 | 0,243 |
+
+Sınırlar: tek kayıt üzerinde doğrulandı (önceki ölçümlerde 2 kayıt ve canlı RTP aynı yönü gösterdi); farklı konuşmacılarda
+ölçülmedi. Nedeni bilinmiyor (seviye normalleştirme işe yaramadı, bant sınırlama yaradı). Whisper medium düzeltmesi bundan etkilenmez.

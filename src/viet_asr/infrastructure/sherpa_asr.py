@@ -10,9 +10,11 @@ Zaman bilgisi modele göre değişir:
 from __future__ import annotations
 
 import math
+import os
 
 import numpy as np
 import sherpa_onnx
+import soxr
 
 from viet_asr.application.config import AsrParams, LanguageProfile, ModelRef
 from viet_asr.application.ports import TextNormalizer
@@ -199,7 +201,31 @@ class SherpaWhisperAsr(_SherpaAsr):
         return spread_words(r.text, seg.start, seg.end, self.normalizer)
 
 
+def band_limit(samples: np.ndarray, rate: int, hz: int) -> np.ndarray:
+    """Sesi hz örnekleme hızına indirip geri çıkarır (üst frekansları keser, uzunluk aynı kalır)."""
+    if hz <= 0 or hz >= rate:
+        return samples
+    low = soxr.resample(np.asarray(samples, np.float32), rate, hz)
+    out = soxr.resample(low, hz, rate).astype(np.float32)
+    n = len(samples)
+    return out[:n] if len(out) >= n else np.pad(out, (0, n - len(out)))
+
+
 class SherpaOmnilingualAsr(_SherpaAsr):
+    """Omnilingual girişi varsayılan olarak 8 kHz'e bantlanır (OMNI_BANDLIMIT_HZ, 0 = kapalı).
+    Ölçüm (22 Ekim, 2 kayıt + canlı RTP): 16 kHz girişte WER ~20 puan daha kötü; model telefon
+    bandında daha iyi çalışıyor. Kayıt sayısı az (n=2), bkz. docs/olcumler.md."""
+
+    def __init__(self, model, params, normalizer):
+        self.band_hz = int(os.environ.get("OMNI_BANDLIMIT_HZ", "8000"))
+        super().__init__(model, params, normalizer)
+
+    def transcribe(self, segments):
+        if self.band_hz > 0:
+            segments = [VadSegment(s.start, band_limit(s.samples, s.sample_rate, self.band_hz),
+                                   s.sample_rate) for s in segments]
+        return super().transcribe(segments)
+
     def _build(self, model, params):
         return sherpa_onnx.OfflineRecognizer.from_omnilingual_asr_ctc(
             model=model.path("model"), tokens=model.path("tokens"),
