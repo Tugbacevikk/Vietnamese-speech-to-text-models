@@ -639,7 +639,7 @@ function liveDone(ev) {
   liveId = null; $("liveStart").classList.remove("hidden"); $("liveStop").classList.add("hidden");
   const o = ev.ozet || {};
   $("liveInfo").textContent = ev.durum === "hata" ? "Hata: " + ev.hata
-    : `Bitti: ${o.sure_sn || 0} sn, ${o.parca || 0} parça, gecikme p95 ${o.gecikme_p95_sn ?? "-"} sn` + (ev.son_is ? " · tam analiz kuyrukta" : "");
+    : `Bitti: ${o.sure_sn || 0} sn, ${o.parca || 0} parça, gecikme p95 ${o.toplam_gecikme_p95_sn ?? o.gecikme_p95_sn ?? "-"} sn (kuyruk dahil)` + (o.iki_asama ? " · iki aşamalı" : o.iki_asama_kota_doldu ? " · iki aşama kotası dolu" : "") + (ev.son_is ? " · tam analiz kuyrukta" : "");
   if (ev.son_is) { const id = ev.son_is; setTimeout(() => { loadHistory(); openJob(id); }, 1500); }
 }
 // mikrofon: /ws/live ya da WebRTC (canli_istemci.js); satırlar ağ akışıyla aynı kutuda
