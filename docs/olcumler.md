@@ -636,3 +636,38 @@ CPU %5'in üstündeydi, bu yüzden RTF aralık olarak verildi).
 - Tüm modellerin referanstan aynı yönde ayrıldığı küçük biçim farkları var (kendini/kendine, eğitim/eğitimin,
   üniversite/üniversitede, online eğitim/eğitime); bunlar konuşmacının gerçek sözü ya da metin farkı olabilir.
 - Aynı gün yapılan ilk ölçüm yanlış referansla (sistemin eski çıktısı) yapıldı ve geçersizdir; bu tablo yerini aldı.
+
+## Türkçe canlı akış ve dosya hattı — tek diyalog dosyası (22 Ekim 2026, ikinci tur)
+
+Aynı kayıt ve referans (187 kelime). **Tek dosya, yön göstericidir.** Ölçüm öncesi CPU %10–16 (geliştirme ortamı
+süreçleri yüzünden %5'in altına inmedi), her koşu öncesi kuyruk boştu. Canlı akış sırasında CPU ortalaması yaklaşık %69.
+
+**Canlı RTP (ffmpeg, G.711 PCMU 8 kHz, gerçek zaman), iki aşamalı mod açık, 4 tekrar:**
+
+| | Sonuç |
+|---|---|
+| Anlık metin (omni) WER / CER | %41,2 / %14,5 (4 tekrarda aynı metin) |
+| Anlık metin gecikmesi (toplam, kuyruk dahil) p50 / p95 | 1,8–1,9 sn / 3,8–4,7 sn |
+| Konuşma → ekran (parça bitişine göre) p50 / p95 | 2,3–2,4 sn / 5,1–5,3 sn |
+| Parça sayısı / ortalama uzunluk | 19 / 5,86 sn |
+| Medium düzeltmesi ses bitişinden sonra tamamlanır | 13,6–13,9 sn |
+| Düzeltmeli canlı metin WER | %26,7–27,3 |
+| Akış bitince çalışan tam analiz (`son_is`) WER / CER | %20,9 / %8,7 |
+| Tam analiz süresi (120 sn kayıt) | 48–51 sn |
+
+- Parçalar ortalama 5,9 sn olduğundan, bir parçanın ilk kelimesi söylendikten yaklaşık 8 sn sonra görünür (ölçülmedi, parça uzunluğundan çıkarım).
+- İki aşamalı modda parça boyutunu `STREAM_MAX_SPEECH` değil, `StreamTranscriber` içindeki `min_chunk=5 sn` ve
+  `max_chunk=8 sn` sınırları belirler (kodda doğrulandı; hızlı motor omni "bitişik" mod kullanır). `STREAM_MAX_SPEECH=6/4` parça sayısını
+  değiştirmedi (19). `MAX_UTTERANCE_SEC` yalnızca /canli mikrofon sayfasını etkiler.
+
+**Dosya yükleme hattı (`POST /jobs`, dil=tr, varsayılan profil, beam 5):**
+
+| Giriş | WER | CER | Süre |
+|---|---|---|---|
+| 16 kHz orijinal (2 tekrar) | %23,5 | %11,4 | 52–53 sn |
+| 8 kHz kopya (2 tekrar) | %20,9 | %11,4 | 49–51 sn |
+
+- **Bu sayılar benchmark betiğinin medium sonucundan (%15,5–17,7 / 16 kHz, %16,0–16,6 / 8 kHz) kötü.** Nedeni açıklanamadı:
+  iki yolda da aynı VAD ayarı, aynı beam ve aynı `transcribe` çağrısı var. Farklar: sunucu 6 iş parçacığı kullanıyor (betik 2),
+  iş hattında güvenlik ağı (boşluk kurtarma) ve konuşmacı birleştirme var. Aday nedenler, ölçülmedi.
+- RTP yolu bozmuyor: aynı kaydın 8 kHz dosya olarak işi de %20,9.
