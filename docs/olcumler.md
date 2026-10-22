@@ -606,42 +606,32 @@ tek model faster-whisper-medium (`STREAM_TWO_STAGE` bu komutta kullanılmaz). Ö
 
 ## Türkçe doğruluk — tek diyalog dosyası (22 Ekim 2026)
 
-> **DÜZELTME (aynı gün, sonradan):** bu bölümdeki medium/small/omni sayıları **tekrarlanamadı**. Aynı komutla
-> (medium, beam 5, 16 kHz) sonradan yapılan iki koşu (2 ve 6 iş parçacığı) %23,5 WER verdi (bu tabloda %17,7);
-> metin farklı çıktı. İş hattı (`POST /jobs`) da %23,5 verdi. İlk koşuda hangi ses dosyasının ya da hangi koşulun
-> kullanıldığı doğrulanamadı. **Bu tablodaki sıralama (medium/small/beam/8 kHz) güvenilir değildir**; tek bir
-> partide, dosya özeti (sha256) kaydedilerek yeniden ölçülecek.
-
-**Sınır:** tek kayıt (`diyalog_parca_01.wav`, 120 sn, iki konuşmacı, 187 kelime). Referans metin
-kullanıcının elle yazdığı metindir (konuşmacı etiketleri ve noktalama çıkarılarak `benchmarks/yerel_dogruluk_testi.py`
-normalleştirmesiyle karşılaştırıldı). Sonuçlar yön gösterir, kesin sıralama değildir: 1 puan ≈ 2 kelime.
-Betik Whisper'a Silero VAD parçalarını verir (üretimdeki dosya hattı 30 sn'lik paketleme kullanır), bu yüzden
-RTF üretimle birebir aynı değildir. Ölçüm `--beam` ve `--hyp-kaydet` ile (f4b82be), 2 CPU iş parçacığı, prizde, "Yüksek performans".
+**Sınır:** tek kayıt (`diyalog_parca_01.wav`, 120 sn, iki konuşmacı, 187 kelime, SHA256 9A63247F…5FCC), tek konuşmacı çifti.
+Referans metin elle yazılmıştır (`benchmarks/yerel_dogruluk_testi.py` normalleştirmesiyle karşılaştırıldı). Sonuçlar yön
+gösterir, kesin sıralama değildir: 1 puan ≈ 2 kelime. CPU (int8), 6 iş parçacığı, sunucu kapalı, ABAB sıralı, 2 tekrar;
+her ayarda iki tekrarın metni birebir aynı çıktı (deterministik). Betik Whisper'a yalnızca Silero VAD parçalarını verir
+(iş hattındaki güvenlik ağı ve konuşmacı birleştirme yok).
 
 | Model | Örnekleme | Beam | WER | CER | RTF |
 |---|---|---|---|---|---|
-| faster-whisper-medium | 16 kHz | 5 | %17,7 | %9,3 | 0,43–0,48 |
-| faster-whisper-medium | 16 kHz | 2 | %15,5 | %8,3 | 0,36–0,38 |
-| faster-whisper-medium | 8 kHz | 5 | %16,0 | %6,1 | 0,40–0,43 |
-| faster-whisper-medium | 8 kHz | 2 | %16,6 | %8,3 | 0,32–0,42 |
-| faster-whisper-small | 16 kHz | 5 | %15,0 | %7,9 | 0,17 |
-| faster-whisper-small | 8 kHz | 5 | %28,9 | %10,5 | 0,15 |
-| omnilingual-300m | 16 kHz | – | %61,5 | %32,7 | 0,15 |
-| omnilingual-300m | 8 kHz | – | %39,6 | %13,4 | 0,15 |
+| faster-whisper-medium | 16 kHz | 5 | %23,5 | %11,4 | 0,41 |
+| faster-whisper-medium | 8 kHz | 5 | %22,5 | %13,0 | 0,35–0,39 |
+| faster-whisper-medium | 16 kHz | 2 | %23,5 | %12,0 | 0,32–0,33 |
+| faster-whisper-medium | 8 kHz | 2 | %20,3 | %8,8 | 0,27–0,28 |
+| faster-whisper-small | 16 kHz | 5 | %25,7 | %7,9 | 0,14–0,15 |
+| faster-whisper-small | 8 kHz | 5 | %28,9 | %10,5 | 0,14 |
+| omnilingual-300m | 16 kHz | – | %61,5 | %32,7 | 0,11 |
+| omnilingual-300m | 8 kHz | – | %40,6 | %13,4 | 0,11 |
 
-Her ayar 2 kez koşuldu; WER ikisinde aynı, RTF değişti (iki koşu arası %5–25 oynama; birkaç koşuda ölçüm öncesi
-CPU %5'in üstündeydi, bu yüzden RTF aralık olarak verildi).
+- Medium 8 kHz telefon sesinde WER'i korudu (%20–22); small 16 → 8 kHz'de %25,7 → %28,9.
+- Beam 2, bu dosyada beam 5'ten kötü değil (16 kHz'de eşit) ve %20–30 hızlı. Tek dosya olduğu için varsayılan beam 5 bırakıldı.
+- 16 kHz'de small ile medium arası fark 4–5 kelime: ayırt edilemez.
+- Omni yalnızca anlık önizleme işi görür; 16 kHz'de 8 kHz'den kötü çıkması bu kayıtta tekrarlandı (nedeni bilinmiyor).
+- Tekrarlanan gerçek hata: "yüz yüze" → "100 100" / "yüz yüzyıl" / "yüz yüzeyitimi" (medium'da da).
 
-- Medium 8 kHz telefon sesinde kalite kaybetmedi (%16,0–16,6); small kaybetti (%15,0 → %28,9).
-- Beam 5 ile 2 arasındaki kalite farkı (1–2 puan) ölçülemeyecek kadar küçük; beam 2 16 kHz'de yaklaşık %20 hızlı. Varsayılan beam 5 kaldı.
-- 16 kHz'de small ile medium bu örnekte ayırt edilemedi.
-- Omni yalnızca anlık önizleme işi görür (metin bozuk).
-- Tekrarlanan gerçek hatalar: "yüz yüze" → "100 100" / "müzik" (medium beam 5 16 kHz ve çoğu ayarda son cümle),
-  8 kHz'de "hocalarla" → "acalarla". 8 kHz medium beam 5 son cümlede kendini tekrar etti
-  ("…bizde aslında bu ev devam eden yüz yüze eğitimi görmek").
-- Tüm modellerin referanstan aynı yönde ayrıldığı küçük biçim farkları var (kendini/kendine, eğitim/eğitimin,
-  üniversite/üniversitede, online eğitim/eğitime); bunlar konuşmacının gerçek sözü ya da metin farkı olabilir.
-- Aynı gün yapılan ilk ölçüm yanlış referansla (sistemin eski çıktısı) yapıldı ve geçersizdir; bu tablo yerini aldı.
+> **Veri kaynağı notu:** ilk raporda sunulan hipotez metinleri (ve bunlardan hesaplanan %15–17'lik medium değerleri), aynı raporun
+> kendi WER sütunuyla tutmuyordu; yeni metinlerle hesaplanan WER ilk raporun sütunuyla birebir tuttu. O ilk metinlerin kaynağı belirlenemedi;
+> o değerler **geçersizdir** ve bu tabloyla değiştirildi.
 
 ## Türkçe canlı akış ve dosya hattı — tek diyalog dosyası (22 Ekim 2026, ikinci tur)
 
