@@ -606,6 +606,12 @@ tek model faster-whisper-medium (`STREAM_TWO_STAGE` bu komutta kullanılmaz). Ö
 
 ## Türkçe doğruluk — tek diyalog dosyası (22 Ekim 2026)
 
+> **DÜZELTME (aynı gün, sonradan):** bu bölümdeki medium/small/omni sayıları **tekrarlanamadı**. Aynı komutla
+> (medium, beam 5, 16 kHz) sonradan yapılan iki koşu (2 ve 6 iş parçacığı) %23,5 WER verdi (bu tabloda %17,7);
+> metin farklı çıktı. İş hattı (`POST /jobs`) da %23,5 verdi. İlk koşuda hangi ses dosyasının ya da hangi koşulun
+> kullanıldığı doğrulanamadı. **Bu tablodaki sıralama (medium/small/beam/8 kHz) güvenilir değildir**; tek bir
+> partide, dosya özeti (sha256) kaydedilerek yeniden ölçülecek.
+
 **Sınır:** tek kayıt (`diyalog_parca_01.wav`, 120 sn, iki konuşmacı, 187 kelime). Referans metin
 kullanıcının elle yazdığı metindir (konuşmacı etiketleri ve noktalama çıkarılarak `benchmarks/yerel_dogruluk_testi.py`
 normalleştirmesiyle karşılaştırıldı). Sonuçlar yön gösterir, kesin sıralama değildir: 1 puan ≈ 2 kelime.
@@ -667,7 +673,9 @@ süreçleri yüzünden %5'in altına inmedi), her koşu öncesi kuyruk boştu. C
 | 16 kHz orijinal (2 tekrar) | %23,5 | %11,4 | 52–53 sn |
 | 8 kHz kopya (2 tekrar) | %20,9 | %11,4 | 49–51 sn |
 
-- **Bu sayılar benchmark betiğinin medium sonucundan (%15,5–17,7 / 16 kHz, %16,0–16,6 / 8 kHz) kötü.** Nedeni açıklanamadı:
-  iki yolda da aynı VAD ayarı, aynı beam ve aynı `transcribe` çağrısı var. Farklar: sunucu 6 iş parçacığı kullanıyor (betik 2),
-  iş hattında güvenlik ağı (boşluk kurtarma) ve konuşmacı birleştirme var. Aday nedenler, ölçülmedi.
+- Aynı ses için benchmark betiği (medium, beam 5, 16 kHz) iş hattıyla **birebir aynı metni ve %23,5 WER'i** verdi; iş parçacığı
+  sayısı (2 ya da 6) metni değiştirmedi, yalnızca hızı: RTF 0,50 (2 iş parçacığı) / 0,41 (6). İş hattında bir hata yok.
+- 8 kHz'de WER'in düşmesi (%23,5 → %20,9), güvenlik ağının 5 kelimeyi (özellikle "devam et") geri kurtarmasından geliyor
+  (kurtarilan_kelime=5; 16 kHz işinde güvenlik ağı çalışmadı). Tek dosya, tesadüf olabilir.
 - RTP yolu bozmuyor: aynı kaydın 8 kHz dosya olarak işi de %20,9.
+- İş hattı süresi (16 kHz, 120 sn): ASR 48,7 sn, konuşmacı ayırma 2,6 sn, toplam 52,5 sn (RTF ≈ 0,44).
