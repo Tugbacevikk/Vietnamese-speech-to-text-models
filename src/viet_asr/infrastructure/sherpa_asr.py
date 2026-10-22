@@ -175,10 +175,6 @@ class SherpaZipformerAsr(_SherpaAsr):
             max_active_paths=params.max_active_paths, provider="cpu", **kw)
 
 
-# geriye dönük uyumluluk
-SherpaOnnxAsr = SherpaZipformerAsr
-
-
 class SherpaWhisperAsr(_SherpaAsr):
     segmentation = "vad"
 

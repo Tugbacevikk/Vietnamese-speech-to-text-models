@@ -24,7 +24,6 @@ x-app: &app
     ONNX_THREADS: "2"
     NUM_SPEAKERS: "0"            # 0: sesten bul; istekte num_speakers verilebilir
     DIARIZER: cluster
-    TASK_TIME_LIMIT: "1800"      # tek iş en fazla 30 dk
   volumes:
     - ./models:/models:ro
     - uploads:/data/uploads

@@ -35,6 +35,7 @@ from .ports import AsrEngine, AudioStream, StreamingVad
 # bekleme süresinden değil birikmeden oluşuyor (docs/olcumler.md). Eski davranış korundu.
 REFINE_IDLE_SEC = 2.0     # yeni parça gelmezse toplanan düzeltme grubu bu süreden sonra çözülür
 REFINE_FLUSH_SPAN = 29.5  # grup bu kadar sese ulaşınca beklemeden çözülür (Whisper penceresi)
+REFINE_MAX_GAP = 3.0     # iki parça arası bu kadar sessizlik varsa grup bölünür
 REFINE_JOIN_SEC = 60.0    # akış bitince bekleyen düzeltmeler için azami bekleme
 REFINE_JOIN_STOP_SEC = 3.0  # iptalde bekleme
 
@@ -67,12 +68,6 @@ class StreamSummary:
         if not self.toplam_gecikmeler:
             return 0.0
         return float(np.percentile(self.toplam_gecikmeler, 95))
-
-    @property
-    def p95_kuyruk_bekleme(self) -> float:
-        if not self.kuyruk_beklemeler:
-            return 0.0
-        return float(np.percentile(self.kuyruk_beklemeler, 95))
 
 
 class StreamTranscriber:
@@ -193,7 +188,7 @@ class StreamTranscriber:
                     if batch:
                         span = vad_seg.end - batch_start
                         gap = vad_seg.start - last_end
-                        if span > 29.5 or gap > 3.0:
+                        if span > REFINE_FLUSH_SPAN or gap > REFINE_MAX_GAP:
                             _process_refine_batch(batch)
                             batch = []
 

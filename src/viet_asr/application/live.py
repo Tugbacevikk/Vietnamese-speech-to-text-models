@@ -320,10 +320,6 @@ class LanguageLock:
         self.detected = False
         self._detect, self.fallback, self.min_sec = detect, fallback, min_sec
 
-    @property
-    def locked(self) -> bool:
-        return self.code is not None
-
     def decide(self, audio: np.ndarray, final: bool) -> str | None:
         """Dil belliyse onu döner. Değilse: ses yeterince uzunsa (ya da kesin cümleyse) tespit
         edip kilitler; kısa ara metinde None (henüz karar yok, ara metin gösterilmez)."""

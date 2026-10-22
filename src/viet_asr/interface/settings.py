@@ -77,7 +77,6 @@ class Settings:
     diarizer_min_window: float = field(default_factory=lambda: float(os.environ.get("DIARIZER_MIN_WINDOW", "0.4")))
     diarizer_merge_distance: float = field(default_factory=lambda: float(os.environ.get("DIARIZER_MERGE_DISTANCE", "0.35")))
     hotwords: str | None = field(default_factory=lambda: os.environ.get("VI_HOTWORDS") or None)
-    task_time_limit: int = field(default_factory=lambda: int(os.environ.get("TASK_TIME_LIMIT", "1800")))
     max_audio_minutes: float = field(default_factory=lambda: float(os.environ.get("MAX_AUDIO_MINUTES", "60")))
     max_upload_mb: int = field(default_factory=lambda: int(os.environ.get("MAX_UPLOAD_MB", "100")))
     # transkript çıktısında cümle başı büyük harf ve cümle sonu noktalama (. / ?)
@@ -158,7 +157,6 @@ class Settings:
     # worker açılırken önceden yüklenecek diller (ilk işte gecikme olmasın)
     warmup: list[str] = field(default_factory=lambda: _list(os.environ.get("WARMUP_LANGS", "")))
     # dil tespiti worker'ı: Whisper-small'ı da baştan yükle (yoksa ilk zor seste ~5-15 sn gecikme)
-    warmup_lid: bool = field(default_factory=lambda: os.environ.get("WARMUP_LID", "0") == "1")
 
     # saklama: biten işlerin ses dosyası N saat, iş kaydı ve sonucu N gün sonra silinir (0 = silme)
     audio_retention_hours: int = field(default_factory=lambda: int(os.environ.get(
