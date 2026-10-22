@@ -26,7 +26,7 @@ from pathlib import Path
 
 import jiwer
 
-from viet_asr.application.config import VadConfig
+from viet_asr.application.config import VadConfig, WhisperParams
 from viet_asr.infrastructure.audio import SoundfileLoader
 from viet_asr.infrastructure.chunker import EnergyChunker
 from viet_asr.infrastructure.catalog import MODEL_CHOICES, language_profile
@@ -49,6 +49,8 @@ def main():
     p.add_argument("--models-dir", default="models")
     p.add_argument("--threads", type=int, default=2)
     p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--beam", type=int, default=0, help="faster-whisper beam genişliği (0 = varsayılan 5; .env'i OKUMAZ)")
+    p.add_argument("--hyp-kaydet", action="store_true", help="JSON'a ref/hyp metinlerinin tamamını yaz")
     a = p.parse_args()
 
     tsv = Path(a.tsv)
@@ -70,7 +72,8 @@ def main():
     modeller = a.modeller.split(",") if a.modeller else MODEL_CHOICES[a.dil]
     sonuc = {}
     for m in modeller:
-        asr = build_asr(language_profile(a.dil, a.models_dir, m, num_threads=a.threads),
+        asr = build_asr(language_profile(a.dil, a.models_dir, m, num_threads=a.threads,
+                                         **({"whisper": WhisperParams(beam_size=a.beam)} if a.beam else {})),
                         normalizer_for(a.dil))
         t = time.perf_counter()
         hyps = [norm(" ".join(w.text for w in asr.transcribe(full if asr.segmentation == "full" else segs)),
@@ -86,6 +89,8 @@ def main():
              "rol": {k: {"n": len(v[0]), "WER": round(jiwer.wer(*v) * 100, 2),
                          "CER": round(jiwer.cer(*v) * 100, 2)} for k, v in sorted(by.items())},
              "ornek": [{"ref": refs[i][:200], "hyp": hyps[i][:200]} for i in range(min(3, len(refs)))]}
+        if a.hyp_kaydet:
+            r["tam_metin"] = [{"ref": refs[i], "hyp": hyps[i]} for i in range(len(refs))]
         sonuc[m] = r
         roller = "  ".join(f"{k} %{v['WER']:.1f}" for k, v in r["rol"].items())
         print(f"  {m:18s} WER %{r['WER']:6.2f}  CER %{r['CER']:6.2f}  RTF {r['RTF']}   | {roller}")
