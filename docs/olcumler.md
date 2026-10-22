@@ -669,3 +669,32 @@ süreçleri yüzünden %5'in altına inmedi), her koşu öncesi kuyruk boştu. C
   (kurtarilan_kelime=5; 16 kHz işinde güvenlik ağı çalışmadı). Tek dosya, tesadüf olabilir.
 - RTP yolu bozmuyor: aynı kaydın 8 kHz dosya olarak işi de %20,9.
 - İş hattı süresi (16 kHz, 120 sn): ASR 48,7 sn, konuşmacı ayırma 2,6 sn, toplam 52,5 sn (RTF ≈ 0,44).
+
+## Türkçe doğruluk — ikinci kayıt `diyalog_parca_04.wav` (22 Ekim 2026)
+
+125,9 sn, 16 kHz, referans elle yazılmış, 230 kelime; ses referansın başında/sonunda fazladan konuşma içermiyor.
+Aynı konuşmacı çifti olabilir (aynı diyalog serisi), bağımsız konuşmacı değil. CPU (int8), 6 iş parçacığı, ABAB, 2 tekrar
+(her ayarda tekrarlar birebir aynı metin). Rakamlar Antigravity raporundan; hipotez metinleri verilen 5 koşudan 3'ü
+yeniden hesaplamayla birebir tuttu, 2'si 2 kelime farkla (elle kopyalama kaynaklı olabilir), kalan modellerin metni verilmedi.
+
+| Model | Örnekleme | Beam | WER | CER | RTF |
+|---|---|---|---|---|---|
+| faster-whisper-medium | 16 kHz | 5 | %15,7 | %6,3 | 0,38 |
+| faster-whisper-medium | 8 kHz | 5 | %17,4 | %9,5 | 0,34–0,36 |
+| faster-whisper-medium | 16 kHz | 2 | %16,1 | %6,7 | 0,28–0,30 |
+| faster-whisper-medium | 8 kHz | 2 | %17,4 | %9,4 | 0,28 |
+| faster-whisper-small | 16 kHz | 5 | %17,4 | %7,0 | 0,14 |
+| faster-whisper-small | 8 kHz | 5 | %22,2 | %12,2 | 0,13–0,14 |
+| omnilingual-300m | 16 kHz | – | %47,8 | %21,6 | 0,12 |
+| omnilingual-300m | 8 kHz | – | %28,3 | %8,5 | 0,11–0,12 |
+
+Dosya yükleme hattı (`POST /jobs`): 16 kHz %15,7, 8 kHz %17,4 (benchmark betiğiyle aynı değer), 49–51 sn (RTF ≈ 0,40).
+Canlı RTP (G.711 8 kHz, iki aşamalı): anlık metin %32,6, medium düzeltmeli canlı metin %13,0, akış bitince tam analiz %17,4;
+anlık gecikme p50 1,7 sn / p95 4,6 sn; düzeltme ses bitişinden ~15,6 sn sonra tamamlandı (nedeni ölçülmedi).
+
+İki kayıtta ortak, tekrarlanan bulgular (yön göstericidir, iki kayıt):
+- Medium, small'dan iyi ya da eşit; 8 kHz telefon sesinde fark açılıyor (kayıt 1: %20–22 / %29; kayıt 2: %17 / %22).
+- Beam 2, beam 5'ten en fazla 1–2 kelime geride (bir koşuda önde) ve %20–30 hızlı.
+- **Omni 16 kHz'de 8 kHz'den yaklaşık 19–21 puan kötü** (kayıt 1: %61,5 / %40,6; kayıt 2: %47,8 / %28,3; canlı push 16 kHz'de de %65). Nedeni
+  bilinmiyor. 16 kHz kaynaklarda (mikrofon sayfası, push) anlık metin bu yüzden daha zayıf olabilir.
+- Whisper "birinci sınıf" ve "elli" gibi sayıları rakamla yazıyor, normalleştirme bunu çevirmiyor; rakam farkı WER'e +1 kelime ekler.
