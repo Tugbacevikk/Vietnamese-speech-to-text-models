@@ -9,7 +9,7 @@ import pytest
 
 from viet_asr.application.config import AsrParams, ModelRef, WhisperParams
 from viet_asr.domain import VadSegment, Word
-from viet_asr.infrastructure.faster_whisper_asr import FasterWhisperAsr, drop_repeats
+from viet_asr.infrastructure.faster_whisper_asr import FasterWhisperAsr, drop_repeats, resolve_device
 from viet_asr.infrastructure.normalizer import normalizer_for
 
 REF = ModelRef("faster-whisper-small", "faster-whisper", "models/faster-whisper-small", {})
@@ -148,3 +148,14 @@ def test_toplu_cozum_paketlenmis_pencereleri_kullanir_kelimeler_kaybolmaz():
     asr.transcribe([seg(1.0, 3.0), seg(3.5, 6.0), seg(40.0, 42.0)])
     clips = batched.calls[0][1]
     assert clips == [{"start": 1.0, "end": 6.0}, {"start": 40.0, "end": 42.0}]   # 3 parça -> 2 pencere
+
+
+def test_cihaz_ve_hesap_turu_cozumu():
+    # CUDA istendi ama yok + .env'de float16: eskiden CPU'da float16 ile çöküyordu
+    assert resolve_device("cuda", "float16", cuda_ok=False) == ("cpu", "int8")
+    assert resolve_device("cuda", "int8_float16", cuda_ok=False) == ("cpu", "int8")
+    assert resolve_device("cpu", "float16", cuda_ok=False) == ("cpu", "int8")
+    assert resolve_device("auto", "auto", cuda_ok=False) == ("cpu", "int8")
+    assert resolve_device("auto", "auto", cuda_ok=True) == ("cuda", "float16")
+    assert resolve_device("cuda", "float16", cuda_ok=True) == ("cuda", "float16")
+    assert resolve_device("cpu", "int8", cuda_ok=False) == ("cpu", "int8")

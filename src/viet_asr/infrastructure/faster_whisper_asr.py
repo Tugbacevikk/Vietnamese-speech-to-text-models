@@ -34,6 +34,24 @@ log = logging.getLogger(__name__)
 SR = 16000
 
 
+def resolve_device(dev: str, c_type: str, cuda_ok: bool) -> tuple[str, str]:
+    """İstenen cihaz ve hesap türünden gerçekte kullanılacak ikiliyi bulur.
+
+    CUDA istenip bulunamazsa CPU'ya düşülür; GPU'ya özgü float16 türleri CPU'da çalışmaz
+    (ValueError: Requested float16 compute type...), bu yüzden int8'e çevrilir."""
+    if dev == "auto":
+        dev = "cuda" if cuda_ok else "cpu"
+    elif dev == "cuda" and not cuda_ok:
+        log.warning("CUDA istendi ama CUDA kütüphaneleri bulunamadı; CPU moduna düşülüyor.")
+        dev = "cpu"
+    if c_type == "auto":
+        c_type = "float16" if dev == "cuda" else "int8"
+    elif dev == "cpu" and "float16" in c_type:
+        log.warning("compute_type=%s CPU'da çalışmaz; int8 kullanılıyor.", c_type)
+        c_type = "int8"
+    return dev, c_type
+
+
 def _cuda_ok() -> bool:
     try:
         import ctranslate2
@@ -115,15 +133,7 @@ class FasterWhisperAsr:
 
             dev = getattr(self.wp, "device", "auto")
             cuda_ok = dev != "cpu" and _cuda_ok()  # cpu istenmişse CUDA'ya hiç bakılmaz (PATH'e dokunulmaz)
-            if dev == "auto":
-                dev = "cuda" if cuda_ok else "cpu"
-            elif dev == "cuda" and not cuda_ok:
-                log.warning("CUDA istendi ama CUDA kütüphaneleri bulunamadı; CPU moduna düşülüyor.")
-                dev = "cpu"
-
-            c_type = getattr(self.wp, "compute_type", "auto")
-            if c_type == "auto":
-                c_type = "float16" if dev == "cuda" else "int8"
+            dev, c_type = resolve_device(dev, getattr(self.wp, "compute_type", "auto"), cuda_ok)
 
             dev_idx = getattr(self.wp, "device_index", 0)
             threads = self.wp.cpu_threads or params.num_threads

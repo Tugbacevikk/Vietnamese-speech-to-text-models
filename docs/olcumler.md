@@ -592,3 +592,14 @@ hesaplanan bitişidir; raporda kısa dosyaların "bitişi" tur duvar süresinden
 - **Small düzeltmesi 2–3 akışta kullanılabilir ama kararsız:** aynı kombinasyonda iki tur arasında düzeltme p50'si
   7 → 22 sn, 8 → 48 sn gibi büyük sapma var. Small'ın metin doğruluğu ölçülmedi.
 - Bu tablo yalnızca ses uzunluğu 100–114 sn olan akışları kapsar; tek ses türü (16 kHz, podcast), 8 kHz telefon sesi değil.
+
+## Türkçe 8 kHz telefon sesi — `akis` komutu, tek model medium (21 Ekim 2026, kullanıcının sohbetinden)
+
+Kullanıcı kendi bilgisayarında `diyalog_parca_01.wav` dosyasını `ffmpeg -re ... -ar 8000 -ac 1 -c:a pcm_mulaw -f rtp rtp://127.0.0.1:5004`
+ile gönderdi; `python -m viet_asr.interface.akis --kaynak rtp://0.0.0.0:5004 --dil tr` dinledi. Ayar: CPU, int8, `WHISPER_THREADS=2`,
+tek model faster-whisper-medium (`STREAM_TWO_STAGE` bu komutta kullanılmaz). Ölçüm yapan: kullanıcı (ekran çıktısı); ben okudum.
+
+- 1. koşu: 63,6 sn, 22 parça, gecikme p95 18,5 sn. 2. koşu: 120,2 sn, 44 parça, gecikme p95 15,9 sn.
+- Gecikme yüksek: tek model medium + 2 iş parçacığı (iki aşamasız, temiz koşul ölçümündeki gibi, bu düzende medium canlıya yetişmiyor).
+- Metinde hatalar var ("yüz yüze" → "100", "hocalarla" → "bacalarla", anlamsız satırlar); referans metin olmadığı için WER ölçülmedi.
+- Aynı 16 kHz sesle karşılaştırma yapılmadı; 8 kHz'in tek başına etkisi ayrılamadı.

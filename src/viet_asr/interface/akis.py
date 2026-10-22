@@ -61,6 +61,9 @@ def main(argv=None) -> int:
         return 2
     if getattr(source, "port", None):
         print(f"dinleniyor: UDP {source.port}", file=sys.stderr, flush=True)
+    if s.stream_two_stage:
+        print("uyarı: STREAM_TWO_STAGE bu komutta kullanılmaz (tek model çalışır). İki aşamalı akış için "
+              "yerel sunucuyu başlatıp POST /streams ile açın.", file=sys.stderr, flush=True)
     asr = build_engines(cfg)[a.dil]
     kayit = a.kayit or (str(Path(s.data_dir) / "akislar" / "son_akis.wav") if a.api else None)
     wav = None
