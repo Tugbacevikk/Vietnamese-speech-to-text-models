@@ -47,7 +47,7 @@ def main() -> int:
         w = csv.writer(f, delimiter="\t")
         w.writerow(["dosya", "metin", "kayit", "ilk_metin", "konusmaci"])
         # yalnızca veri setine aktarma onayı verilmiş işler (kontrol eden + açık onay)
-        for c in store.corrections(consented_only=True):
+        for c in store.corrections(consented_only=True, use="egitim"):
             if a.dil and c.language != a.dil:
                 skipped["dil"] += 1
                 continue

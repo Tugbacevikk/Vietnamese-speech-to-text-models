@@ -128,10 +128,12 @@ class MemoryJobStore:
         self.consents[job_id] = (by, use, _now())
         return True
 
-    def corrections(self, limit=10_000, consented_only=False):
+    def corrections(self, limit=10_000, consented_only=False, use=None):
         out = []
         for (jid, idx), ((osp, otx), at) in self._edits.items():
-            if consented_only and jid not in self.consents:
+            if (consented_only or use) and jid not in self.consents:
+                continue
+            if use and self.consents[jid][1] != use:
                 continue
             u, r = self.results[jid].utterances[idx], self.jobs[jid]
             out.append(Correction(jid, r.job.audio_path, r.decision.code if r.decision else None, idx,

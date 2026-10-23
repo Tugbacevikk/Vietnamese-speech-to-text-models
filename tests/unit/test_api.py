@@ -380,6 +380,9 @@ def test_veri_setine_aktarma(tmp_path):
     r = c.post(f"/jobs/{jid}/dataset", json=body)
     assert r.status_code == 200, r.text
     assert len(store.corrections(consented_only=True)) == 1
+    # onayın amacı eğitim değil test ise eğitim verisine girmez (test sızıntısı olmasın)
+    assert len(store.corrections(consented_only=True, use=body["use"])) == 1
+    assert store.corrections(consented_only=True, use="egitim" if body["use"] != "egitim" else "test") == []
     d = root / "bekleyen" / jid
     assert {p.name for p in d.iterdir()} == {"ses.wav", "konusmaci.rttm", "ref.json", "satirlar.tsv", "meta.json"}
     meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))

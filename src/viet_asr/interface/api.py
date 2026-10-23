@@ -678,7 +678,7 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         (1-20 sn) düzeltilmiş satır sayısı ve süresi; eşik: scripts/ince_ayar_dongusu.py ile aynı
         (500 satır, 1 saat; sezgiseldir). Eğitimin kendisi arayüzde yapılmaz (WSL2 + GPU, finetune/)."""
         out = {}
-        for c in store.corrections(consented_only=True):
+        for c in store.corrections(consented_only=True, use="egitim"):
             if not 1.0 <= c.end - c.start <= 20.0:
                 continue
             d = out.setdefault(c.language or "?", {"satir": 0, "sure_sn": 0.0})

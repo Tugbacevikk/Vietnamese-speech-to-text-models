@@ -129,7 +129,8 @@ class JobStore(ResultRepository, Protocol):
         """Satırı sonuçtan kaldırır (kayıtta kalır). Olmazsa False."""
         ...
 
-    def corrections(self, limit: int = 10_000, consented_only: bool = False) -> list[Correction]:
+    def corrections(self, limit: int = 10_000, consented_only: bool = False,
+                    use: str | None = None) -> list[Correction]:
         """Düzeltilmiş satırlar (en yenisi önce): ince ayar verisi.
         consented_only: yalnızca veri setine aktarma onayı verilmiş işlerden."""
         ...

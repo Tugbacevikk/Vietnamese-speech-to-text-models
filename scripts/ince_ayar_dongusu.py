@@ -38,7 +38,7 @@ EN_KISA, EN_UZUN = 1.0, 20.0   # icefall sınırı (scripts/duzeltmeleri_disa_ak
 
 def approved_corrections(store, dil: str, min_dur: float = EN_KISA, max_dur: float = EN_UZUN) -> list:
     """Veri setine aktarma onayı verilmiş, eğitime uygun uzunlukta düzeltilmiş satırlar."""
-    return [c for c in store.corrections(consented_only=True)
+    return [c for c in store.corrections(consented_only=True, use="egitim")
             if (not dil or c.language == dil) and min_dur <= c.end - c.start <= max_dur]
 
 

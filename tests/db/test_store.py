@@ -317,6 +317,8 @@ def test_veri_seti_onayi(store):
     assert len(store.corrections()) == 2 and store.corrections(consented_only=True) == []
     assert store.set_consent("v", "Dr. A", "test") is True
     assert [c.job_id for c in store.corrections(consented_only=True)] == ["v"]
+    assert [c.job_id for c in store.corrections(use="test")] == ["v"]
+    assert store.corrections(use="egitim") == []                  # test onayı eğitime girmez
 
 
 def test_konusmaci_profili_ve_cumle_sinirlari_saklanir(store):

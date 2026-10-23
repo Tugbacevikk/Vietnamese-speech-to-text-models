@@ -301,14 +301,18 @@ class SqlAlchemyJobStore:
             u.edited_at = utcnow()
             return Utterance(u.speaker, u.start_s, u.end_s, u.text, True, u.idx)
 
-    def corrections(self, limit: int = 10_000, consented_only: bool = False) -> list[Correction]:
-        """consented_only: yalnızca veri setine aktarma onayı verilmiş işlerden (ince ayar verisi)."""
+    def corrections(self, limit: int = 10_000, consented_only: bool = False,
+                    use: str | None = None) -> list[Correction]:
+        """consented_only: yalnızca veri setine aktarma onayı verilmiş işlerden (ince ayar verisi).
+        use: onayın amacı ("egitim" | "test"); "test" için onaylanan sesler eğitime GİRMEMELİ (sızıntı)."""
         with self._session() as s:
             q = (select(UtteranceRow, JobRow.audio_path, JobRow.lang_code)
                  .join(JobRow, JobRow.id == UtteranceRow.job_id)
                  .where(UtteranceRow.edited_at.is_not(None), UtteranceRow.deleted_at.is_(None)))
-            if consented_only:
+            if consented_only or use:
                 q = q.where(JobRow.consent_at.is_not(None))
+            if use:
+                q = q.where(JobRow.consent_use == use)
             rows = s.execute(q.order_by(UtteranceRow.edited_at.desc()).limit(limit)).all()
             return [Correction(u.job_id, path, lang, u.idx, u.start_s, u.end_s, u.speaker, u.text,
                                u.original_speaker or u.speaker, u.original_text or u.text, u.edited_at)
