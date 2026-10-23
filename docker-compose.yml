@@ -1,11 +1,15 @@
 # Tüm sistem:  docker compose up -d --build
 # Önce modeller: python scripts/download_models.py  (./models klasörüne)
 #
-# Çekirdek bütçesi: her worker süreci ONNX_THREADS çekirdek kullanır.
-# worker-vi süreç sayısını kendisi hesaplar: kullanılabilir çekirdek / ONNX_THREADS
-# (konteynere "cpus:" sınırı konduysa onu dikkate alır). worker-lid ve worker-tr
-# 1 süreçle başlar; Türkçe yük artarsa CONCURRENCY değerini yükseltin. Toplam
-# süreç x ONNX_THREADS çekirdek sayısını geçerse süreçler birbirini yavaşlatır.
+# Çekirdek bütçesi: Vietnamca süreci ONNX_THREADS (2), Türkçe süreci WHISPER_THREADS (auto: çekirdek/2) iş
+# parçacığı kullanır. Servisler birbirini bilmediği için CONCURRENCY=auto HER BİRİNDE makinenin tamamını
+# kendine ayırırdı (12 çekirdekte 6 Vietnamca + 2 Türkçe süreç = 24 iş parçacığı > 12); bu yüzden süreç sayıları
+# burada sabit: VI_WORKERS (2), TR_WORKERS (1), dil tespiti 1. Makineniz büyükse .env'e VI_WORKERS / TR_WORKERS
+# yazın; toplam süreç x iş parçacığı çekirdek sayısını geçmesin. Docker Desktop (Windows) konteynerlere varsayılan
+# olarak belleğin yarısını verir (.wslconfig); Türkçe medium süreç başına ~1,8 GB ister.
+#
+# .env konteynerlere de geçer (env_file). Windows yollarını (MODELS_DIR=models, DATA_DIR=data/uploads) ezmemesi
+# için aşağıda konteyner yolları açıkça yazılıdır.
 
 x-app: &app
   build: .
@@ -24,6 +28,8 @@ x-app: &app
     ONNX_THREADS: "2"
     NUM_SPEAKERS: "0"            # 0: sesten bul; istekte num_speakers verilebilir
     DIARIZER: cluster
+    MODELS_DIR: /models           # .env'deki Windows yolu (models) konteynerde geçersiz
+    DATA_DIR: /data/uploads       # API ile worker'ların ORTAK klasörü (uploads hacmi)
   volumes:
     - ./models:/models:ro
     - uploads:/data/uploads
@@ -54,10 +60,18 @@ services:
 
   api:
     <<: *app
-    ports: ["${PORT:-8001}:8000"]
+    # RTP canlı akışı için UDP aralığı: POST /streams {"kaynak": "rtp://0.0.0.0:0"} aralıktan boş bir port seçer
+    # ve yanıtta "rtp_adres" verir. Canlı akış production'da varsayılan kapalıdır: .env'e ENABLE_STREAMS=1.
+    ports: ["${PORT:-8001}:8000", "40000-40019:40000-40019/udp"]
+    volumes:
+      - ./models:/models:ro
+      - uploads:/data/uploads
+      - dataset:/data/veri_seti       # "Veri setine ekle" kayıtları konteyner silinse de kalsın
     environment:
       <<: *env
       MAX_UPLOAD_MB: "100"
+      DATASET_DIR: /data/veri_seti
+      STREAM_RTP_PORTS: "40000-40019"
     healthcheck:       # canlılık; hazır olma (modeller + işçiler) için /health/ready
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
@@ -70,19 +84,19 @@ services:
       <<: *env
       CONCURRENCY: "1"
 
-  worker-vi:           # Vietnamca: Zipformer ~0,5 GB/süreç
+  worker-vi:           # Vietnamca: Zipformer ~0,5 GB/süreç, süreç başına ONNX_THREADS (VI_WORKERS)
     <<: *app
     command: ["python", "-m", "viet_asr.interface.stream_worker", "--kuyruk", "vi"]
     environment:
       <<: *env
-      CONCURRENCY: auto
+      CONCURRENCY: ${VI_WORKERS:-2}
 
-  worker-tr:           # Türkçe: faster-whisper medium ~1,8 GB/süreç; sayı bellek ve çekirdekten
+  worker-tr:           # Türkçe: faster-whisper medium ~1,8 GB/süreç, her süreç WHISPER_THREADS iş parçacığı (TR_WORKERS)
     <<: *app
     command: ["python", "-m", "viet_asr.interface.stream_worker", "--kuyruk", "tr"]
     environment:
       <<: *env
-      CONCURRENCY: auto
+      CONCURRENCY: ${TR_WORKERS:-1}
 
   dispatcher:          # outbox -> webhook (WEBHOOK_SECRET varsa imzalı)
     <<: *app
@@ -96,3 +110,4 @@ volumes:
   pgdata:
   redisdata:
   uploads:
+  dataset:

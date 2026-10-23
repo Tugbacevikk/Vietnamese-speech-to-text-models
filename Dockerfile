@@ -10,7 +10,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install ".[server]" && useradd --create-home --uid 1000 app \
-    && mkdir -p /data/uploads && chown -R app /data
+    && mkdir -p /data/uploads /data/veri_seti && chown -R app /data
 
 USER app
 EXPOSE 8000
