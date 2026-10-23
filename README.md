@@ -94,6 +94,7 @@ curl -H "X-API-Key: $K" http://localhost:8001/jobs/<job_id>        # durum + son
 | `DELETE /jobs/{id}/utterances/{n}` | uydurma satırı sonuçtan kaldır (kayıtta kalır) |
 | `POST /jobs/{id}/reanalyze` | aynı sesi yeni konuşmacı sayısıyla yeniden analiz (`{"num_speakers"}`, 0 = sesten bul) |
 | `POST /jobs/{id}/dataset` | kontrol edilmiş sonucu veri setinin onay kuyruğuna koy (`ENABLE_DATASET_EXPORT=1`, onay zorunlu) |
+| `GET /finetune/durum` | ince ayar hazırlığı: dil başına onaylı düzeltme satırı ve süresi, eşik (500 satır, 1 saat) |
 | `GET /metrics` | gecikme oranı (hedef p95 ≤ 1), kuyruk doluluğu |
 | `GET /` | web arayüzü |
 

@@ -217,6 +217,15 @@ details#qualityBox summary { cursor: pointer; }
       <div id="quality" class="sub">Yükleniyor…</div>
     </details>
   </section>
+<section class="card">
+  <details id="ftBox">
+    <summary><h2 style="display:inline">İnce ayar</h2> <span class="sub">veri hazırlığı durumu</span></summary>
+    <p class="sub">Düzelttiğiniz ve "Veri setine ekle" ile onayladığınız satırlar burada sayılır. Eşik dolunca
+      (500 satır ve 1 saat ses; sezgiseldir) eğitim verisi hazırlanabilir. Eğitimin kendisi bu sayfada yapılmaz:
+      WSL2 + GPU ile <code>finetune/</code> klasöründeki betiklerle çalışır, model terfisi için Kapı 2 ölçümü gerekir.</p>
+    <div id="ft" class="sub">Yükleniyor…</div>
+  </details>
+</section>
 </div>
 
 <dialog id="cleanDialog" class="wide">
@@ -598,6 +607,23 @@ async function loadQuality() {
   } catch (e) { box.textContent = "Kalite alınamadı: " + e.message; }
 }
 $("qualityBox").addEventListener("toggle", () => { if ($("qualityBox").open) loadQuality(); });
+
+async function loadFinetune() {
+  const box = $("ft");
+  try {
+    const f = await (await api("/finetune/durum")).json();
+    const rows = Object.entries(f.diller);
+    const note = f.veri_seti_acik ? "" : " Veri seti aktarımı kapalı: sunucuda ENABLE_DATASET_EXPORT=1 yapılınca \"Veri setine ekle\" düğmesi görünür.";
+    if (!rows.length) { box.textContent = "Henüz onaylı düzeltme yok." + note; return; }
+    box.replaceChildren(el("table", { class: "qtable" },
+      el("thead", {}, el("tr", {}, ...["Dil", "Onaylı satır", "Ses (dk)", "Durum"].map((x) => el("th", {}, x)))),
+      el("tbody", {}, ...rows.map(([dil, d]) => el("tr", {}, ...[LANG[dil] || dil,
+        `${d.satir} / ${f.esik_satir}`, `${(d.sure_sn / 60).toFixed(1)} / ${f.esik_sure_sn / 60}`,
+        d.esik_asildi ? "eşik aşıldı" : "eşik bekleniyor"].map((x) => el("td", {}, String(x))))))));
+    if (note) box.append(el("p", {}, note.trim()));
+  } catch (e) { box.textContent = "İnce ayar durumu alınamadı: " + e.message; }
+}
+$("ftBox").addEventListener("toggle", () => { if ($("ftBox").open) loadFinetune(); });
 
 async function loadHistory() {
   const box = $("hist");

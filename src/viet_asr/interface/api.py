@@ -672,6 +672,23 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
         since = datetime.now(timezone.utc) - timedelta(days=max(1, min(gun, 3650)))
         return {"gun": gun, "satirlar": quality_report(store.review_lines(since))}
 
+    @api.get("/finetune/durum", dependencies=[auth])
+    def finetune_status():
+        """İnce ayar hazırlığı: dil başına veri setine aktarma onayı verilmiş, eğitime uygun uzunlukta
+        (1-20 sn) düzeltilmiş satır sayısı ve süresi; eşik: scripts/ince_ayar_dongusu.py ile aynı
+        (500 satır, 1 saat; sezgiseldir). Eğitimin kendisi arayüzde yapılmaz (WSL2 + GPU, finetune/)."""
+        out = {}
+        for c in store.corrections(consented_only=True):
+            if not 1.0 <= c.end - c.start <= 20.0:
+                continue
+            d = out.setdefault(c.language or "?", {"satir": 0, "sure_sn": 0.0})
+            d["satir"] += 1
+            d["sure_sn"] = round(d["sure_sn"] + (c.end - c.start), 1)
+        for d in out.values():
+            d["esik_asildi"] = d["satir"] >= 500 and d["sure_sn"] >= 3600
+        return {"esik_satir": 500, "esik_sure_sn": 3600, "veri_seti_acik": settings.enable_dataset_export,
+                "diller": out}
+
     @api.get("/metrics/prometheus", dependencies=[auth], response_class=PlainTextResponse)
     def metrics_prometheus():
         """Prometheus biçiminde: iş sayıları, kuyruk derinliği ve en eski mesaj yaşı, aşama süre
