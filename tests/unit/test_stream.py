@@ -490,6 +490,8 @@ def test_iki_asamali_akis_duzeltme():
     assert sm.duzeltmeler == 2
     assert sm.duzeltme_pencere >= 1  # sayaç çalışıyor
     assert sm.duzeltme_pencere <= 2
+    # düzeltme olayının 'latency' alanı çözme süresi (saniye); eskiden monotonik saatten ses konumu çıkarılıyordu (yüzlerce sn)
+    assert all(0.0 <= c.latency < 5.0 for c in corrections)
 
 
 def test_duzeltme_grubu_sabitleri_olculen_degerde():

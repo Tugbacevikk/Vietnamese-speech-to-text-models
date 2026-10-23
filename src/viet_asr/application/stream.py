@@ -117,6 +117,7 @@ class StreamTranscriber:
                 t0 = min(s.start for _, s, _ in batch)
                 shifted = [VadSegment(start=max(0.0, s.start - t0), samples=s.samples) for _, s, _ in batch]
                 summary.duzeltme_pencere += 1
+                t_start = time.monotonic()
                 try:
                     words = refiner.transcribe(shifted)
                 except Exception as e:
@@ -153,7 +154,7 @@ class StreamTranscriber:
                         final=True,
                         conf=avg_conf,
                         low_conf=(),
-                        latency=round(max(0.0, t_now - vad_seg.end), 3),
+                        latency=round(max(0.0, t_now - t_start), 3),  # düzeltme motorunun bu pencereyi çözme süresi
                         kuyruk_bekleme_sn=st_seg.kuyruk_bekleme_sn,
                         toplam_gecikme_sn=round(max(0.0, t_now - t_in), 3),
                         duzeltildi=True,
