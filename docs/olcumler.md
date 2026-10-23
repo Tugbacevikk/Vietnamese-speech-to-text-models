@@ -731,3 +731,23 @@ vietmed_0025 (Lecturer, 96,2 sn). Gerçek zaman hızında G.711 PCMU, tek akış
 - Hataların çoğu tıbbi terimler (beta hcg -> "dta hcv", progesterone -> "proson"), dolgu sesleri ("ờ", "à", "á") ve
   benzer sesli hece karışıklıkları. Canlı ile dosya hattı birbirine yakın: canlı akış doğruluğu bozmuyor.
 - Sınır: 2 kayıt, tek akış; eşzamanlı Vietnamca akış bu turda ölçülmedi. Zipformer VietMed ile eğitildiği için sonuç iyimser olabilir.
+
+### Canlı RTP doğrulaması — diyalog_parca_01, 2 ayar x 2 iletim x 2 tekrar (23 Ekim 2026)
+
+Antigravity ölçtü (komut satırı `akis --dil tr`; PCMU: ffmpeg 8 kHz, L16: `rtp_gonder.py --codec l16` 16 kHz); WER'i rapordaki
+tam metinlerden ben yeniden hesapladım (7 metinde rapordakiyle birebir aynı). Referans: kullanıcının insan metni (187 kelime).
+Iki aşamalı: omni anlık + medium düzeltme, CPU, medium beam 5.
+
+| İletim | OMNI_BANDLIMIT_HZ | Anlık WER | Nihai (medium) WER, 2 tekrar | Anlık gecikme p50 / p95 | Düzeltme ses bittikten sonra |
+|---|---|---|---|---|---|
+| PCMU 8 kHz | 0 | %41,18 | %27,27 / %24,06 | 1,9 / 4,3–4,5 sn | 14–15 sn |
+| L16 16 kHz | 0 | **%65,24** | %21,39 / %22,46 | 2,2–2,3 / 5,2–5,4 sn | 16–17 sn |
+| PCMU 8 kHz | 8000 | %42,25 | %24,06 / %24,06 | 1,9 / 3,6–4,1 sn | 14 sn |
+| L16 16 kHz | 8000 | **%42,25** | %24,06 / %22,46 | 2,2–2,3 / 5,4–5,7 sn | 15–18 sn |
+
+- Bantlama, 16 kHz canlı girişte anlık metni %65,2 -> %42,3 yapıyor (dosya ölçümüyle aynı yön ve büyüklük); 8 kHz girişte etkisi yok
+  (%41,2 -> %42,3, bir-iki kelime). Nihai metin bantlamadan etkilenmiyor (21–27 arası, tekrarlar arası 1–6 kelime oynuyor).
+- Anlık metin iki tekrarda birebir aynı; medium düzeltmesi tekrarlar arasında 1–6 kelime değişiyor (düzeltme pencereleri 9–15 adet, zamanlamaya bağlı).
+- Nihai metindeki kalıcı hata: "yüz yüze" -> "100 100" / "müzik eğitimi". Medium bu ifadeyi tüm koşularda yanlış yazıyor.
+- Sınır: hâlâ tek kayıt. Koşuların çoğunda akış başlamadan CPU %68–86'ydı (yalnızca ilk koşuda %15); gecikmeler bu yüzden
+  temiz koşuya göre biraz kötü olabilir, WER etkilenmez. L16'da gecikme PCMU'dan ~0,3 sn yüksek (6010 paket, ek yeniden örnekleme).
