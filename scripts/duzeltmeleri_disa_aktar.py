@@ -51,6 +51,9 @@ def main() -> int:
             if a.dil and c.language != a.dil:
                 skipped["dil"] += 1
                 continue
+            if not c.text.strip():   # boş referans eğitimi bozar
+                skipped["boş metin"] = skipped.get("boş metin", 0) + 1
+                continue
             if not a.en_kisa <= c.end - c.start <= a.en_uzun:
                 skipped["süre"] += 1
                 continue

@@ -501,6 +501,8 @@ def create_app(store: JobStore, queue: JobQueue, settings: Settings,
     def edit_utterance(job_id: str, idx: int, body: UtteranceEdit, request: Request, who: str = auth):
         if body.speaker is None and body.text is None:
             raise HTTPException(422, "text ya da speaker verilmeli")
+        if body.text is not None and not body.text.strip():
+            raise HTTPException(422, "metin boş olamaz; yanlış satırı kaldırmak için satırı silin")
         u = store.update_utterance(job_id, idx, body.speaker,
                                    " ".join(body.text.split()) if body.text is not None else None)
         if u is None:
