@@ -826,3 +826,23 @@ medium beam 5, OMNI_BANDLIMIT_HZ=8000, her ayar için ısınma + 3 tekrar). Orta
 - Canlı akış sürerken aynı anda 125,85 sn'lik dosya işi: GPU'da 8,1 sn (RTF 0,064), bellek hatası yok, en çok 2875 MiB. C'de dosya işi başlarken tek bir pencere 3,73 sn sürdü.
 - *C'de "anlık gecikme" yalnızca parça kapandıktan sonraki çözme süresidir; kelime ekrana, konuşma 5–8 sn'lik parça dolunca gelir (ilk metin 5,9 sn'de). Tek aşamalı modda ara (interim) metin üretilmiyor. Gerçek kelime gecikmesi ölçülmedi.
 - B'de "ses bittikten sonra" 6,88 sn'nin yalnızca ~0,8 sn'si medium; kalanı bekleme mantığı (REFINE_IDLE_SEC = 2 sn vb.) ve omni çözmesi. Kalemlere ayrılmadı.
+
+### Whisper medium canlı akış: CPU / GPU, iki aşamalı / tek aşamalı (23 Ekim 2026)
+
+Antigravity ölçtü (yerel Windows, Docker yok, RTX 3050 Laptop 4 GB, commit ee66910); ortalamaları ve WER'i ben yeniden hesapladım
+(metinleri rapor dosyasından programla ayrıştırdım). Kayıt: `diyalog_parca_01` (120,2 sn, PCMU 8 kHz), referans: kullanıcının insan metni (187 kelime).
+A = CPU int8, iki aşamalı; B = GPU fp16, iki aşamalı; C = GPU fp16, tek aşamalı (medium doğrudan canlı model). 3 tekrar, rtp.kayip hepsinde 0.
+
+| Ayar | Medium pencere p50 / p95 / max | Ses bittikten sonra | Anlık WER | Nihai WER (3 tekrar) | Nihai kelime |
+|---|---|---|---|---|---|
+| A | 6,34 / 7,59 / 7,59 sn | 12,42 sn | %42,25 | %25,13 / %25,13 / %26,74 | 157–160 |
+| B | 0,76 / 0,85 / 0,88 sn | 6,88 sn | %42,25 | %27,81 x3 | 153 |
+| C | 0,53 / 0,83 / 1,22 sn | 0,36 sn | (medium) | %25,67 x3 | 179 |
+
+- GPU belleği: B 2587, C 2171 MiB. Canlı akış sürerken parca_04 dosya işi GPU'da 8,06–8,08 sn (süre/ses 0,064), bellek hatası yok (B_ek 2875 MiB).
+- A/B/C nihai WER farkı birkaç kelime (187 kelimede 1 kelime = %0,53); tek kayıtta sıralama yapılamaz.
+- C'de konuşmada olmayan ifadeler çıkıyor ("hoşça kalın", "teşekkürler", "damat hadi", "bekleyin", "yüz yüzey için göndermek istiyorum evet devam etsene bizi"):
+  Whisper uydurması. A/B nihai metni 30+ kelime eksik bırakıyor (silme 28–35), C 11.
+- "yüz yüze" üç ayarda da "100 100" / "100" çıkıyor.
+- "Ses bittikten sonra" ve gecikme değerleri parça kapandıktan sonraki bekleyiştir; kelimenin söylendiği andan ekrana gelişi değil (parça 5–8 sn ses biriktiriyor; ilk parça C'de bile 5,89 sn).
+- Sınır: tek kayıt, tek konuşmacı çifti; Docker'da GPU kurulu değil, bu koşular Docker'da yapılmadı.
