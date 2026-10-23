@@ -809,3 +809,20 @@ canlı akış döngüsü (`stream.py`) hem UDP soketini okuyor hem ASR'yi aynı 
 
 **Düzeltme:** `RtpSource` artık soketi ayrı bir iş parçacığında sürekli boşaltıp paketleri bellekteki kuyruğa koyuyor (`tests/unit/test_rtp_reader.py`:
 yavaş tüketicide 400/400 paket; eski kodda 12/400). Docker'da yeniden ölçülmedi — bu ölçüm bekliyor.
+
+### Canlı akışta Whisper medium: CPU / GPU / tek aşama (23 Ekim 2026)
+
+Antigravity ölçtü (commit ee66910, Docker'sız yerel sunucu, RTX 3050 Laptop 4 GB, Windows i5-11400H, RTP/PCMU 8 kHz, `diyalog_parca_01` 120,2 sn,
+medium beam 5, OMNI_BANDLIMIT_HZ=8000, her ayar için ısınma + 3 tekrar). Ortalamaları ve oranı ben yeniden hesapladım. **Metinler/WER henüz değerlendirilmedi** (n=1 kayıt).
+
+| Ayar | Anlık metin gecikmesi p50 / p95 | Medium çözme p50 / max (pencere başına) | Ses bittikten sonra son metin | GPU belleği | Ortalama CPU |
+|---|---|---|---|---|---|
+| A: CPU, iki aşamalı | 1,85 / 3,91 sn | 6,34 / 7,59 sn | 12,42 sn | — | %58,1 |
+| B: GPU, iki aşamalı | 1,04 / 2,89 sn | 0,76 / 0,88 sn | 6,88 sn | 2587 MiB | %19,3 |
+| C: GPU, tek aşama (medium canlı model) | 0,53 / 0,83 sn* | 0,53 / 1,22 sn | 0,36 sn | 2171 MiB | %12,5 |
+
+- 11 akışın hepsinde RTP paket kaybı 0: ayrı okuyucu iş parçacığı düzeltmesi yerelde işe yarıyor (Docker'da henüz ölçülmedi).
+- GPU medium'u 8,3 kat hızlı çözdü (6,34 → 0,76 sn). B'de omnilingual anlık gecikmesi de düştü (1,85 → 1,04 sn p50), çünkü medium CPU'yu artık meşgul etmiyor.
+- Canlı akış sürerken aynı anda 125,85 sn'lik dosya işi: GPU'da 8,1 sn (RTF 0,064), bellek hatası yok, en çok 2875 MiB. C'de dosya işi başlarken tek bir pencere 3,73 sn sürdü.
+- *C'de "anlık gecikme" yalnızca parça kapandıktan sonraki çözme süresidir; kelime ekrana, konuşma 5–8 sn'lik parça dolunca gelir (ilk metin 5,9 sn'de). Tek aşamalı modda ara (interim) metin üretilmiyor. Gerçek kelime gecikmesi ölçülmedi.
+- B'de "ses bittikten sonra" 6,88 sn'nin yalnızca ~0,8 sn'si medium; kalanı bekleme mantığı (REFINE_IDLE_SEC = 2 sn vb.) ve omni çözmesi. Kalemlere ayrılmadı.
