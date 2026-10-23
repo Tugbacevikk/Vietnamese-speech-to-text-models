@@ -751,3 +751,44 @@ Iki aşamalı: omni anlık + medium düzeltme, CPU, medium beam 5.
 - Nihai metindeki kalıcı hata: "yüz yüze" -> "100 100" / "müzik eğitimi". Medium bu ifadeyi tüm koşularda yanlış yazıyor.
 - Sınır: hâlâ tek kayıt. Koşuların çoğunda akış başlamadan CPU %68–86'ydı (yalnızca ilk koşuda %15); gecikmeler bu yüzden
   temiz koşuya göre biraz kötü olabilir, WER etkilenmez. L16'da gecikme PCMU'dan ~0,3 sn yüksek (6010 paket, ek yeniden örnekleme).
+
+### Docker'da çok akışlı canlı ölçüm, tam analiz süresi ve PostgreSQL/Redis testleri (23 Ekim 2026)
+
+Antigravity ölçtü (Windows i5-11400H, Docker Desktop: 12 çekirdek / 7,65 GB, `docker compose`, commit 3697a74, başlangıç CPU %12);
+rapordaki sayıları ben tekrar hesapladım. Yalnızca `diyalog_parca_01` (120,2 sn) ve `diyalog_parca_04` (125,85 sn) kullanıldı. Tek kişi/iki kayıt: genelleme yapmayın.
+
+**A. Gerçek PostgreSQL 16 + Redis 7 ile `tests/db`:** 53 test, 51 geçti, 0 kalan, 2 atlandı
+(`test_backup.py:69,80` — Windows ana makinede `pg_dump` yok; yedekleme testleri bu yüzden koşmadı, Docker içinde ayrıca denenmedi).
+
+**B. Docker'da canlı akış (Türkçe, iki aşamalı, RTP/UDP):**
+
+| Koşu | Anlık gecikme p95 / max | Düzeltme | RTP kaybı (kayıp / beklenen) |
+|---|---|---|---|
+| 1. akış (soğuk model) | 3,99 / 4,80 sn | 20 | 710 / 6010 = %11,8 |
+| 2. akış (sıcak model) | 5,91 / 6,69 sn | 19 | 701 / 6010 = %11,7 |
+| Aynı anda, akış 1 (parca_01) | 6,60 / 6,81 sn | 19 | 225 / 6010 = %3,7 |
+| Aynı anda, akış 2 (parca_04, düzeltme kotası dolu, yalnız anlık) | 8,17 / 11,69 sn | yok | 1534 / 6281 = %24,4 |
+
+- İlk akışta ilk parça 27,5 sn'de geldi (omnilingual modelinin ilk yüklenmesi); sonrakiler 8–15 sn. Yani **ilk canlı çağrıdan önce modeli ısıtmak gerekir**.
+- Kota çalıştı: `STREAM_TWO_STAGE_MAX=1` olduğu için ikinci eşzamanlı akış yalnız anlık metinle çalıştı (`iki_asama_kota_doldu: true`).
+- Bellek yaklaşık 2,8–3,0 GiB (api) + 1,9–2,7 GiB (worker-tr), sınır 7,65 GiB: iki akışta sığıyor, ama boşluk dar.
+- **Çözülmemiş sorun — RTP paket kaybı:** Docker'da %4–24 paket kaybı var (api konteyneri 300–900 % CPU kullanırken). Önceki yerel
+  (Docker'sız) ölçümlerde kayıp raporlanmamıştı. Kaybın nerede olduğu **bilinmiyor**: Docker Desktop'ın UDP aktarımı mı, gönderici mi, yoksa
+  API'nin yoğunken soketi yetişememesi mi (çekirdek tamponu dolması)? Bu ölçümden ayırt edilemez. Kayıp sesi eksilttiği için Docker'daki
+  kelime sayıları (143–166, referans 187) yerel ölçümle birebir kıyaslanmamalı; bu koşularda WER hesaplanmadı.
+- Dikkat — koşular birbirinden temiz ayrılmamış olabilir: 1. akış bitince son kaydı normal iş olarak `worker-tr`'ye gider (~40 sn sürer).
+  2. akışın ilk 10 saniyesinde `worker-tr` %538 CPU'daydı; yani 2. akışın gecikmesi (5,91 sn) önceki akışın son işiyle yarıştı.
+  Aynı şekilde C bölümündeki 75 sn'lik koşunun 34,7 sn'si kuyrukta bekledi (başka bir iş işçiyi tutuyordu — doğrulanmadı).
+- Rapordaki "anlık / düzeltilmiş örnek" iki ayrı akıştan (parca_04 / parca_01) alınmış; aynı konuşmanın karşılaştırması değil.
+  Tablodaki "ilk parça 11,96 / 15,05 sn" değerleri gösterilen JSON'larda yok, kanıtsız.
+
+**C. Dosya işi (tam analiz: VAD + ASR + konuşmacı ayırma), `worker-tr=1`, Docker:**
+
+| Dosya | İşlem süresi (3 tekrar) | RTF (işlem) | Not |
+|---|---|---|---|
+| parca_01 (120,2 sn) | 47,0 / 41,2 / 39,1 sn | 0,33–0,39 | 2. tekrarda 34,7 sn kuyrukta bekledi → toplam 75,0 sn |
+| parca_04 (125,85 sn) | 37,6 / 41,8 / 41,1 sn | 0,30–0,33 | — |
+
+Süre dağılımı (parca_01, 1. tekrar): ASR 42,7 sn, konuşmacı ayırma 3,4 sn, VAD 0,6 sn, ses profili 0,3 sn, toplam 47,0 sn.
+Şartı (işlem süresi ≤ ses süresi) rahat sağlıyor; kuyruk bekleme süresi şarta dahil edilirse tek işçiyle yük altında aşılabilir.
+Sınır: yalnız 2 dakikalık kayıtlar; uzun kayıtlar ve eşzamanlı çok sayıda iş ölçülmedi.
