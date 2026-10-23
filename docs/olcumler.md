@@ -713,3 +713,21 @@ Canlı akışta anlık metni üreten omnilingual-300m, 16 kHz girişte 8 kHz'e g
 
 Sınırlar: tek kayıt üzerinde doğrulandı (önceki ölçümlerde 2 kayıt ve canlı RTP aynı yönü gösterdi); farklı konuşmacılarda
 ölçülmedi. Nedeni bilinmiyor (seviye normalleştirme işe yaramadı, bant sınırlama yaradı). Whisper medium düzeltmesi bundan etkilenmez.
+
+## Vietnamca canlı akış (RTP) — rastgele 2 VietMed kaydı (23 Ekim 2026)
+
+`random.seed(42)` ile vietmed_1_2dk'tan (626 kayıt) rol filtresi olmadan 2 dosya: vietmed_0114 (Doctor, 90,2 sn) ve
+vietmed_0025 (Lecturer, 96,2 sn). Gerçek zaman hızında G.711 PCMU, tek akış, Zipformer-68M, her dosya 2 koşu
+(Antigravity ölçtü; hipotez metinleri canlı koşudan, WER'i metinlerden ben yeniden hesapladım). Başlangıç CPU ~%16.
+
+| Dosya | Canlı WER | Dosya hattı WER | Kesin metin gecikmesi p50 / p95 / en çok | Ara sonuç p95 |
+|---|---|---|---|---|
+| 0114 (Doctor) | %12,39 | %12,68 | 0,17 / 0,94 / 2,0 sn | 0,17 sn |
+| 0025 (Lecturer) | %18,24 (benim hesabım %18,89) | %17,26 | 0,16 / 1,03 / 3,0 sn | 0,17 sn |
+
+- İki koşu metin olarak birebir aynı (deterministik). Kuyruk bekleme 0.
+- 0114'ü yeniden hesaplamam rapordaki değerle aynı; 0025'te 2 kelimelik fark var (metin aktarımı ya da normalleştirme).
+- En çok gecikme ilk parçada (ilk kesim için en az 5 sn ses gerekiyor); sonrakiler ~0,1–0,5 sn.
+- Hataların çoğu tıbbi terimler (beta hcg -> "dta hcv", progesterone -> "proson"), dolgu sesleri ("ờ", "à", "á") ve
+  benzer sesli hece karışıklıkları. Canlı ile dosya hattı birbirine yakın: canlı akış doğruluğu bozmuyor.
+- Sınır: 2 kayıt, tek akış; eşzamanlı Vietnamca akış bu turda ölçülmedi. Zipformer VietMed ile eğitildiği için sonuç iyimser olabilir.
