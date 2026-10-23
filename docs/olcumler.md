@@ -792,3 +792,20 @@ rapordaki sayıları ben tekrar hesapladım. Yalnızca `diyalog_parca_01` (120,2
 Süre dağılımı (parca_01, 1. tekrar): ASR 42,7 sn, konuşmacı ayırma 3,4 sn, VAD 0,6 sn, ses profili 0,3 sn, toplam 47,0 sn.
 Şartı (işlem süresi ≤ ses süresi) rahat sağlıyor; kuyruk bekleme süresi şarta dahil edilirse tek işçiyle yük altında aşılabilir.
 Sınır: yalnız 2 dakikalık kayıtlar; uzun kayıtlar ve eşzamanlı çok sayıda iş ölçülmedi.
+
+### RTP paket kaybının kök nedeni (23 Ekim 2026)
+
+Antigravity ölçtü (commit 26abf9f); sayaç toplamlarını ben kontrol ettim. Kayıp **Docker Desktop'tan değil, API'nin soketi okumayı bırakmasından** geliyordu:
+canlı akış döngüsü (`stream.py`) hem UDP soketini okuyor hem ASR'yi aynı döngüde çalıştırıyordu; ASR sürerken soket okunmuyor, çekirdek tamponu
+(WSL2'de `rmem_max` 208 KiB → soket en çok 416 KiB, ~4 sn ses) doluyor ve çekirdek paket düşürüyordu (`RcvbufErrors`).
+
+- Windows'tan gönderimde 5800 alındı + 210 çekirdekte düştü = 6010: Docker Desktop paketi kaybetmiyor.
+- Gönderici konteynerin içindeyken (Docker Desktop aktarımı yok) iki iki aşamalı koşuda 0 kayıp; ana makineden 2 koşudan birinde %3,5, ötekinde 0.
+  Kayıp, işlemci başka işle (önceki akışın son işi) yarışırken ortaya çıkıyor.
+- `STREAM_TWO_STAGE=0` ağır medium'u canlı döngüde doğrudan çalıştırır (yük **artar**): %48–66 kayıp. Bu üretim ayarı değildir, yalnız mekanizmayı gösterir.
+- Windows göndericisi 15,6 ms zamanlayıcı yüzünden paketleri 0/31 ms patlamalarla yolluyor (ortalama 50 paket/sn doğru); kaybın nedeni bu değil.
+- Raporda `1966+3940` ve `2665+3311` "6010'a eşit" denmiş; gerçekte 5906 ve 5976 (34–104 paket açıklanamıyor). Ayrıca "olay döngüsü bloklandı" ifadesi yanlış
+  (okuyucu bir döngü değil, ASR ile aynı iş parçacığı).
+
+**Düzeltme:** `RtpSource` artık soketi ayrı bir iş parçacığında sürekli boşaltıp paketleri bellekteki kuyruğa koyuyor (`tests/unit/test_rtp_reader.py`:
+yavaş tüketicide 400/400 paket; eski kodda 12/400). Docker'da yeniden ölçülmedi — bu ölçüm bekliyor.

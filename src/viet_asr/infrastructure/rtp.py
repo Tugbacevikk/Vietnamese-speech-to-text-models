@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import socket
 import struct
+import queue
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -130,6 +131,9 @@ class JitterBuffer:
         return out
 
 
+_BITTI = object()
+
+
 class RtpSource:
     """UDP portunu dinler; `frames()` 16 kHz float32 parçalar verir (AudioStream portu).
 
@@ -182,14 +186,35 @@ class RtpSource:
             self._resampler = soxr.ResampleStream(rate, SR, 1, dtype="float32")
         return self._resampler.resample_chunk(x, last=last)
 
+    def _read_loop(self, q: queue.SimpleQueue) -> None:
+        """Soketi tanıma/çözümlemeden bağımsız, sürekli boşaltır: ASR çalışırken çekirdek tamponu (WSL2'de ~416 KiB
+        ≈ 4 sn) dolup paket düşürmesin. Paketler bellekte kuyruğa girer, `frames()` oradan okur."""
+        try:
+            while not self._stop.is_set():
+                try:
+                    q.put(self.sock.recv(4096))
+                except socket.timeout:
+                    q.put(None)  # sessizlik işareti: boşta kalma süresini frames() sayar
+                except OSError:
+                    break
+        finally:
+            q.put(_BITTI)  # bitti işareti
+
     def frames(self) -> Iterator[np.ndarray]:
         self.sock.settimeout(0.2)
+        pkts: queue.SimpleQueue = queue.SimpleQueue()
+        reader = threading.Thread(target=self._read_loop, args=(pkts,), daemon=True, name="rtp-okuyucu")
+        reader.start()
         waited, codec, rate = 0.0, None, None
         try:
             while not self._stop.is_set():
                 try:
-                    data = self.sock.recv(4096)
-                except socket.timeout:
+                    data = pkts.get(timeout=1.0)
+                except queue.Empty:
+                    continue
+                if data is _BITTI:
+                    break
+                if data is None:
                     waited += 0.2
                     limit = self.idle_timeout if self.ssrc is not None else self.first_timeout
                     if waited >= limit:
@@ -223,6 +248,8 @@ class RtpSource:
                 if len(tail):
                     yield tail
         finally:
+            self._stop.set()
+            reader.join(timeout=1.0)
             self.sock.close()
 
     def _emit(self, p: RtpPacket | None, codec: str, rate: int) -> np.ndarray:
